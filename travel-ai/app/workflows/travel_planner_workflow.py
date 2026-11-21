@@ -129,6 +129,16 @@ class TravelPlannerWorkflow:
         yield {"type": "reply", "text": reply, "next_question": plan.next_question,
                "answer_options": plan.answer_options}
 
+        # Save the exchange before the slow work (drafts take minutes), so anything the user does
+        # meanwhile, like choosing the first draft, lands after it in the conversation.
+        asked = list(dict.fromkeys(state.get("asked_fields", []) + ([plan.asked_field] if plan.asked_field else [])))
+        streak = state.get("questions_streak", 0) + 1 if plan.action == TurnAction.ASK and not progressed else 0
+        trip.state = {**state, "asked_fields": asked, "questions_streak": streak, "answer_options": plan.answer_options}
+        trip.next_question = plan.next_question
+        self.trips.add_message(trip.id, "user", shown_message)
+        answer = self.trips.add_message(trip.id, "assistant", reply if not plan.next_question else f"{reply}\n\n{plan.next_question}")
+        self.db.commit()
+
         try:
             if plan.action == TurnAction.SHOW_OPTIONS:
                 yield from self._show_options(trip, new_profile, taste, plan.options_request)
@@ -143,17 +153,12 @@ class TravelPlannerWorkflow:
             logger.warning("Places unavailable: %s", e)
             extra = " (I couldn't reach the places service just now.)"
             reply += extra
+            answer.content = reply if not plan.next_question else f"{reply}\n\n{plan.next_question}"
             yield {"type": "note", "text": extra.strip()}
 
-        # Bookkeeping for the "stuck after N questions" rule and asking duration only once.
-        asked = list(dict.fromkeys(state.get("asked_fields", []) + ([plan.asked_field] if plan.asked_field else [])))
-        streak = state.get("questions_streak", 0) + 1 if plan.action == TurnAction.ASK and not progressed else 0
-        trip.state = {**state, "asked_fields": asked, "questions_streak": streak, "answer_options": plan.answer_options}
-        trip.next_question = plan.next_question
-
-        self.trips.add_message(trip.id, "user", shown_message)
-        self.trips.add_message(trip.id, "assistant", reply if not plan.next_question else f"{reply}\n\n{plan.next_question}")
         self.db.commit()
+        # Another request (choosing a draft) may have changed the trip while we worked.
+        self.db.refresh(trip)
         yield {"type": "done", "trip": self.trips.to_out(trip).model_dump(mode="json")}
 
     def _reset(self, trip: TripModel, message: str) -> Iterator[Event]:

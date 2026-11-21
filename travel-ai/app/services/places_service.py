@@ -257,18 +257,32 @@ class PlacesService:
         if not settings.GOOGLE_PLACES_API_KEY:
             raise PlacesUnavailableError("GOOGLE_PLACES_API_KEY is not set")
 
-        response = httpx.get(
-            f"https://places.googleapis.com/v1/{photo_name}/media",
-            params={
-                "maxWidthPx": max_width,
-                "skipHttpRedirect": "true",
-                "key": settings.GOOGLE_PLACES_API_KEY,
-            },
-            timeout=15,
-        )
+        response = self._photo_media(photo_name, max_width)
+        # Photo names stored on old trips expire; the name holds the place id, so fetch that place's current photo.
+        if response.status_code in (400, 404) and (fresh := self._current_photo_name(photo_name.split("/")[1])):
+            response = self._photo_media(fresh, max_width)
         if response.status_code != 200:
             raise PlacesUnavailableError(f"Photo lookup failed ({response.status_code})")
 
         url = response.json()["photoUri"]
         self._store(key, {"url": url})
         return url
+
+    @staticmethod
+    def _photo_media(photo_name: str, max_width: int) -> httpx.Response:
+        return httpx.get(
+            f"https://places.googleapis.com/v1/{photo_name}/media",
+            params={"maxWidthPx": max_width, "skipHttpRedirect": "true", "key": settings.GOOGLE_PLACES_API_KEY},
+            timeout=15,
+        )
+
+    @staticmethod
+    def _current_photo_name(place_id: str) -> str | None:
+        response = httpx.get(
+            f"https://places.googleapis.com/v1/places/{place_id}",
+            headers={"X-Goog-Api-Key": settings.GOOGLE_PLACES_API_KEY, "X-Goog-FieldMask": "photos"},
+            timeout=15,
+        )
+        photos = response.json().get("photos") if response.status_code == 200 else None
+        name = photos[0]["name"] if photos else None
+        return name if name and _PHOTO_NAME.fullmatch(name) else None

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { api, sendStream } from "../api";
+import { ApiError, api, sendStream } from "../api";
 import type { OptionSet, PickAction, Trip, TripProfile } from "../types";
 import PickCard from "../components/PickCard";
 import IdeaCard from "../components/IdeaCard";
@@ -38,10 +38,14 @@ export default function TripScreen({ tripId, firstMessage }: { tripId: string; f
   const [panel, setPanel] = useState<PanelView | null>(null);
   const [panelOpen, setPanelOpen] = useState(false);
   const [drafting, setDrafting] = useState(false);
+  const [draftingSince, setDraftingSince] = useState(0);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // A message that failed before the server saved it, so the user can resend it.
+  const [retryText, setRetryText] = useState<string | null>(null);
+  const streamAbort = useRef<AbortController | null>(null);
   const [chatOpen, setChatOpen] = useState(false);
   const logRef = useRef<HTMLDivElement>(null);
   const sentFirst = useRef(false);
@@ -77,15 +81,28 @@ export default function TripScreen({ tripId, firstMessage }: { tripId: string; f
     if (!text.trim() || busy || !trip) return;
     setInput("");
     setError(null);
+    setRetryText(null);
     setBusy(true);
     setLive({ userText: text === SHOW_PLANS ? "Show me some plans" : text, steps: [], reply: null });
+    // Once the reply arrives the server has saved the message, so a failure after that isn't resent.
+    let saved = false;
+    const failed = (detail: string) => {
+      setError(detail);
+      if (!saved) {
+        setRetryText(text);
+        if (text !== SHOW_PLANS) setInput(text);
+      }
+    };
+    const abort = new AbortController();
+    streamAbort.current = abort;
     try {
-      await sendStream(trip.id, text, (ev) => {
+      await sendStream(trip.id, text, abort.signal, (ev) => {
         switch (ev.type) {
           case "progress":
             setLive((l) => l && { ...l, steps: [...l.steps, ev.text] });
             break;
           case "reply":
+            saved = true;
             setLive((l) => l && { ...l, reply: ev });
             break;
           case "note":
@@ -103,18 +120,21 @@ export default function TripScreen({ tripId, firstMessage }: { tripId: string; f
             setTrip(ev.trip);
             break;
           case "error":
-            setError(ev.detail);
+            failed(ev.detail);
             break;
         }
         // Drafting starts with this progress step; show placeholders right away.
         if (ev.type === "progress" && ev.text.startsWith("Gathering places")) {
           setDrafting(true);
+          setDraftingSince(Date.now());
           openPanel({ view: "drafts" });
         }
       });
     } catch (e) {
-      setError((e as Error).message);
+      // fetch throws a bare TypeError when the network or server is down.
+      if (!abort.signal.aborted) failed(e instanceof ApiError ? e.message : "I can't reach Adieu right now — please try again.");
     } finally {
+      streamAbort.current = null;
       setBusy(false);
       setDrafting(false);
       setLive(null);
@@ -143,6 +163,8 @@ export default function TripScreen({ tripId, firstMessage }: { tripId: string; f
   const chooseDraft = (draftId: string) =>
     act(async () => {
       if (!trip) return;
+      // The turn is already saved; stop waiting for the remaining drafts.
+      streamAbort.current?.abort();
       setTrip(await api.chooseDraft(trip.id, draftId));
       setPanelOpen(false);
     });
@@ -192,7 +214,11 @@ export default function TripScreen({ tripId, firstMessage }: { tripId: string; f
         ))}
         {drafting &&
           Array.from({ length: DRAFT_COUNT - trip.drafts.length }, (_, i) => (
-            <DraftSkeleton key={i} label={`Drafting plan ${trip.drafts.length + i + 1} of ${DRAFT_COUNT}…`} />
+            <DraftSkeleton
+              key={i}
+              since={draftingSince}
+              label={`Drafting plan ${trip.drafts.length + i + 1} of ${DRAFT_COUNT} from real places…`}
+            />
           ))}
       </div>
     );
@@ -281,7 +307,16 @@ export default function TripScreen({ tripId, firstMessage }: { tripId: string; f
               {live.reply.next_question && `\n\n${live.reply.next_question}`}
             </div>
           )}
-          {error && <div className="msg error">{error}</div>}
+          {error && (
+            <div className="msg error">
+              {error}
+              {retryText && !busy && (
+                <button className="retry" onClick={() => send(retryText)}>
+                  Try again
+                </button>
+              )}
+            </div>
+          )}
         </div>
 
         {!busy && (chips.length > 0 || canShowPlans) && (

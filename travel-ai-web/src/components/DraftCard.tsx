@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { photoUrl } from "../api";
 import type { Draft } from "../types";
 
@@ -30,12 +31,24 @@ export default function DraftCard({ draft, onChoose }: { draft: Draft; onChoose:
   );
 }
 
-export function DraftSkeleton({ label }: { label: string }) {
+export function DraftSkeleton({ label, since }: { label: string; since: number }) {
+  // A ticking clock shows the wait is progressing; drafts can take a minute or more on local models.
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  const secs = Math.max(0, Math.round((now - since) / 1000));
   return (
-    <article className="draft skeleton">
+    <article className="draft skeleton" aria-busy="true">
       <div className="photo" />
       <div className="draft-body">
-        <span className="muted pulse">{label}</span>
+        <span className="muted">
+          {label} <span className="small">{Math.floor(secs / 60)}:{String(secs % 60).padStart(2, "0")}</span>
+        </span>
+        <span className="line" />
+        <span className="line short" />
+        <span className="line" />
       </div>
     </article>
   );

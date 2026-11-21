@@ -286,3 +286,41 @@ def test_destination_never_resolves_to_a_business(client, auth, fake_llm, fake_p
 
     assert turn["trip"]["destination_name"] == "South Korea"
     assert any(b.get("includedType") == "country" for b in fake_places.bodies)
+
+
+def test_choosing_a_draft_mid_stream_keeps_the_conversation_in_order(client, auth, fake_llm):
+    trip = ready_trip(client, auth, fake_llm)
+
+    with client.stream("POST", f"/trips/{trip['id']}/messages/stream", json={"message": "a week"}, headers=auth) as r:
+        for line in r.iter_lines():
+            event = json.loads(line) if line else {}
+            if event.get("type") == "draft" and event["index"] == 0:
+                client.post(f"/trips/{trip['id']}/drafts/{event['draft']['id']}/choose", headers=auth)
+            if event.get("type") == "done":
+                done = event["trip"]
+
+    contents = [m["content"] for m in done["messages"]]
+    assert contents.index("a week") < next(i for i, c in enumerate(contents) if c.startswith("Great choice"))
+    assert done["itinerary"] is not None
+    assert done["next_question"].startswith("Great choice")
+
+
+def test_starter_ideas_are_cached_per_user(client, auth, fake_llm):
+    first = client.get("/starter-ideas", headers=auth).json()
+    second = client.get("/starter-ideas", headers=auth).json()
+
+    assert [i["destination"] for i in first] == ["Lisbon, Portugal"]
+    assert second == first
+    assert [name for name, _ in fake_llm.prompts].count("StarterIdeas") == 1
+
+
+def test_trip_list_shows_the_chosen_plan_name_and_length(client, auth, fake_llm):
+    trip = ready_trip(client, auth, fake_llm)
+    draft = say(client, auth, trip["id"], "4 days")["drafts"][0]
+    client.post(f"/trips/{trip['id']}/drafts/{draft['id']}/choose", headers=auth)
+
+    [summary] = client.get("/trips", headers=auth).json()
+
+    assert summary["title"] == draft["title"]
+    assert summary["duration_days"] == 4
+    assert summary["photo_name"]

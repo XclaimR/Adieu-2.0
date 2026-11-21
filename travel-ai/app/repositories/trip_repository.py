@@ -31,15 +31,20 @@ class TripRepository:
         return [
             TripSummary(
                 id=t.id,
-                title=t.title,
+                # The chosen plan's name tells trips to the same place apart.
+                title=(t.itinerary or {}).get("title") or t.title,
                 destination=(t.profile or {}).get("destination"),
+                duration_days=(t.profile or {}).get("duration_days"),
+                photo_name=(t.destination_area or {}).get("photo_name"),
                 updated_at=t.updated_at,
             )
             for t in trips
         ]
 
-    def add_message(self, trip_id: str, role: str, content: str) -> None:
-        self.db.add(MessageModel(trip_id=trip_id, role=role, content=content))
+    def add_message(self, trip_id: str, role: str, content: str) -> MessageModel:
+        message = MessageModel(trip_id=trip_id, role=role, content=content)
+        self.db.add(message)
+        return message
 
     def messages(self, trip_id: str) -> list[MessageModel]:
         return list(self.db.scalars(

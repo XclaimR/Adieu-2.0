@@ -97,7 +97,14 @@ export type Trip = {
   messages: Message[];
 };
 
-export type TripSummary = { id: string; title: string; destination: string | null; updated_at: string };
+export type TripSummary = {
+  id: string;
+  title: string;
+  destination: string | null;
+  duration_days: number | null;
+  photo_name: string | null;
+  updated_at: string;
+};
 
 export type TripUpdate = { trip: Trip; options: OptionSet | null };
 

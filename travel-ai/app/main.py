@@ -39,7 +39,7 @@ def health():
 @app.exception_handler(APIStatusError)
 def llm_unavailable(request: Request, exc: Exception):
     logging.getLogger(__name__).error("LLM request failed: %s", exc)
-    return JSONResponse(status_code=503, content={"detail": "The AI model is unavailable. Is Ollama running?"})
+    return JSONResponse(status_code=503, content={"detail": "I can't think straight right now — please try again in a moment."})
 
 
 @app.exception_handler(LLMOutputError)

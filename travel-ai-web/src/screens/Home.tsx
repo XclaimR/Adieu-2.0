@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import { api } from "../api";
-import type { TripSummary, User } from "../types";
+import { api, photoUrl } from "../api";
+import IdeaCard from "../components/IdeaCard";
+import type { StarterIdea, TripSummary, User } from "../types";
 
 type Props = { user: User; openTrip: (id: string, firstMessage?: string) => void };
 
@@ -9,9 +10,12 @@ export default function Home({ user, openTrip }: Props) {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // null while loading; ideas are a nice-to-have, so a failure just hides the section.
+  const [ideas, setIdeas] = useState<StarterIdea[] | null>(null);
 
   useEffect(() => {
     api.trips().then(setTrips);
+    api.starterIdeas().then(setIdeas).catch(() => setIdeas([]));
   }, []);
 
   // A new trip always starts as a conversation; what the user typed becomes the first message.
@@ -62,17 +66,58 @@ export default function Home({ user, openTrip }: Props) {
         <section>
           <h2>Your trips</h2>
           <ul className="trip-list">
-            {trips.map((t) => (
-              <li key={t.id}>
-                <button onClick={() => openTrip(t.id)}>
-                  <strong>{t.title}</strong>
-                  <span className="muted small">
-                    {t.destination ?? "No destination yet"} · {new Date(t.updated_at).toLocaleDateString()}
-                  </span>
-                </button>
-              </li>
-            ))}
+            {trips.map((t) => {
+              const src = photoUrl(t.photo_name);
+              return (
+                <li key={t.id}>
+                  <button onClick={() => openTrip(t.id)}>
+                    <span className="trip-thumb">{src ? (
+                        // Google photo names expire, so old trips can point at a dead photo.
+                        <img src={src} alt="" loading="lazy" onError={(e) => e.currentTarget.remove()} />
+                      ) : (
+                        "🧭"
+                      )}</span>
+                    <span className="trip-text">
+                      <strong>{t.title}</strong>
+                      <span className="muted small">
+                        {[
+                          t.title !== t.destination && t.destination,
+                          t.duration_days && `${t.duration_days} days`,
+                          `edited ${new Date(t.updated_at).toLocaleDateString()}`,
+                        ]
+                          .filter(Boolean)
+                          .join(" · ")}
+                      </span>
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
           </ul>
+        </section>
+      )}
+
+      {ideas !== null && ideas.length === 0 ? null : (
+        <section>
+          <h2>Ideas for you</h2>
+          <div className="idea-grid">
+            {ideas === null
+              ? Array.from({ length: 3 }, (_, i) => (
+                  <div key={i} className="idea skeleton" aria-busy="true">
+                    <div className="photo" />
+                    <div className="idea-body">
+                      <span className="muted small">Finding trips that fit your vibe…</span>
+                    </div>
+                  </div>
+                ))
+              : ideas.map((idea) => (
+                  <IdeaCard
+                    key={idea.title}
+                    idea={idea}
+                    onChoose={() => start(`Let's do “${idea.title}” in ${idea.destination}`)}
+                  />
+                ))}
+          </div>
         </section>
       )}
     </main>

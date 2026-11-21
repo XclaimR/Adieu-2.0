@@ -48,7 +48,7 @@ Return:
   offer_drafts   - you know enough (destination, mood, who's going) or the user wants you to decide
   edit_itinerary - an itinerary exists and the user wants to change it; put the change in edit_request
   chat           - a general question or comment that needs nothing else
-- reply: 1-2 short sentences reacting to the user. No questions in the reply. Same language as the user.
+- reply: 1-2 short sentences reacting to the user. No questions in the reply. Same language as the user. Don't promise suggestions or plans ("let me suggest…") — the app decides when to show them.
 - next_question: ONE short question that matters most now, or null. Never ask what's already known.
 - answer_options: 2-5 short tap-to-answer choices for next_question (e.g. ["Just me", "My partner", "Friends"]).
 - user_stuck: true when the user seems unsure or overwhelmed ("not sure", "idk", "you decide", "anything").
