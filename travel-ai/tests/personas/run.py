@@ -19,6 +19,8 @@ MAX_TURNS = 12
 MAX_QUESTIONS = 8
 SHOW_PLANS = "just show me plans"
 RETRIES, RETRY_WAIT = 3, 30
+DEFAULT_DAYS = 4  # the app's draft_service.DEFAULT_DAYS
+DRAFT_COUNT = 3  # the app's travel_planner_workflow.DRAFT_COUNT; fewer means a draft was silently dropped
 CHECKED_FIELDS = ["party", "party_size", "kids", "budget_level", "start_date", "duration_days", "mood"]
 
 
@@ -55,8 +57,10 @@ def pick_reply(persona: dict, question: str, chips: list[str], used: set[int]) -
     return SHOW_PLANS, {}
 
 
-def converse(api: Api, persona: dict) -> dict:
-    """Plays one persona until drafts appear (or it gives up). Returns the transcript and timings."""
+def converse(api: Api, persona: dict, answer=None) -> dict:
+    """Plays one persona until drafts appear (or it gives up). Returns the transcript and timings.
+    answer(resp, used) -> (reply, facts it states); defaults to the scripted pick_reply (the AI agent passes its own)."""
+    answer = answer or (lambda resp, used: pick_reply(persona, resp["next_question"], resp["answer_options"], used))
     # A fresh user per run: the app saves learned taste on the user, which would carry into the next run.
     email = f"persona-{persona['name']}-{time.time_ns()}@personas.test"
     api.token = api.post("/auth/dev", {"email": email})["token"]
@@ -68,8 +72,8 @@ def converse(api: Api, persona: dict) -> dict:
     for n in range(1, MAX_TURNS + 1):
         start = time.time()
         resp = api.post(f"/trips/{trip_id}/messages", {"message": message})
-        turns.append({"said": message, "seconds": round(time.time() - start), "question": resp["next_question"],
-                      "drafts": len(resp["drafts"]), "options": bool(resp.get("options"))})
+        turns.append({"said": message, "seconds": round(time.time() - start), "reply": resp.get("reply"),
+                      "question": resp["next_question"], "chips": resp.get("answer_options") or [], "drafts": len(resp["drafts"]), "options": bool(resp.get("options"))})
         if message == SHOW_PLANS and show_plans_turn is None:
             show_plans_turn = n
         if vibe_due is None and all(k in facts for k in ("destination", "mood", "party")):
@@ -82,7 +86,7 @@ def converse(api: Api, persona: dict) -> dict:
             break
         if plans_turn is None:
             questions += 1
-        message, new_facts = pick_reply(persona, resp["next_question"], resp["answer_options"], used)
+        message, new_facts = answer(resp, used)
         for k, v in new_facts.items():
             facts.setdefault(k, []).extend(v)
     return {"trip": trip, "turns": turns, "facts": facts, "questions": questions, "plans_turn": plans_turn,
@@ -129,7 +133,10 @@ def check(persona: dict, run: dict) -> list[tuple[str, bool | None, str]]:
     """(rule, passed or None if it couldn't be checked, detail)."""
     trip, has_drafts = run["trip"], bool(run["trip"]["drafts"])
     profile = trip["profile"]
-    invented = invented_facts(profile, run["facts"])
+    facts = run["facts"]
+    if "duration_days" not in facts:  # the app drafts with its default length when none was said
+        facts = {**facts, "duration_days": [DEFAULT_DAYS]}
+    invented = invented_facts(profile, facts)
     shown = {k: v for k, v in profile.items() if k in CHECKED_FIELDS and v not in (None, [])}
     rules = [("no invented facts", not invented, ", ".join(invented) or json.dumps(shown))]
 
@@ -151,6 +158,8 @@ def check(persona: dict, run: dict) -> list[tuple[str, bool | None, str]]:
         rules.append(("picks fit the traveler", not bad, "; ".join(bad) or f"{len(pick_texts(trip)[0])} items checked"))
     else:
         rules.append(("picks fit the traveler", None, "no drafts to check"))
+    n = len(trip["drafts"])
+    rules.append(("all drafts arrived", n == DRAFT_COUNT if has_drafts else None, f"{n} of {DRAFT_COUNT}"))
     return rules
 
 
