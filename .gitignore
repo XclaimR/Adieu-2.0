@@ -1,0 +1,29 @@
+# secrets
+.env
+.env.*
+!.env.example
+secret key.txt
+*.pem
+*.key
+
+# python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# node / build
+node_modules/
+dist/
+*.tsbuildinfo
+
+# editor / OS / tools
+.vscode/
+.idea/
+.DS_Store
+.claude/settings.local.json
+
+# stray
+travel-ai/query
+Adieu 2.0/

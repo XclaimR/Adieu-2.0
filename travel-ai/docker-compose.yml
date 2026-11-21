@@ -1,0 +1,71 @@
+services:
+
+  postgres:
+    image: postgres:17
+
+    container_name: travel-ai-postgres
+
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: travel_ai
+
+    ports:
+      - "127.0.0.1:5433:5432"
+
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d travel_ai"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build: .
+
+    image: travel-ai-api
+
+    container_name: travel-ai-api
+
+    restart: unless-stopped
+
+    env_file: .env
+
+    environment:
+      DATABASE_URL: postgresql+psycopg2://postgres:postgres@postgres:5432/travel_ai
+      # Ollama runs on the host. To use a hosted model instead, set LLM_BASE_URL,
+      # LLM_MODEL and LLM_API_KEY in .env (any OpenAI-compatible provider).
+      LLM_BASE_URL: ${LLM_BASE_URL:-http://host.docker.internal:11434/v1}
+      LLM_MODEL: ${LLM_MODEL:-qwen3:8b}
+      # Sign in without Google while developing locally.
+      ALLOW_DEV_LOGIN: ${ALLOW_DEV_LOGIN:-false}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173,http://localhost:8080}
+
+    ports:
+      - "127.0.0.1:8000:8000"
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  web:
+    build: ../travel-ai-web
+
+    image: travel-ai-web
+
+    container_name: travel-ai-web
+
+    restart: unless-stopped
+
+    ports:
+      - "8080:80"
+
+    depends_on:
+      - api
+
+volumes:
+  postgres_data:

@@ -1,0 +1,288 @@
+import json
+
+from app.schemas.trip_profile import BudgetLevel, Party, ProfileUpdates
+from app.schemas.turn import OptionsKind, OptionsRequest, TurnAction, TurnDecision
+from tests.v1.conftest import VIEWPORT
+
+
+def new_trip(client, auth):
+    return client.post("/trips", json={}, headers=auth).json()
+
+
+def say(client, auth, trip_id, message):
+    return client.post(f"/trips/{trip_id}/messages", json={"message": message}, headers=auth).json()
+
+
+def decision(action=TurnAction.ASK, **profile):
+    return TurnDecision(profile_updates=ProfileUpdates(**profile), action=action, reply="Lovely.")
+
+
+def ready_trip(client, auth, fake_llm, **extra):
+    """A trip with the minimum vibe known and duration already asked, so the next turn drafts plans."""
+    trip = new_trip(client, auth)
+    fake_llm.decisions.append(decision(destination="Lisbon", mood=["relaxed"], party=Party.COUPLE, **extra))
+    say(client, auth, trip["id"], "Lisbon, relaxed, with my partner, on a budget")  # asks duration
+    return trip
+
+
+def test_routes_require_sign_in(client):
+    assert client.get("/trips").status_code == 401
+    assert client.get("/trips", headers={"Authorization": "Bearer junk"}).status_code == 401
+
+
+def test_vibe_picker_saves_valid_vibes_only(client, auth):
+    user = client.post("/me/taste", json={"vibes": ["food", "beach", "not-a-vibe"]}, headers=auth).json()
+    assert user["taste"]["vibes"] == ["food", "beach"]
+
+
+def test_new_trip_asks_for_destination_with_chips(client, auth):
+    trip = new_trip(client, auth)
+    assert trip["profile"]["destination"] is None
+    assert trip["next_question"] == "Where would you like to go?"
+    assert "Surprise me" in trip["answer_options"]
+    assert trip["panel"] is None and trip["drafts"] == []
+
+
+def test_destination_from_a_sentence_is_resolved_and_mood_is_asked_next(client, auth, fake_llm):
+    trip = new_trip(client, auth)
+    fake_llm.decisions.append(decision(destination="Japan"))
+
+    turn = say(client, auth, trip["id"], "I want to go to Japan")
+
+    assert turn["trip"]["profile"]["destination"] == "Japan"
+    assert turn["trip"]["destination_name"] == "Japan"
+    assert turn["next_question"] == "What kind of trip are you dreaming of?"
+    assert "Relaxed" in turn["answer_options"]
+    assert turn["options"] is None and turn["drafts"] == []
+
+
+def test_unknown_destination_is_not_kept(client, auth, fake_llm):
+    trip = new_trip(client, auth)
+    fake_llm.decisions.append(decision(destination="Atlantis"))
+
+    turn = say(client, auth, trip["id"], "Atlantis")
+
+    assert turn["trip"]["profile"]["destination"] is None
+    assert "couldn't find" in turn["reply"]
+
+
+def test_no_options_until_the_vibe_is_known(client, auth, fake_llm):
+    trip = new_trip(client, auth)
+    fake_llm.decisions.append(decision(destination="Lisbon"))
+    say(client, auth, trip["id"], "Lisbon")
+    # The model wants to show options, but the user didn't ask and the mood is unknown.
+    fake_llm.decisions.append(TurnDecision(action=TurnAction.SHOW_OPTIONS, reply="Here!",
+                                           options_request=OptionsRequest(kind=OptionsKind.STAY)))
+
+    turn = say(client, auth, trip["id"], "we love good food")
+
+    assert turn["options"] is None
+    assert turn["next_question"] == "What kind of trip are you dreaming of?"
+
+
+def test_explicit_requests_are_honoured_before_the_vibe_is_complete(client, auth, fake_llm):
+    trip = new_trip(client, auth)
+    fake_llm.decisions.append(decision(destination="Lisbon"))
+    say(client, auth, trip["id"], "Lisbon")
+    fake_llm.decisions.append(TurnDecision(action=TurnAction.SHOW_OPTIONS, reply="Sure.",
+                                           options_request=OptionsRequest(kind=OptionsKind.EAT, query="cafés near Alfama")))
+
+    turn = say(client, auth, trip["id"], "show me cafés near Alfama")
+
+    assert turn["options"]["kind"] == "eat"
+    assert [p["place_id"] for p in turn["options"]["items"]] == ["eat-1", "eat-0"]
+    assert turn["trip"]["panel"]["id"] == turn["options"]["id"]
+
+
+def test_every_search_stays_inside_the_destination(client, auth, fake_llm, fake_places):
+    trip = ready_trip(client, auth, fake_llm)
+    say(client, auth, trip["id"], "not sure about days")  # duration was asked once -> drafts
+
+    searches = [b for b in fake_places.bodies if b.get("maxResultCount") == 10]
+    assert searches, "expected candidate searches"
+    for body in searches:
+        assert body["locationRestriction"]["rectangle"] == {"low": VIEWPORT["low"], "high": VIEWPORT["high"]}
+
+
+def test_complete_vibe_offers_three_drafts_using_only_real_places(client, auth, fake_llm):
+    trip = ready_trip(client, auth, fake_llm)
+    assert trip  # duration question was asked in ready_trip
+
+    turn = say(client, auth, trip["id"], "not sure about days")
+
+    assert len(turn["drafts"]) == 3
+    assert turn["trip"]["profile"]["duration_days"] == 4  # default when skipped
+    draft = turn["drafts"][0]["itinerary"]
+    place_ids = [a["place_id"] for d in draft["days"] for a in d["activities"]]
+    assert place_ids == ["do-0", "eat-0", "do-1", "gem-0"]  # the invented ref 999 was dropped
+    assert draft["stay"]["place_id"] == "stay-0"
+
+
+def test_stuck_user_gets_drafts_even_with_only_a_destination(client, auth, fake_llm):
+    trip = new_trip(client, auth)
+    fake_llm.decisions.append(decision(destination="Lisbon"))
+    say(client, auth, trip["id"], "Lisbon")
+    stuck = decision()
+    stuck.user_stuck = True
+    fake_llm.decisions.append(stuck)
+
+    turn = say(client, auth, trip["id"], "hmm no idea, you decide")
+
+    assert len(turn["drafts"]) == 3
+
+
+def test_show_plans_button_offers_drafts_and_reads_naturally(client, auth, fake_llm):
+    trip = new_trip(client, auth)
+    fake_llm.decisions.append(decision(destination="Lisbon"))
+    say(client, auth, trip["id"], "Lisbon")
+
+    turn = say(client, auth, trip["id"], "__show_plans__")
+
+    assert len(turn["drafts"]) == 3
+    assert "Show me some plans" in [m["content"] for m in turn["trip"]["messages"]]
+
+
+def test_drafts_offered_after_four_questions_without_progress(client, auth, fake_llm):
+    trip = new_trip(client, auth)
+    fake_llm.decisions.append(decision(destination="Lisbon"))
+    say(client, auth, trip["id"], "Lisbon")
+    for _ in range(4):
+        turn = say(client, auth, trip["id"], "hmm")
+        assert turn["drafts"] == []
+
+    turn = say(client, auth, trip["id"], "hmm")
+    assert len(turn["drafts"]) == 3
+
+
+def test_surprise_me_shows_only_verified_destination_ideas(client, auth, fake_llm):
+    trip = new_trip(client, auth)
+    fake_llm.decisions.append(decision(destination="Thailand"))
+
+    turn = say(client, auth, trip["id"], "surprise me")
+
+    assert turn["trip"]["profile"]["destination"] is None
+    assert turn["options"]["kind"] == "destinations"
+    assert [i["destination"] for i in turn["options"]["ideas"]] == ["Lisbon, Portugal"]
+
+
+def test_choosing_a_draft_sets_the_itinerary_and_asks_for_changes(client, auth, fake_llm):
+    trip = ready_trip(client, auth, fake_llm)
+    draft = say(client, auth, trip["id"], "not sure")["drafts"][1]
+
+    chosen = client.post(f"/trips/{trip['id']}/drafts/{draft['id']}/choose", headers=auth).json()
+
+    assert chosen["itinerary"]["title"] == draft["title"]
+    assert "Anything you'd like to change?" in chosen["next_question"]
+    assert chosen["answer_options"]
+
+
+def test_liking_an_over_budget_stay_suggests_similar_cheaper_ones(client, auth, fake_llm):
+    trip = ready_trip(client, auth, fake_llm, budget_level=BudgetLevel.BUDGET)
+    fake_llm.decisions.append(TurnDecision(action=TurnAction.SHOW_OPTIONS, reply="Sure.",
+                                           options_request=OptionsRequest(kind=OptionsKind.STAY, query="")))
+    # Budget traveler: the luxury resort is filtered out of what we show...
+    shown = say(client, auth, trip["id"], "show me places to stay")["options"]["items"]
+    assert "stay-2" not in [p["place_id"] for p in shown]
+
+    # ...but if they like a mid-tier hotel anyway, we offer similar budget ones.
+    result = client.post(f"/trips/{trip['id']}/picks/stay-1", json={"action": "like"}, headers=auth).json()
+
+    assert result["trip"]["liked_place_ids"] == ["stay-1"]
+    assert result["options"]["title"] == "Like City Hotel, for less"
+    assert all(p["tier"] == "budget" for p in result["options"]["items"])
+
+
+def test_liking_an_affordable_place_is_just_a_taste_signal(client, auth, fake_llm):
+    trip = ready_trip(client, auth, fake_llm)
+    fake_llm.decisions.append(TurnDecision(action=TurnAction.SHOW_OPTIONS, reply="Sure.",
+                                           options_request=OptionsRequest(kind=OptionsKind.EAT, query="")))
+    say(client, auth, trip["id"], "show me where to eat")
+
+    result = client.post(f"/trips/{trip['id']}/picks/eat-1", json={"action": "like"}, headers=auth).json()
+
+    assert result["options"] is None
+    assert result["trip"]["itinerary"] is None  # liking is not adding
+    assert "Seafood Restaurant" in client.get("/me", headers=auth).json()["taste"]["likes"]
+
+
+def test_add_puts_places_in_the_itinerary(client, auth, fake_llm):
+    trip = ready_trip(client, auth, fake_llm)
+    fake_llm.decisions.append(TurnDecision(action=TurnAction.SHOW_OPTIONS, reply="Sure.",
+                                           options_request=OptionsRequest(kind=OptionsKind.STAY, query="")))
+    say(client, auth, trip["id"], "show me places to stay")
+
+    result = client.post(f"/trips/{trip['id']}/picks/stay-1", json={"action": "add"}, headers=auth).json()
+
+    assert result["trip"]["itinerary"]["stay"]["place_id"] == "stay-1"
+
+
+def test_swap_and_remove_activities(client, auth, fake_llm):
+    trip = ready_trip(client, auth, fake_llm)
+    draft = say(client, auth, trip["id"], "not sure")["drafts"][0]
+    client.post(f"/trips/{trip['id']}/drafts/{draft['id']}/choose", headers=auth)
+    base = f"/trips/{trip['id']}/itinerary/days/1/activities"
+
+    swap = client.post(f"{base}/0", json={"action": "swap"}, headers=auth).json()
+    assert swap["options"]["kind"] == "swap"
+    alternative = swap["options"]["items"][0]["place_id"]
+    assert alternative not in ("do-0", "do-1")  # already in the plan
+
+    replaced = client.post(f"{base}/0/replace", json={"place_id": alternative}, headers=auth).json()
+    assert replaced["itinerary"]["days"][0]["activities"][0]["place_id"] == alternative
+    assert replaced["itinerary"]["days"][0]["activities"][0]["time_of_day"] == "morning"
+
+    removed = client.post(f"{base}/1", json={"action": "remove"}, headers=auth).json()
+    assert len(removed["trip"]["itinerary"]["days"][0]["activities"]) == 1
+
+
+def test_chat_edits_the_chosen_itinerary(client, auth, fake_llm):
+    trip = ready_trip(client, auth, fake_llm)
+    draft = say(client, auth, trip["id"], "not sure")["drafts"][0]
+    client.post(f"/trips/{trip['id']}/drafts/{draft['id']}/choose", headers=auth)
+    edit = TurnDecision(action=TurnAction.EDIT_ITINERARY, reply="Done.", edit_request="make day 2 more relaxed")
+    fake_llm.decisions.append(edit)
+
+    turn = say(client, auth, trip["id"], "make day 2 more relaxed")
+
+    edit_prompts = [p for name, p in fake_llm.prompts if name == "DraftPlan"]
+    assert "make day 2 more relaxed" in edit_prompts[-1]
+    assert turn["trip"]["itinerary"]["days"]
+    assert turn["next_question"] == "Anything you'd like to change?"
+
+
+def test_stream_sends_progress_reply_drafts_then_done(client, auth, fake_llm):
+    trip = ready_trip(client, auth, fake_llm)
+
+    with client.stream("POST", f"/trips/{trip['id']}/messages/stream", json={"message": "not sure"}, headers=auth) as r:
+        events = [json.loads(line) for line in r.iter_lines() if line]
+
+    types = [e["type"] for e in events]
+    assert types[0] == "progress"
+    assert types.index("reply") < types.index("draft")
+    assert types.count("draft") == 3
+    assert types[-1] == "done"
+    assert len(events[-1]["trip"]["drafts"]) == 3
+
+
+def test_users_cannot_see_each_others_trips(client, auth):
+    trip = new_trip(client, auth)
+    other = client.post("/auth/dev", json={"email": "b@example.com"}).json()["token"]
+    resp = client.get(f"/trips/{trip['id']}", headers={"Authorization": f"Bearer {other}"})
+    assert resp.status_code == 404
+
+
+def test_reset_clears_the_trip(client, auth, fake_llm):
+    trip = ready_trip(client, auth, fake_llm)
+    turn = say(client, auth, trip["id"], "start over")
+    assert turn["trip"]["profile"]["destination"] is None
+    assert turn["trip"]["drafts"] == []
+
+
+def test_destination_never_resolves_to_a_business(client, auth, fake_llm, fake_places):
+    trip = new_trip(client, auth)
+    fake_llm.decisions.append(decision(destination="Korea"))
+
+    turn = say(client, auth, trip["id"], "I want to bachelor party in Korea")
+
+    assert turn["trip"]["destination_name"] == "South Korea"
+    assert any(b.get("includedType") == "country" for b in fake_places.bodies)
