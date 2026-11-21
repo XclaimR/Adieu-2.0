@@ -176,3 +176,36 @@ def test_drafts_say_which_stop_fulfils_each_moment_and_what_is_left():
     itinerary = PlacePool(places).to_itinerary(plan, "Rome", ["one big night out", "a cooking class"])
     assert [a.for_note for a in itinerary.days[0].activities] == [None, "one big night out"]  # 7 doesn't exist
     assert fulfilled(itinerary) == {"one big night out"}
+
+
+def test_a_quote_may_run_across_a_comma():
+    msg = "Backpacking Vietnam on a shoestring, every night out partying!"
+    p = PersonalityService.update(None, TripProfile(), Taste(), [
+        note("Backpacking Vietnam on a shoestring, every night out partying", "style", toward="nightlife")], msg)
+    assert [(n.scope, n.toward) for n in p.notes] == [("trip", "nightlife")]
+    # Spanning a one-off phrase makes the whole note a moment.
+    p = PersonalityService.update(None, TripProfile(), Taste(), [
+        note("a slow week, but one big night out", "mix")], "A slow week, but one big night out")
+    assert p.notes[0].scope == "moment"
+
+
+def test_one_note_per_topic_per_message_and_dropping_a_note_drops_its_trait():
+    p = PersonalityService.update(None, TripProfile(), Taste(), [
+        note("a slow week", "pace", toward="slow"), note("slow mornings", "pace", toward="slow")],
+        "A slow week, slow mornings")
+    assert [n.text for n in p.notes] == ["slow mornings"]
+    assert PersonalityService.card(p).traits == ["Slow pace"]
+    p = PersonalityService.update(p, TripProfile(), Taste(), [], "forget that, we're flexible", drop_topics=["pace"])
+    assert p.notes == [] and PersonalityService.card(p).traits == []
+
+
+def test_the_model_sees_the_notes_so_it_can_replace_or_drop_them(client, auth, fake_llm):
+    trip = new_trip(client, auth)
+    fake_llm.decisions.append(TurnDecision(action=TurnAction.ASK, reply="ok", notes=[
+        note("one cooking class", "cooking", "moment")]))
+    say(client, auth, trip["id"], "Lisbon, and one cooking class")
+    fake_llm.decisions.append(TurnDecision(action=TurnAction.ASK, reply="ok", drop_note_topics=["cooking"]))
+    turn = say(client, auth, trip["id"], "Skip the cooking class")
+    turn_prompts = [p for name, p in fake_llm.prompts if name == "TurnDecision"]
+    assert "What they told us so far (topic: their words): cooking: 'one cooking class'" in turn_prompts[-1]
+    assert turn["trip"]["personality"]["notes"] == []

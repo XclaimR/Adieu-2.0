@@ -86,7 +86,8 @@ _BUDGET = {BudgetLevel.BUDGET: -0.8, BudgetLevel.MID: 0.0, BudgetLevel.LUXURY: 0
 
 def _clauses(message: str) -> list[str]:
     """The message in phrases, so "no" and "one" stay with the words they belong to."""
-    return [c for c in (_words(c) for c in re.split(r"[,;.!?:]| but ", message.lower())) if c]
+    # "but" opens the next phrase (kept, so quotes that include it still match the traveler's words).
+    return [c for c in (_words(c) for c in re.split(r"[,;.!?:]|(?= but )", message.lower())) if c]
 
 
 def _words(text: str) -> str:
@@ -129,16 +130,29 @@ def _listed(clause: str) -> dict[str, tuple[int, int]]:
     return out
 
 
+def _covering(quote: str, clauses: list[str]) -> list[str]:
+    """The phrases of the message a quote spans, or [] if those aren't the traveler's exact words."""
+    text, spans, at = " ".join(clauses), [], 0
+    for c in clauses:
+        spans.append((at, at + len(c), c))
+        at += len(c) + 1
+    start = f" {text} ".find(f" {quote} ") if quote else -1
+    if start < 0:
+        return []
+    return [c for s, e, c in spans if s < start + len(quote) and e > start]
+
+
 def _check_note(update: NoteUpdate, clauses: list[str], place: set[str]) -> tuple[Note, str] | None:
     """Keep a model-read note only if it is the traveler's own words and says something. Code, not the model,
     decides it's a one-off ("one big night out" is a moment), and drops a pole the words don't support."""
     quote = _words(update.quote)
-    clause = next((c for c in clauses if quote and f" {quote} " in f" {c} "), None)  # whole words only
-    if clause is None or len(quote.split()) > _MAX_QUOTE_WORDS:
+    covered = _covering(quote, clauses)  # whole words only; may run across a comma
+    if not covered or len(quote.split()) > _MAX_QUOTE_WORDS:
         return None  # not their words, or a whole paragraph
     if not [w for w in quote.split() if w not in _VAGUE | place and w[0].isalpha()]:
         return None  # "fun", "planning a trip to Japan": nothing to keep
-    scope = "moment" if _ONE_OFF.search(clause) else update.scope
+    clause = " ".join(covered)
+    scope = "moment" if any(_ONE_OFF.search(c) for c in covered) else update.scope
     toward = update.toward if scope == "trip" else None
     if toward:
         name, direction = POLES[toward]
@@ -226,13 +240,18 @@ class PersonalityService:
         scales = {**seed(taste), **from_profile(profile)}
         if stored:
             scales.update({n: s for n, s in stored.scales.items() if s.source not in DERIVED})
+        gone = {"_".join(_words(t).split()) for t in drop_topics}
+        for n in (stored.notes if stored else []):
+            if n.topic in gone and n.toward and scales.get(POLES[n.toward][0], Scale()).source == "said":
+                del scales[POLES[n.toward][0]]  # "forget the slow thing": the card forgets it too
         said, new_notes = read_message(message, notes, profile.destination)
         for name, scale in said.items():
             old = scales.get(name)
             # A weak model-only guess never overwrites something the traveler clearly said earlier.
             if scale.confidence >= KNOWN or not (old and old.source not in DERIVED and old.confidence >= KNOWN):
                 scales[name] = scale
-        dropped = {"_".join(_words(t).split()) for t in drop_topics} | {n.topic for n in new_notes}
+        new_notes = list({n.topic: n for n in new_notes}.values())
+        dropped = gone | {n.topic for n in new_notes}
         kept = [n for n in (stored.notes if stored else []) if n.topic not in dropped] + new_notes
         return Personality(scales=scales, notes=kept[-MAX_NOTES:])
 

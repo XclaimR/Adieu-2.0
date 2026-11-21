@@ -189,6 +189,11 @@ class TravelPlannerWorkflow:
         if itinerary:
             lines.append("Their chosen itinerary: " + "; ".join(
                 f"Day {d.day_number}: " + ", ".join(a.name for a in d.activities) for d in itinerary.days))
+        personality = self.trips.personality(trip)
+        if personality and personality.notes:
+            # Lets the model reuse a topic to replace a note, or name it in drop_note_topics.
+            lines.append("What they told us so far (topic: their words): " + "; ".join(
+                f"{n.topic}: '{n.text}'" for n in personality.notes))
         return "\n".join(lines)
 
     def _resolve(self, destination: str) -> dict | None:
