@@ -70,10 +70,15 @@ _UNSURE = re.compile(r"\b(maybe|perhaps|might|not sure|probably|possibly|i guess
 # A phrase about one moment ("one big night out", "a spa afternoon") is a wish for that day, not the trip's personality.
 _ONE_OFF = re.compile(r"\b(one|a single|once)\b(?! (week|month|fortnight|trip|holiday|vacation))"
                       r"|\ban? (\w+ )?(afternoon|evening|morning|night|day|dinner|lunch)\b")
-# Words that sound positive but don't say which way any scale goes. A quote made only of these proves nothing.
+# Words that don't say which way any scale goes: vague praise and generic trip talk. A quote made only of these
+# (plus place names) proves nothing; neither does a whole sentence quoted as proof.
 _VAGUE = {"fun", "nice", "amazing", "great", "cool", "good", "awesome", "best", "exciting", "interesting", "special",
           "memorable", "unique", "different", "epic", "lovely", "perfect", "trip", "holiday", "vacation", "a", "an",
-          "the", "and", "with", "we", "i", "want", "something", "really", "very", "so", "super"}
+          "the", "and", "with", "we", "i", "want", "something", "really", "very", "so", "super", "planning", "plan",
+          "going", "go", "visit", "visiting", "travel", "traveling", "travelling", "to", "in", "for", "my", "our",
+          "friends", "partner", "wife", "husband", "family", "kids", "us", "me", "love", "like", "would", "we'd",
+          "i'd", "some", "somewhere", "place", "of", "on", "at", "it", "is", "be"}
+_MAX_QUOTE_WORDS = 6
 _BUDGET = {BudgetLevel.BUDGET: -0.8, BudgetLevel.MID: 0.0, BudgetLevel.LUXURY: 0.8}
 
 
@@ -122,11 +127,12 @@ def _listed(clause: str) -> dict[str, tuple[int, int]]:
     return out
 
 
-def read_message(message: str, signals: list[ScaleSignal] = ()) -> dict[str, Scale]:
+def read_message(message: str, signals: list[ScaleSignal] = (), destination: str | None = None) -> dict[str, Scale]:
     """What the latest message says about the whole trip.
     The word list reads the traveler's own words; the model's signals (read in context) add what the list doesn't
     know. Either way the code checks it's really their words and sizes it from them."""
     clauses = [c for c in _clauses(message) if not _ONE_OFF.search(c)]
+    place = set(_words(destination or "").split())  # shortcut: other place names in the message still count as words
     scales: dict[str, Scale] = {}
     for clause in clauses:
         for name, (direction, at) in _listed(clause).items():
@@ -135,8 +141,10 @@ def read_message(message: str, signals: list[ScaleSignal] = ()) -> dict[str, Sca
         name, direction = POLES[signal.toward]
         quote = _words(signal.quote)
         clause = next((c for c in clauses if quote and quote in c), None)
-        if name in scales or clause is None or set(quote.split()) <= _VAGUE:
-            continue  # the list already read it / not their words or a one-off / "fun" alone says nothing
+        if name in scales or clause is None or len(quote.split()) > _MAX_QUOTE_WORDS:
+            continue  # the list already read it / not their words, or a one-off / a whole sentence isn't proof
+        if not [w for w in quote.split() if w not in _VAGUE | place and w[0].isalpha()]:
+            continue  # "fun", "planning a trip to Japan": nothing that says which way
         listed = _listed(quote)
         if listed and (name not in listed or listed[name][0] != direction):
             continue  # the words point the other way, or are about another scale
@@ -196,7 +204,7 @@ class PersonalityService:
         scales = {**seed(taste), **from_profile(profile)}
         if stored:
             scales.update({n: s for n, s in stored.scales.items() if s.source not in DERIVED})
-        scales.update(read_message(message, signals))
+        scales.update(read_message(message, signals, profile.destination))
         return Personality(scales=scales)
 
     @staticmethod
