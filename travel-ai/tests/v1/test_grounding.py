@@ -37,6 +37,7 @@ def test_chip_answers_are_kept(chip, updates):
     ("5 days", 5), ("4-5 days", 5), ("a week", 7), ("A weekend", 2), ("two weeks", 14),
     ("three nights in Rome", 3), ("Not sure yet", None), ("Tokyo", None),
     ("A slow week in Lisbon with my partner", 7), ("a trip next week", None),
+    ("My wife and I want a slow food week in Lisbon.", 7), ("a trip to Rome next week", None),
 ])
 def test_extract_duration(message, days):
     assert extract_duration(message) == days
