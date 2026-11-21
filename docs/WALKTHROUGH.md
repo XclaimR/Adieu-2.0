@@ -60,6 +60,11 @@ Every later request sends it as `Authorization: Bearer …`, checked by `api/dep
 1. `TurnService.decide` — LLM reads the message + history and returns a `TurnDecision` (profile updates, reply, intent).
 2. `TripProfileService.merge` + `grounding.ground_updates` — keeps only facts the user actually said (e.g. `extract_duration` turns "a slow week" into 7 days).
 3. New destination? `PlacesService.resolve_destination` checks it's a real place (not a business) and stores its map area.
+   Then `PersonalityService.update` recomputes the trip's **personality** (six scales with confidence, stored in
+   `trips.personality`): lasting-taste vibes seed weak leanings, and the profile (budget, party, clear mood words,
+   stated preferences) sets scales firmly. Vague words like "fun" set nothing. The card on the trip screen shows the
+   known traits in plain words; `traveler_fit` (places_service) puts them into ranking and draft prompts, and each
+   pick/draft names the known trait it serves (`trait`).
 4. `TurnService.plan` — rules decide what happens next: ask a question, show options, offer drafts, or edit the itinerary.
 5. The reply is streamed and **saved immediately**, then the slow part runs:
    - Show options → `OptionsService.build` → Places search in the destination → `RankingService` (LLM ranks by your taste) → slide-in panel (`components/OptionsPanel.tsx`, `PickCard.tsx`).
