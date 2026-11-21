@@ -18,6 +18,7 @@ from tests.personas.personas import PERSONAS
 MAX_TURNS = 12
 MAX_QUESTIONS = 8
 SHOW_PLANS = "just show me plans"
+RETRIES, RETRY_WAIT = 3, 30
 CHECKED_FIELDS = ["party", "party_size", "kids", "budget_level", "start_date", "duration_days", "mood"]
 
 
@@ -30,11 +31,16 @@ class Api:
         if self.token:
             headers["Authorization"] = f"Bearer {self.token}"
         req = urllib.request.Request(self.base + path, json.dumps(body).encode(), headers, method="POST")
-        try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
-                return json.load(resp)
-        except urllib.error.HTTPError as e:
-            raise RuntimeError(f"{path} -> HTTP {e.code}: {e.read().decode()[:200]}") from None
+        for attempt in range(RETRIES + 1):
+            try:
+                with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                    return json.load(resp)
+            except urllib.error.HTTPError as e:
+                # 503 = the model is unavailable, usually a free-tier rate limit; wait it out a few times.
+                if e.code != 503 or attempt == RETRIES:
+                    raise RuntimeError(f"{path} -> HTTP {e.code}: {e.read().decode()[:200]}") from None
+                print(f"  (503 from model, retrying in {RETRY_WAIT}s)", flush=True)
+                time.sleep(RETRY_WAIT)
 
 
 def pick_reply(persona: dict, question: str, chips: list[str], used: set[int]) -> tuple[str, dict]:
@@ -56,7 +62,7 @@ def converse(api: Api, persona: dict) -> dict:
     trip_id = trip["id"]
     facts = {k: list(v) for k, v in persona["facts"].items()}
     message, used = persona["opening"], set()
-    turns, questions, plans_turn, vibe_turn, show_plans_turn = [], 0, None, None, None
+    turns, questions, plans_turn, vibe_due, show_plans_turn = [], 0, None, None, None
     for n in range(1, MAX_TURNS + 1):
         start = time.time()
         resp = api.post(f"/trips/{trip_id}/messages", {"message": message})
@@ -64,8 +70,9 @@ def converse(api: Api, persona: dict) -> dict:
                       "drafts": len(resp["drafts"]), "options": bool(resp.get("options"))})
         if message == SHOW_PLANS and show_plans_turn is None:
             show_plans_turn = n
-        if vibe_turn is None and all(k in facts for k in ("destination", "mood", "party")):
-            vibe_turn = n
+        if vibe_due is None and all(k in facts for k in ("destination", "mood", "party")):
+            # With the vibe known the app may still ask duration once (missing_vibe), unless it was already said.
+            vibe_due = n + (0 if "duration_days" in facts else 1)
         trip = resp["trip"]
         if resp["drafts"] or resp.get("options"):
             plans_turn = plans_turn or n
@@ -77,7 +84,7 @@ def converse(api: Api, persona: dict) -> dict:
         for k, v in new_facts.items():
             facts.setdefault(k, []).extend(v)
     return {"trip": trip, "turns": turns, "facts": facts, "questions": questions, "plans_turn": plans_turn,
-            "vibe_turn": vibe_turn, "show_plans_turn": show_plans_turn}
+            "vibe_due": vibe_due, "show_plans_turn": show_plans_turn}
 
 
 def invented_facts(profile: dict, facts: dict) -> list[str]:
@@ -129,9 +136,7 @@ def check(persona: dict, run: dict) -> list[tuple[str, bool | None, str]]:
                   f"{questions} questions" + ("" if run["plans_turn"] else ", plans never appeared")))
 
     drafts_turn = next((i + 1 for i, t in enumerate(run["turns"]) if t["drafts"]), None)
-    # Once destination, mood and party are known the app may still ask duration once (missing_vibe).
-    grace = 0 if "duration_days" in run["facts"] else 1
-    due = [t for t in (run["vibe_turn"] and run["vibe_turn"] + grace, run["show_plans_turn"]) if t]
+    due = [t for t in (run["vibe_due"], run["show_plans_turn"]) if t]
     due_turn = min(due) if due else None
     if due_turn is None:
         rules.append(("drafts once vibe is known", None, "persona never gave destination, mood and party"))

@@ -19,7 +19,7 @@ NOT_SURE_DATES = (WHEN, "Not sure about dates yet.", {})
 PERSONAS = [
     {
         "name": "bachelor",
-        "opening": "Planning a bachelor trip to Japan with a group of friends!",
+        "opening": "Planning a fun, lively bachelor trip to Japan with a group of friends!",
         "facts": {
             "destination": ["Japan"], "party": ["friends"],
             "mood": ["bachelor", "party", "celebrat", "nightlife", "fun", "lively", "social", "adventur", "food"],
