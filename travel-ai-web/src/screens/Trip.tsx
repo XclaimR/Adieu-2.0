@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ApiError, api, sendStream } from "../api";
-import type { OptionSet, PickAction, Trip, TripProfile } from "../types";
+import type { OptionSet, Personality, PickAction, Trip, TripProfile } from "../types";
 import PickCard from "../components/PickCard";
 import IdeaCard from "../components/IdeaCard";
 import DraftCard, { DraftSkeleton } from "../components/DraftCard";
@@ -30,6 +30,21 @@ function profileFacts(p: TripProfile): string[] {
     ...p.preferences.map((x) => x.value),
   ];
   return [...new Set(facts.filter((f): f is string => !!f))];
+}
+
+/** The trip's personality in plain words: "Slow pace, food is the point". Unknown scales are named, never guessed. */
+function PersonalityCard({ personality }: { personality: Personality }) {
+  const { traits, unknown } = personality;
+  const sentence = traits.map((t, i) => (i ? t.toLowerCase() : t)).join(", ");
+  return (
+    <div className="personality" title="This trip's personality">
+      <span className="personality-label">Trip personality</span>
+      <span>{sentence || "Still getting to know this trip"}</span>
+      {traits.length > 0 && unknown.length > 0 && (
+        <span className="small muted">Not sure yet: {unknown.join(", ").toLowerCase()}</span>
+      )}
+    </div>
+  );
 }
 
 export default function TripScreen({ tripId, firstMessage }: { tripId: string; firstMessage?: string }) {
@@ -285,6 +300,7 @@ export default function TripScreen({ tripId, firstMessage }: { tripId: string; f
             ))}
           </div>
         )}
+        <PersonalityCard personality={trip.personality} />
         <div className="log" ref={logRef}>
           {trip.messages.map((m, i) => (
             <div key={i} className={`msg ${m.role}`}>

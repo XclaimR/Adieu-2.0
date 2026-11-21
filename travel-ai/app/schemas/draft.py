@@ -10,4 +10,6 @@ class Draft(BaseModel):
     title: str
     summary: str
     photo_name: str | None = None
+    # The trip-personality trait this version serves most, if any.
+    trait: str | None = None
     itinerary: Itinerary

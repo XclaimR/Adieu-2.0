@@ -4,6 +4,7 @@ from pydantic import BaseModel, Field
 
 from app.schemas.draft import Draft
 from app.schemas.itinerary import Itinerary
+from app.schemas.personality import Personality
 from app.schemas.place import OptionSet
 from app.schemas.taste import Taste
 from app.schemas.trip_profile import TripProfile
@@ -59,6 +60,7 @@ class TripOut(BaseModel):
     id: str
     title: str
     profile: TripProfile
+    personality: Personality
     destination_name: str | None
     panel: OptionSet | None
     drafts: list[Draft]

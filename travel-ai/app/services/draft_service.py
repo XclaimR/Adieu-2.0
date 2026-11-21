@@ -11,11 +11,13 @@ from app.schemas.activity import Activity
 from app.schemas.dayplan import DayPlan
 from app.schemas.draft import Draft
 from app.schemas.itinerary import Itinerary
+from app.schemas.personality import Personality
 from app.schemas.place import Pick, PickCategory, PlaceCandidate
 from app.schemas.taste import Taste
 from app.schemas.trip_profile import TripProfile
 from app.services.llm_client import LLMClient
-from app.services.places_service import PlacesService, party_fit, tier_rank
+from app.services.personality_service import PersonalityService
+from app.services.places_service import PlacesService, tier_rank, traveler_fit
 from app.services.taste_service import TasteService
 
 logger = logging.getLogger(__name__)
@@ -47,6 +49,7 @@ class DraftPlan(BaseModel):
     title: str = Field(description="catchy 3-6 word name for this version of the trip")
     summary: str = Field(description="one sentence on what this version feels like")
     stay_ref: int | None = Field(default=None, description="[n] of a place to stay from the list, or null")
+    trait: str | None = Field(default=None, description="the listed personality trait this version serves most, or null")
     # The cap stops runaway generation (each extra day costs ~10 s on a local model).
     days: list[PlanDay] = Field(min_length=1, max_length=10)
 
@@ -162,7 +165,9 @@ class DraftService:
         return PlacePool(places)
 
     @staticmethod
-    def _prompt(profile: TripProfile, taste: Taste, pool: PlacePool, days: int, brief: str) -> str:
+    def _prompt(profile: TripProfile, taste: Taste, pool: PlacePool, days: int, brief: str,
+                personality: Personality | None = None) -> str:
+        allowed = PersonalityService.traits(personality)[0]  # only known traits; guesses stay off the cards
         return f"""
 Plan a {days}-day trip to {profile.destination}.
 This version's style: {brief}
@@ -182,17 +187,20 @@ Rules:
 - Each stop's place and note must be about the same listed place. Don't plan anything that isn't on the list.
 - Group nearby places on the same day. Don't repeat a place.
 - Respect diet, mobility, kids and budget preferences.
-{party_fit(profile)}
+{traveler_fit(profile, personality)}
+{f"- trait: copy the one personality trait above that this version serves best (exactly as written), or null. Options: {', '.join(allowed)}." if allowed else "- trait: null."}
 - stay_ref must be a 'stay' place from the list, or null.
 """
 
-    def generate(self, profile: TripProfile, taste: Taste, viewport: dict | None, exclude_ids: set[str]) -> Iterator[Draft]:
+    def generate(self, profile: TripProfile, taste: Taste, viewport: dict | None, exclude_ids: set[str],
+                 personality: Personality | None = None) -> Iterator[Draft]:
         """Yields 3 drafts with different flavors, one at a time (each is a separate model call)."""
         pool = self.pool(profile, viewport, exclude_ids)
         days = min(profile.duration_days or DEFAULT_DAYS, MAX_DAYS)
+        allowed = PersonalityService.traits(personality)[0]  # only known traits; guesses stay off the cards
         for flavor, brief in FLAVORS:
             try:
-                plan = LLMClient.generate_structured(self._prompt(profile, taste, pool, days, brief), DraftPlan)
+                plan = LLMClient.generate_structured(self._prompt(profile, taste, pool, days, brief, personality), DraftPlan)
             except Exception:
                 logger.exception("Draft %s failed", flavor)
                 continue
@@ -207,11 +215,12 @@ Rules:
                 title=plan.title,
                 summary=plan.summary,
                 photo_name=first_photo,
+                trait=PersonalityService.match_trait(plan.trait, allowed),
                 itinerary=itinerary,
             )
 
     def edit(self, itinerary: Itinerary, request: str, profile: TripProfile, taste: Taste,
-             viewport: dict | None, exclude_ids: set[str]) -> Itinerary:
+             viewport: dict | None, exclude_ids: set[str], personality: Personality | None = None) -> Itinerary:
         """Apply a free-text change ("make day 2 more relaxed") using only real places."""
         current = [
             PlaceCandidate(place_id=a.place_id, name=a.name, category=PickCategory(a.category)
@@ -233,7 +242,8 @@ Rules:
         if profile.duration_days and profile.duration_days != days:
             days = min(profile.duration_days, MAX_DAYS)
 
-        prompt = self._prompt(profile, taste, pool, days, "keep what works, change only what the traveler asked") + f"""
+        prompt = self._prompt(profile, taste, pool, days, "keep what works, change only what the traveler asked",
+                              personality) + f"""
 Current plan:
 {outline}
 Current stay: {f"[{ref[itinerary.stay.place_id]}]" if itinerary.stay else "none"}

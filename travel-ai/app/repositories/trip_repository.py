@@ -4,17 +4,20 @@ from sqlalchemy.orm import Session
 from app.database.models.trip import MessageModel, PickFeedbackModel, TripModel
 from app.schemas.api import MessageOut, TripOut, TripSummary
 from app.schemas.draft import Draft
+from app.schemas.personality import Personality
 from app.schemas.itinerary import Itinerary
 from app.schemas.place import OptionSet, Pick
 from app.schemas.trip_profile import TripProfile
+from app.services.personality_service import PersonalityService
 
 
 class TripRepository:
     def __init__(self, db: Session):
         self.db = db
 
-    def create(self, user_id: str, title: str, profile: TripProfile) -> TripModel:
-        trip = TripModel(user_id=user_id, title=title, profile=profile.model_dump(mode="json"), drafts=[], state={})
+    def create(self, user_id: str, title: str, profile: TripProfile, personality: Personality | None = None) -> TripModel:
+        trip = TripModel(user_id=user_id, title=title, profile=profile.model_dump(mode="json"), drafts=[], state={},
+                         personality=personality.model_dump(mode="json", include={"scales"}) if personality else None)
         self.db.add(trip)
         self.db.commit()
         self.db.refresh(trip)
@@ -76,6 +79,10 @@ class TripRepository:
         return TripProfile.model_validate(trip.profile or {})
 
     @staticmethod
+    def personality(trip: TripModel) -> Personality | None:
+        return Personality.model_validate(trip.personality) if trip.personality else None
+
+    @staticmethod
     def panel(trip: TripModel) -> OptionSet | None:
         return OptionSet.model_validate(trip.panel) if trip.panel else None
 
@@ -106,6 +113,7 @@ class TripRepository:
             id=trip.id,
             title=trip.title,
             profile=self.profile(trip),
+            personality=PersonalityService.card(self.personality(trip)),
             destination_name=(trip.destination_area or {}).get("name"),
             panel=self.panel(trip),
             drafts=self.drafts(trip),

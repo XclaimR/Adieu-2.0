@@ -11,6 +11,7 @@ export default function DraftCard({ draft, onChoose }: { draft: Draft; onChoose:
       <div className="draft-body">
         <strong className="draft-title">{draft.title}</strong>
         <p className="small muted">{draft.summary}</p>
+        {draft.trait && <span className="trait">For you: {draft.trait.toLowerCase()}</span>}
         <ol className="draft-days">
           {days.map((d) => (
             <li key={d.day_number}>

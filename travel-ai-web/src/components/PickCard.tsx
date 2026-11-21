@@ -28,6 +28,7 @@ export default function PickCard({ pick, liked, onAction, onUse }: Props) {
           )}
         </div>
         {pick.why && <p className="why">{pick.why}</p>}
+        {pick.trait && <span className="trait">For you: {pick.trait.toLowerCase()}</span>}
         <div className="pick-actions">
           {onUse ? (
             <button className="primary" onClick={onUse}>

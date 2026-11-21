@@ -8,8 +8,10 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.database.models.place_cache import PlaceCacheModel
+from app.schemas.personality import Personality
 from app.schemas.place import PickCategory, PlaceCandidate
 from app.schemas.trip_profile import BudgetLevel, TripProfile
+from app.services.personality_service import PersonalityService
 
 logger = logging.getLogger(__name__)
 
@@ -81,9 +83,16 @@ _PARTY_FIT = {
 }
 
 
-def party_fit(profile: TripProfile) -> str:
-    """One plain instruction about who's travelling, for prompts that choose places. Empty if unknown."""
-    return f"- Who's going: {_PARTY_FIT[profile.party.value]}" if profile.party else ""
+def traveler_fit(profile: TripProfile, personality: Personality | None = None) -> str:
+    """Plain instructions about who's travelling and the trip's personality, for prompts that choose places.
+    Unknown scales are left out, so the model doesn't plan around a guess."""
+    lines = [f"- Who's going: {_PARTY_FIT[profile.party.value]}"] if profile.party else []
+    known, leans = PersonalityService.traits(personality)
+    if known:
+        lines.append(f"- This trip's personality: {'; '.join(known)}. Let it shape what you choose.")
+    if leans:
+        lines.append(f"- Weak guesses from their usual taste (don't over-weight): {'; '.join(leans)}.")
+    return "\n".join(lines)
 
 
 _TIER_ORDER = {"budget": 0, "mid": 1, "luxury": 2}

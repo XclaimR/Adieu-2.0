@@ -2,11 +2,13 @@ import logging
 
 from pydantic import BaseModel, Field
 
+from app.schemas.personality import Personality
 from app.schemas.place import Pick, PickCategory, PlaceCandidate
 from app.schemas.taste import Taste
 from app.schemas.trip_profile import TripProfile
 from app.services.llm_client import LLMClient
-from app.services.places_service import party_fit
+from app.services.personality_service import PersonalityService
+from app.services.places_service import traveler_fit
 from app.services.taste_service import TasteService
 
 logger = logging.getLogger(__name__)
@@ -17,6 +19,7 @@ PICKS_PER_CATEGORY = 5
 class RankedItem(BaseModel):
     ref: int = Field(description="the [n] number of the candidate")
     why: str = Field(description="why this fits this traveler, max 12 words")
+    trait: str | None = Field(default=None, description="the listed personality trait this place serves, or null")
 
 
 class Ranking(BaseModel):
@@ -54,12 +57,14 @@ class RankingService:
         profile: TripProfile,
         taste: Taste,
         focus: str = "",
+        personality: Personality | None = None,
     ) -> list[Pick]:
         """Rank real candidates for this traveler. The model only refers to candidates by number, so it can't invent places."""
         if not candidates:
             return []
 
         listing = "\n".join(_describe(i, c) for i, c in enumerate(candidates))
+        allowed = PersonalityService.traits(personality)[0]  # only known traits; guesses stay off the cards
         prompt = f"""
 Pick the {PICKS_PER_CATEGORY} places from the list below that best fit this traveler, best first.
 Category: {category.value}
@@ -79,7 +84,8 @@ Rules:
 - Price levels: $ cheap, $$ moderate, $$$ expensive, $$$$ very expensive. For a "budget" traveler put cheaper
   places first; for "luxury" the opposite.
 - Respect hard preferences (diet, mobility, kids): rank places that clearly fit them first.
-{party_fit(profile)}
+{traveler_fit(profile, personality)}
+{f"- trait: copy the one personality trait above that this place serves best (exactly as written), or null. Options: {', '.join(allowed)}." if allowed else "- trait: null."}
 - "why" must connect the place to something specific about this traveler, using only the facts listed.
   Never claim a place is cheap, vegetarian, accessible, etc. unless the facts say so. Keep it under 12 words.
 - If little is known about the traveler, favour well-rated, distinctive places.
@@ -95,7 +101,8 @@ Rules:
         for item in ranking.ranked:
             if 0 <= item.ref < len(candidates) and item.ref not in seen:
                 seen.add(item.ref)
-                picks.append(Pick(**candidates[item.ref].model_dump(), why=item.why))
+                picks.append(Pick(**candidates[item.ref].model_dump(), why=item.why,
+                                  trait=PersonalityService.match_trait(item.trait, allowed)))
             if len(picks) == PICKS_PER_CATEGORY:
                 break
 
