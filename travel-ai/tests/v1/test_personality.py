@@ -81,6 +81,9 @@ def test_model_only_poles_are_weak_guesses_and_need_their_words():
 
 def test_family_and_budget_are_checked_facts():
     assert card(profile=TripProfile(party=Party.FAMILY)).traits == ["Chill evenings"]
+    # A weak model-only guess ("beach holiday" read as chill) doesn't wipe the fact (seen live).
+    assert card("a beach holiday", signals=[("chill", "beach holiday")],
+                profile=TripProfile(party=Party.FAMILY)).traits == ["Chill evenings"]
     assert card(profile=TripProfile(budget_level=BudgetLevel.MID)).traits == ["Mid-range comfort"]
 
 

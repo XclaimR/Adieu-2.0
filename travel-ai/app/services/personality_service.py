@@ -247,8 +247,8 @@ class PersonalityService:
         said, new_notes = read_message(message, notes, profile.destination)
         for name, scale in said.items():
             old = scales.get(name)
-            # A weak model-only guess never overwrites something the traveler clearly said earlier.
-            if scale.confidence >= KNOWN or not (old and old.source not in DERIVED and old.confidence >= KNOWN):
+            # A weak guess never overwrites a known scale (said earlier, or a profile fact like kids).
+            if scale.confidence >= KNOWN or not (old and old.confidence >= KNOWN):
                 scales[name] = scale
         new_notes = list({n.topic: n for n in new_notes}.values())
         dropped = gone | {n.topic for n in new_notes}
