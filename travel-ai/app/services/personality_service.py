@@ -52,8 +52,6 @@ _WORDS: dict[str, dict[str, float]] = {
     "luxur": {"comfort": 0.8}, "upscale": {"comfort": 0.8}, "five-star": {"comfort": 0.8}, "5-star": {"comfort": 0.8},
     "backpack": {"comfort": -0.8}, "shoestring": {"comfort": -0.8}, "cheap": {"comfort": -0.6},
 }
-# Preference topics that are about the whole trip. Others are single wishes or rules (a diet, a spa day).
-_TRIP_WIDE_KEYS = {"pace", "crowds", "nightlife"}
 _WHOLE_WORD = {"party"}  # would otherwise match "party of four"
 # Only for these does "no X" mean the other pole ("no nightlife" = chill evenings). Elsewhere a negation says
 # nothing firm ("not cheap" isn't luxury), so the word is ignored.
@@ -69,6 +67,9 @@ POLES = {
 _STRONG = re.compile(r"\b(very|really|super|so|extremely|totally|absolutely|all about|only|lots of|tons of)\b")
 _MILD = re.compile(r"\b(a bit|a little|slightly|somewhat|kind of|kinda|sort of|fairly|bit of)\b")
 _UNSURE = re.compile(r"\b(maybe|perhaps|might|not sure|probably|possibly|i guess|could be)\b")
+# A phrase about one moment ("one big night out", "a spa afternoon") is a wish for that day, not the trip's personality.
+_ONE_OFF = re.compile(r"\b(one|a single|once)\b(?! (week|month|fortnight|trip|holiday|vacation))"
+                      r"|\ban? (\w+ )?(afternoon|evening|morning|night|day|dinner|lunch)\b")
 # Words that sound positive but don't say which way any scale goes. A quote made only of these proves nothing.
 _VAGUE = {"fun", "nice", "amazing", "great", "cool", "good", "awesome", "best", "exciting", "interesting", "special",
           "memorable", "unique", "different", "epic", "lovely", "perfect", "trip", "holiday", "vacation", "a", "an",
@@ -76,46 +77,93 @@ _VAGUE = {"fun", "nice", "amazing", "great", "cool", "good", "awesome", "best", 
 _BUDGET = {BudgetLevel.BUDGET: -0.8, BudgetLevel.MID: 0.0, BudgetLevel.LUXURY: 0.8}
 
 
-def _average(signals: list[dict[str, float]], confidence: float, source: str) -> dict[str, Scale]:
-    values: dict[str, list[float]] = {}
-    for signal in signals:
-        for name, v in signal.items():
-            values.setdefault(name, []).append(v)
-    return {name: Scale(value=round(sum(vs) / len(vs), 2), confidence=confidence, source=source)
-            for name, vs in values.items()}
+def _clauses(message: str) -> list[str]:
+    """The message in phrases, so "no" and "one" stay with the words they belong to."""
+    return [c for c in (_words(c) for c in re.split(r"[,;.!?:]| but ", message.lower())) if c]
 
 
-def _word_signals(text: str) -> dict[str, float]:
-    """Scale pushes from one mood word or preference, e.g. "avoid crowds" -> crowds -0.6."""
-    out: dict[str, float] = {}
-    for clause in re.split(r"[,;]| but ", text.lower()):  # "no nightlife, lots of food": negation stays in its clause
-        for stem, effects in _WORDS.items():
-            match = re.search(rf"\b{re.escape(stem)}" + (r"\b" if stem in _WHOLE_WORD else ""), clause)
-            if not match:
-                continue
-            if _NEGATION.search(clause[:match.start()]):
-                if stem in _FLIPPABLE:
-                    out.update({name: -v for name, v in effects.items()})
-            else:
-                out.update(effects)
+def _words(text: str) -> str:
+    return " ".join(re.findall(r"[a-z0-9'-]+", text.lower().replace("’", "'")))
+
+
+def _stems(clause: str) -> list[tuple[str, int]]:
+    """(listed stem, position) found in a clause."""
+    found = []
+    for stem in _WORDS:
+        match = re.search(rf"\b{re.escape(stem)}" + (r"\b" if stem in _WHOLE_WORD else ""), clause)
+        if match:
+            found.append((stem, match.start()))
+    return found
+
+
+def _size(direction: int, lead: str, clause: str) -> Scale:
+    """How strongly and how surely, from the traveler's words just before the trait and the rest of the phrase."""
+    amount, confidence = (0.9, 0.85) if _STRONG.search(lead) else (0.4, 0.7) if _MILD.search(lead) else (0.7, 0.75)
+    if _UNSURE.search(clause):
+        confidence = 0.4  # a guess: kept as a weak lean, shown as unknown
+    return Scale(value=direction * amount, confidence=confidence, source="said")
+
+
+def _lead(clause: str, at: int, words: str) -> str:
+    """The trait's words plus the three before them: where "really" or "a bit" would be."""
+    return " ".join(clause[:at].split()[-3:] + [words])
+
+
+def _listed(clause: str) -> dict[str, tuple[int, int]]:
+    """Scales the word list reads in one phrase: name -> (direction, position). "no nightlife" flips; other
+    negations ("not cheap") say nothing firm, so the word is ignored."""
+    out = {}
+    for stem, at in _stems(clause):
+        negated = _NEGATION.search(clause[:at])
+        if negated and stem not in _FLIPPABLE:
+            continue
+        for name, v in _WORDS[stem].items():
+            out[name] = (-1 if (v < 0) != bool(negated) else 1, at)
     return out
+
+
+def read_message(message: str, signals: list[ScaleSignal] = ()) -> dict[str, Scale]:
+    """What the latest message says about the whole trip.
+    The word list reads the traveler's own words; the model's signals (read in context) add what the list doesn't
+    know. Either way the code checks it's really their words and sizes it from them."""
+    clauses = [c for c in _clauses(message) if not _ONE_OFF.search(c)]
+    scales: dict[str, Scale] = {}
+    for clause in clauses:
+        for name, (direction, at) in _listed(clause).items():
+            scales[name] = _size(direction, _lead(clause, at, clause[at:].split(" ", 1)[0]), clause)
+    for signal in signals:
+        name, direction = POLES[signal.toward]
+        quote = _words(signal.quote)
+        clause = next((c for c in clauses if quote and quote in c), None)
+        if name in scales or clause is None or set(quote.split()) <= _VAGUE:
+            continue  # the list already read it / not their words or a one-off / "fun" alone says nothing
+        listed = _listed(quote)
+        if listed and (name not in listed or listed[name][0] != direction):
+            continue  # the words point the other way, or are about another scale
+        if _NEGATION.search(quote) and any(name in _WORDS[st] for st, _ in _stems(quote)):
+            continue  # "not too packed" isn't packed, and isn't firmly slow either
+        # Other negations are the model's reading in context: "avoid the tourist traps" is hidden gems.
+        scales[name] = _size(direction, _lead(clause, clause.index(quote), quote), clause)
+    return scales
 
 
 def seed(taste: Taste) -> dict[str, Scale]:
     """Leanings from lasting taste, at low confidence: a starting point, never shown as known."""
-    return _average([_VIBES[v] for v in taste.vibes if v in _VIBES], TASTE_CONFIDENCE, "taste")
+    values: dict[str, list[float]] = {}
+    for vibe in taste.vibes:
+        for name, v in _VIBES.get(vibe, {}).items():
+            values.setdefault(name, []).append(v)
+    return {n: Scale(value=round(sum(vs) / len(vs), 2), confidence=TASTE_CONFIDENCE, source="taste")
+            for n, vs in values.items()}
 
 
 def from_profile(profile: TripProfile) -> dict[str, Scale]:
-    """What this trip's chat already says: budget, who's going, mood words and preferences."""
+    """Checked profile facts: budget and kids. Mood words aren't read here; the model may have written them."""
     scales: dict[str, Scale] = {}
     if profile.budget_level:
         scales["comfort"] = Scale(value=_BUDGET[profile.budget_level], confidence=CHAT_CONFIDENCE, source="chat")
     if profile.party == Party.FAMILY or profile.kids:
         scales["energy"] = Scale(value=-0.6, confidence=CHAT_CONFIDENCE, source="chat")
-    texts = profile.mood + [p.value for p in profile.preferences if p.source == "stated" and p.key in _TRIP_WIDE_KEYS]
-    # Words override budget and party: "a luxury trip on points" or "family, but we love a night out".
-    scales.update(_average([_word_signals(t) for t in texts], CHAT_CONFIDENCE, "chat"))
     return scales
 
 
@@ -138,47 +186,17 @@ def leaning(name: str, scale: Scale | None) -> str | None:
     return left if scale.value < 0 else right
 
 
-def _words(text: str) -> str:
-    return " ".join(re.findall(r"[a-z0-9']+", text.lower().replace("’", "'")))
-
-
-def read_signal(signal: ScaleSignal, message: str) -> tuple[str, Scale] | None:
-    """Check a model-read signal against what the traveler actually wrote, and size it from their words.
-    The model picks the scale and direction in context; the code decides whether it counts and by how much."""
-    quote = _words(signal.quote)
-    if not quote or quote not in _words(message):
-        return None  # not their words
-    if set(quote.split()) <= _VAGUE:
-        return None  # "fun" alone says nothing
-    name, direction = POLES[signal.toward]
-    known = _word_signals(quote)
-    listed = known.get(name)
-    if known and listed is None:
-        return None  # the words are about another scale ("slow week" as proof of nightlife)
-    if listed is not None and (listed > 0) != (direction > 0):
-        return None  # the words point the other way
-    if _NEGATION.search(quote) and any(
-            name in effects and stem not in _FLIPPABLE and re.search(rf"\b{re.escape(stem)}", quote)
-            for stem, effects in _WORDS.items()):
-        return None  # "not too packed" isn't packed, and isn't firmly slow either
-    # Other negations are the model's reading in context: "avoid the tourist traps" is hidden gems.
-    amount, confidence = (0.9, 0.85) if _STRONG.search(quote) else (0.4, 0.7) if _MILD.search(quote) else (0.7, 0.75)
-    if _UNSURE.search(quote):
-        confidence = 0.4  # a guess: kept as a weak lean, shown as unknown
-    return name, Scale(value=direction * amount, confidence=confidence, source="said")
-
-
 class PersonalityService:
 
     @staticmethod
     def update(stored: Personality | None, profile: TripProfile, taste: Taste,
                signals: list[ScaleSignal] = (), message: str = "") -> Personality:
-        """Recompute the derived scales from taste and the chat, keep any set another way, then apply what the
-        latest message said (newest wins)."""
+        """Taste and checked profile facts are recomputed; what earlier messages said is kept; what the latest
+        message says wins."""
         scales = {**seed(taste), **from_profile(profile)}
         if stored:
             scales.update({n: s for n, s in stored.scales.items() if s.source not in DERIVED})
-        scales.update(dict(filter(None, (read_signal(s, message) for s in signals))))
+        scales.update(read_message(message, signals))
         return Personality(scales=scales)
 
     @staticmethod
