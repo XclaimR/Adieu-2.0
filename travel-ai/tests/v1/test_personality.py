@@ -61,8 +61,10 @@ def test_intensity_and_certainty_come_from_their_words():
 
 def test_model_signals_add_what_the_list_doesnt_know_but_only_with_their_words():
     msg = "Barcelona, avoid the tourist traps, we want what locals love"
-    assert card(msg, signals=[("hidden_gems", "what locals love")]).traits == ["Avoids crowds"]
-    assert card(msg, signals=[("slow", "avoid tourist traps")]).traits == []  # not their exact words
+    assert card(msg).traits == ["Avoids crowds"]  # the list reads "avoid the tourist traps" on its own
+    assert card("Barcelona, we want what locals love", signals=[("hidden_gems", "what locals love")]).traits == [
+        "Avoids crowds"]
+    assert card(msg, signals=[("slow", "avoid tourist traps")]).traits == ["Avoids crowds"]  # "slow": not their words
     assert card("honestly just doing nothing", signals=[("luxury", "prioritizing comfort")]).traits == []  # invented
     assert card("Something fun!", signals=[("nightlife", "fun")]).traits == []  # vague
     fun = "Planning a fun trip to Japan with friends!"

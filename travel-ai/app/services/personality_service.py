@@ -47,7 +47,7 @@ _WORDS: dict[str, dict[str, float]] = {
     "nightlife": {"energy": 0.8}, "party": {"energy": 0.8}, "partying": {"energy": 0.8},
     "hidden gem": {"crowds": -0.7}, "off the beaten": {"crowds": -0.7},
     "avoid crowd": {"crowds": -0.7}, "no crowd": {"crowds": -0.7}, "away from the crowd": {"crowds": -0.7},
-    "iconic": {"crowds": 0.7}, "the icons": {"crowds": 0.7}, "must-see": {"crowds": 0.7},
+    "tourist trap": {"crowds": 0.6}, "iconic": {"crowds": 0.7}, "the icons": {"crowds": 0.7}, "must-see": {"crowds": 0.7},
     "food": {"food": 0.8}, "culinar": {"food": 0.8}, "gastro": {"food": 0.8},
     "luxur": {"comfort": 0.8}, "upscale": {"comfort": 0.8}, "five-star": {"comfort": 0.8}, "5-star": {"comfort": 0.8},
     "backpack": {"comfort": -0.8}, "shoestring": {"comfort": -0.8}, "cheap": {"comfort": -0.6},
@@ -55,7 +55,7 @@ _WORDS: dict[str, dict[str, float]] = {
 _WHOLE_WORD = {"party"}  # would otherwise match "party of four"
 # Only for these does "no X" mean the other pole ("no nightlife" = chill evenings). Elsewhere a negation says
 # nothing firm ("not cheap" isn't luxury), so the word is ignored.
-_FLIPPABLE = {"nightlife", "party", "partying"}
+_FLIPPABLE = {"nightlife", "party", "partying", "tourist trap"}
 _NEGATION = re.compile(r"\b(no|not|avoid\w*|without|skip|less|hate|away from|don't|dont)\b")
 # pole -> (scale, direction)
 POLES = {
