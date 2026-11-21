@@ -121,7 +121,7 @@ def misfit_picks(trip: dict, persona: dict) -> list[str]:
            if re.search(rf"\b{re.escape(w)}\b", text, re.I)]
     bad += [f"{p['name']}: tier {p['tier']}" for p in picks if p.get("tier") in persona["banned_tiers"]]
     if "luxury" in persona["banned_tiers"]:  # budget travelers: no $$$$ places
-        bad += [f"{p['name']}: $$$$" for p in picks if p.get("price_level") == "PRICE_LEVEL_VERY_EXPENSIVE"]
+        bad += [f"{p['name']}: $$$$" for p in picks if p.get("price_level") == "$$$$"]
     return sorted(set(bad))
 
 

@@ -18,7 +18,7 @@ def test_unset_fields_and_stated_moods_pass():
 
 
 def test_misfit_picks_flags_words_and_pricey_stays():
-    stay = {"name": "Grand Hotel", "tier": "luxury", "price_level": "PRICE_LEVEL_VERY_EXPENSIVE"}
+    stay = {"name": "Grand Hotel", "tier": "luxury", "price_level": "$$$$"}
     trip = {"panel": None, "drafts": [{"title": "Saigon", "summary": "A luxury escape", "itinerary": {
         "stay": stay, "days": [{"activities": [{"name": "Street food walk", "description": "Barcelona-style"}]}]}}]}
     assert misfit_picks(trip, BACKPACKER) == [

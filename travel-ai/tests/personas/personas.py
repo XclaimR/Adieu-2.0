@@ -102,10 +102,11 @@ PERSONAS = [
             "destination": ["Paris"], "party": ["couple"], "party_size": [2], "kids": [False],
             "budget_level": ["luxury"],
             "duration_days": [2, 3],
-            "mood": ["luxur", "romantic", "indulg", "relax", "fine", "elegant", "pamper", "upscale"],
+            # "Luxury" is a budget, not a mood: the mood only counts as said once the persona answers it.
         },
         "answers": [
-            (MOOD, "Romantic and indulgent: fine dining and a nice spa.", {}),
+            (MOOD, "Romantic and indulgent: fine dining and a nice spa.",
+             {"mood": ["luxur", "romantic", "indulg", "relax", "fine", "elegant", "pamper", "upscale"]}),
             NOT_SURE_DATES,
         ],
         "chips": ["partner", "romantic"],
