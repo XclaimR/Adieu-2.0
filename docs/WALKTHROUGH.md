@@ -117,3 +117,10 @@ Events the browser handles: `progress` (step list), `reply`, `note`, `options`, 
   - All six, inside the container (after a rebuild so the image has the folder): `docker compose exec api python -m tests.personas.run`
   - From the host against any server (stdlib only): `cd travel-ai && python3 -m tests.personas.run --base-url http://localhost:8000`
   - One persona, longer per-turn timeout: `--persona bachelor --timeout 900` (`--persona` repeats)
+  - Also checks all 3 drafts arrived (a dropped draft fails).
+- `tests/agent/` — AI traveler agent: a model plays each persona through the running app in its own words (taps
+  chips, says "just show me plans", picks a draft), then a judge model gives each persona rule a reason, adds
+  "no needless questions", and scores "felt understood" 1–5. Reuses the personas and rule checks above; the checks
+  decide where they ran, the judge decides the rest. Uses the app's LLM settings, so run it inside an api container:
+  `docker compose exec api python -m tests.agent.run [--persona NAME] [--report agent-report.md]`. About 4 model calls
+  per persona on top of the app's own; waits out 429/503 a few times. Sample: `docs/reports/agent-report-sample.md`.
