@@ -41,9 +41,10 @@ _MOOD_SYNONYMS = {
 }
 
 # Activity words that name the trip's mood on their own. Only unambiguous ones: "fun" or "nice" stay unanswered.
+# Matched against what the model filed as the user's interests, never the raw message ("no beach please").
 _ACTIVITY_MOODS = [
     (r"\b(hik\w*|trek\w*)\b", ["adventurous", "nature"]),
-    (r"\b(ski|skiing|scuba|diving|snorkel\w*|surf\w*|rafting)\b", ["adventurous"]),
+    (r"\b(ski|skiing|scuba|snorkel\w*|surf\w*|rafting)\b", ["adventurous"]),
     (r"\bbeach\w*\b", ["beach"]),
     (r"\b(food (tour|trip|week|holiday)|foodie|culinary)\b", ["foodie"]),
 ]
@@ -72,9 +73,9 @@ def extract_duration(message: str) -> int | None:
     return None
 
 
-def extract_mood(message: str) -> list[str]:
-    """Moods named by clear activity words: "a hiking trip" -> adventurous, nature; "a beach holiday" -> beach."""
-    moods = [m for pattern, ms in _ACTIVITY_MOODS if _has(pattern, message) for m in ms]
+def extract_mood(interests: str) -> list[str]:
+    """Moods named by clear activity words: "hiking" -> adventurous, nature; "beach holiday" -> beach."""
+    moods = [m for pattern, ms in _ACTIVITY_MOODS if _has(pattern, interests) for m in ms]
     return list(dict.fromkeys(moods))
 
 
@@ -82,7 +83,7 @@ def _to_int(token: str) -> int:
     return int(token) if token.isdigit() else _NUMBER_WORDS[token]
 
 
-def _mood_supported(mood: str, text: str) -> bool:
+def mood_supported(mood: str, text: str) -> bool:
     mood = mood.lower()
     if mood[:5] and mood[:5] in text:
         return True
@@ -98,7 +99,9 @@ def ground_updates(updates: ProfileUpdates, message: str) -> ProfileUpdates:
         if not any(w in text for w in words):
             u.destination = None
 
-    u.mood = [m for m in u.mood if _mood_supported(m, text)]
+    # Drop a mood the same answer also files as something to avoid ("no beach please").
+    avoid = " ".join(p.value.lower() for p in u.preferences if p.key.strip().lower() in ("avoid", "avoids"))
+    u.mood = [m for m in u.mood if mood_supported(m, text) and not mood_supported(m, avoid)]
 
     if u.party and not _has(_PARTY_WORDS[u.party], text):
         u.party = None

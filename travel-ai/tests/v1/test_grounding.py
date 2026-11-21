@@ -2,7 +2,7 @@ import pytest
 
 from app.schemas.trip_profile import BudgetLevel, Party, ProfileUpdates
 from app.services.grounding import extract_duration, extract_mood, ground_updates
-from app.schemas.trip_profile import TripProfile
+from app.schemas.trip_profile import Preference, TripProfile
 from app.services.trip_profile_service import TripProfileService
 
 
@@ -61,35 +61,58 @@ def test_party_size_must_be_stated_or_implied(message, guess, kept):
     assert ground_updates(updates, message).party_size == kept
 
 
-@pytest.mark.parametrize("message,moods", [
-    ("Going solo on a hiking trip in the Dolomites for 5 days.", ["adventurous", "nature"]),
-    ("Trekking in Nepal", ["adventurous", "nature"]),
-    ("A ski trip to Niseko", ["adventurous"]),
-    ("Scuba diving in Bali", ["adventurous"]),
-    ("A beach holiday in Goa", ["beach"]),
-    ("A slow food week in Lisbon", ["foodie"]),
+@pytest.mark.parametrize("interests,moods", [
+    ("hiking", ["adventurous", "nature"]),
+    ("trekking in Nepal", ["adventurous", "nature"]),
+    ("skiing", ["adventurous"]),
+    ("scuba diving", ["adventurous"]),
+    ("beach holiday", ["beach"]),
+    ("slow food week", ["foodie"]),
     # Vague or ambiguous words must not become a mood: ask instead of guessing.
-    ("A fun trip to Rome", []),
-    ("Something nice in Paris", []),
-    ("Tokyo", []),
-    ("Barcelona, love a good dive bar", []),
-    ("Just me", []),
+    ("fun", []),
+    ("something nice", []),
+    ("diving into the local food scene", []),
+    ("", []),
 ])
-def test_extract_mood(message, moods):
-    assert extract_mood(message) == moods
+def test_extract_mood(interests, moods):
+    assert extract_mood(interests) == moods
 
 
-def test_missed_mood_is_read_from_the_text():
+HIKER = "Going solo on a hiking trip in the Dolomites for 5 days."
+
+
+def _merge(message, profile=None, **updates):
+    return TripProfileService.merge(profile or TripProfile(), ProfileUpdates(**updates), message)
+
+
+def test_missed_mood_is_read_from_the_models_interests():
     # Issue #41: gemini sometimes returns no mood for this and files "hiking" under interests.
-    message = "Going solo on a hiking trip in the Dolomites for 5 days."
-    merged = TripProfileService.merge(TripProfile(), ProfileUpdates(destination="Dolomites", party=Party.SOLO), message)
+    merged = _merge(HIKER, destination="Dolomites", preferences=[Preference(key="interests", value="hiking")])
     assert merged.mood == ["adventurous", "nature"]
+
+
+@pytest.mark.parametrize("message,preferences", [
+    # The model understood the "no": beach is something to avoid, not an interest.
+    ("Bali for a week, no beach please", [Preference(key="avoid", value="beach")]),
+    # An interest the user never mentioned is not a mood.
+    ("Dolomites for 5 days", [Preference(key="interests", value="hiking")]),
+    # Raw words alone are not read: only what the model filed as an interest.
+    (HIKER, []),
+])
+def test_no_mood_without_a_stated_interest(message, preferences):
+    assert _merge(message, preferences=preferences).mood == []
+
+
+def test_mood_the_user_wants_to_avoid_is_dropped():
+    updates = ProfileUpdates(destination="Bali", mood=["beach", "relaxed"], preferences=[Preference(key="avoid", value="beach")])
+    assert ground_updates(updates, "Bali, relaxed, but no beach please").mood == ["relaxed"]
 
 
 def test_hiking_supports_a_nature_mood():
     assert ground_updates(ProfileUpdates(mood=["adventurous", "nature"]), "a hiking trip").mood == ["adventurous", "nature"]
 
 
-def test_activity_words_do_not_add_to_a_known_mood():
-    merged = TripProfileService.merge(TripProfile(mood=["relaxed"]), ProfileUpdates(), "add a short hike on day 2")
+def test_activity_interests_do_not_add_to_a_known_mood():
+    merged = _merge("add a short hike on day 2", TripProfile(mood=["relaxed"]),
+                    preferences=[Preference(key="interests", value="hiking")])
     assert merged.mood == ["relaxed"]

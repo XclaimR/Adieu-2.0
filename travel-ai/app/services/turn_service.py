@@ -56,6 +56,8 @@ Return:
 Examples (non-null parts only):
 - "I want to go to Japan" -> destination "Japan", action ask, next_question about the trip's mood
 - "somewhere relaxing with my wife, 5 days" -> mood ["relaxed"], party "couple", party_size 2, duration_days 5
+- "a hiking trip in the Dolomites" -> destination "Dolomites", mood ["adventurous", "nature"]
+- "Bali for a week, no beach please" -> destination "Bali", duration_days 7, preferences [{key "avoid", value "beach"}]
 - "my mom uses a wheelchair" -> party "family", preferences [{key "mobility", value "wheelchair user"}]
 - "hmm not sure, you decide" -> user_stuck true
 - "show me cafés near Alfama" -> action show_options, options_request {kind "eat", query "cafés near Alfama"}
