@@ -180,6 +180,10 @@ def main(argv=None) -> int:
         for rule, ok, detail in check(persona, run):
             failed += ok is False
             print(f"  {'PASS' if ok else 'FAIL' if ok is False else 'SKIP'}  {rule}: {detail}")
+        card = run["trip"].get("personality") or {}
+        print(f"  card: {', '.join(card.get('traits', [])) or '-'} | unknown: {', '.join(card.get('unknown', [])) or '-'}")
+        for d in run["trip"]["drafts"]:
+            print(f"  draft {d['title']!r} -> {d.get('trait') or 'no trait'}")
         print(f"  total {time.time() - start:.0f}s", flush=True)
     print(f"\n{failed} failure(s) across {len(selected)} persona(s)")
     return 1 if failed else 0

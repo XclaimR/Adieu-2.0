@@ -54,8 +54,8 @@ def extract_duration(message: str) -> int | None:
         return _to_int(m.group(1))
     if m := re.search(rf"{_NUM}\s*weeks?", text):
         return 7 * _to_int(m.group(1))
-    # "a week", "a slow week"; not "a trip next week", which is a date.
-    if re.search(r"\b(?:a|one)\s+(?:(?!next|this|last)\w+\s+)?week\b|\bweek-?long\b", text):
+    # "a week", "a slow week", "a slow food week"; not "a trip next week", which is a date.
+    if re.search(r"\b(?:a|one)\s+(?:(?!next|this|last)\w+\s+){0,2}week\b|\bweek-?long\b", text):
         return 7
     if re.search(r"\bfortnight\b", text):
         return 14

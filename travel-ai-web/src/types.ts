@@ -27,6 +27,7 @@ export type Pick = {
   photo_name: string | null;
   maps_url: string | null;
   why: string | null;
+  trait: string | null;
 };
 
 export type StarterIdea = { title: string; destination: string; pitch: string; photo_name: string | null };
@@ -62,6 +63,7 @@ export type Activity = {
   place_id: string | null;
   photo_name: string | null;
   maps_url: string | null;
+  for_note: string | null;
 };
 
 export type Itinerary = {
@@ -77,8 +79,17 @@ export type Draft = {
   title: string;
   summary: string;
   photo_name: string | null;
+  trait: string | null;
+  unplanned: string[];
   itinerary: Itinerary;
 };
+
+export type Scale = { value: number; confidence: number; source: string | null };
+
+/** Six scales with confidence; `traits` are the known ones in plain words, `unknown` the scale labels still open. */
+export type Note = { topic: string; text: string; scope: "trip" | "moment"; toward: string | null };
+
+export type Personality = { scales: Record<string, Scale>; notes: Note[]; traits: string[]; unknown: string[] };
 
 export type Message = { role: "user" | "assistant"; content: string; created_at: string };
 
@@ -86,6 +97,7 @@ export type Trip = {
   id: string;
   title: string;
   profile: TripProfile;
+  personality: Personality;
   destination_name: string | null;
   panel: OptionSet | null;
   drafts: Draft[];

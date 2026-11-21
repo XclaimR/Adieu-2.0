@@ -60,6 +60,16 @@ Every later request sends it as `Authorization: Bearer …`, checked by `api/dep
 1. `TurnService.decide` — LLM reads the message + history and returns a `TurnDecision` (profile updates, reply, intent).
 2. `TripProfileService.merge` + `grounding.ground_updates` — keeps only facts the user actually said (e.g. `extract_duration` turns "a slow week" into 7 days).
 3. New destination? `PlacesService.resolve_destination` checks it's a real place (not a business) and stores its map area.
+   Then `PersonalityService.update` refreshes the trip's **personality** (`trips.personality`):
+   - **Notes**: the traveler's intentions in their own words, each about the whole trip ("a slow week") or one
+     moment ("one big night out for my birthday"). The turn model proposes them (`TurnDecision.notes`); code keeps
+     only real quotes, decides what is a one-off, and replaces a note when the model reuses its topic or drops it.
+   - **Six scales** with confidence, for the card and (later) choosing questions: a word list over the traveler's
+     own message, checked profile facts (budget, kids), and weak leanings from lasting taste. A pole only the model
+     read stays a weak guess. Intensity ("really", "a bit") and hedges ("maybe") come from their words.
+   `traveler_fit` (places_service) gives ranking and drafts the known traits, the notes and numbered moments; each
+   draft stop can say which moment it fulfils (`Activity.for_note`), and a draft lists what it didn't fit
+   (`Draft.unplanned`). Live check: `python -m tests.evals.run_personality_evals` (8 sentences, one call each).
 4. `TurnService.plan` — rules decide what happens next: ask a question, show options, offer drafts, or edit the itinerary.
 5. The reply is streamed and **saved immediately**, then the slow part runs:
    - Show options → `OptionsService.build` → Places search in the destination → `RankingService` (LLM ranks by your taste) → slide-in panel (`components/OptionsPanel.tsx`, `PickCard.tsx`).

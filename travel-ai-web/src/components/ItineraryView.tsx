@@ -54,6 +54,7 @@ export default function ItineraryView({ itinerary, busy, onSwap, onRemove }: Pro
                       {a.time_of_day && <span className="tod">{a.time_of_day}</span>}
                       <strong>{a.name}</strong>
                       {a.description && <span className="small muted">{a.description}</span>}
+                      {a.for_note && <span className="trait">For: {a.for_note}</span>}
                     </span>
                   </button>
                   {selected === key && (

@@ -9,12 +9,14 @@ from app.repositories.trip_repository import TripRepository
 from app.repositories.user_repository import UserRepository
 from app.schemas.api import TurnResponse
 from app.schemas.itinerary import Itinerary
+from app.schemas.personality import Personality
 from app.schemas.place import OptionSet, Pick, PickCategory, SwapTarget
 from app.schemas.taste import Taste, TasteUpdates
 from app.schemas.trip_profile import TripProfile
 from app.schemas.turn import OptionsKind, OptionsRequest, TurnAction
 from app.services.draft_service import DEFAULT_DAYS, DraftService
 from app.services.options_service import OptionsService
+from app.services.personality_service import PersonalityService
 from app.services.places_service import PlacesService, PlacesUnavailableError, tier_rank
 from app.services.trip_profile_service import TripProfileService
 from app.services.turn_service import SHOW_PLANS, SHOW_PLANS_TEXT, VIBE_QUESTIONS, TurnService
@@ -107,6 +109,9 @@ class TravelPlannerWorkflow:
 
         self.users.set_taste(user, TripProfileService.merge_taste(taste, decision.taste_updates))
         taste = self.users.taste(user)
+        personality = PersonalityService.update(self.trips.personality(trip), new_profile, taste,
+                                                decision.notes, shown_message, decision.drop_note_topics)
+        trip.personality = personality.model_dump(mode="json", include={"scales", "notes"})
 
         progressed = new_profile != profile
         plan = TurnService.plan(
@@ -141,13 +146,13 @@ class TravelPlannerWorkflow:
 
         try:
             if plan.action == TurnAction.SHOW_OPTIONS:
-                yield from self._show_options(trip, new_profile, taste, plan.options_request)
+                yield from self._show_options(trip, new_profile, taste, plan.options_request, personality)
             elif plan.action == TurnAction.OFFER_DRAFTS:
-                yield from self._offer_drafts(trip, new_profile, taste)
+                yield from self._offer_drafts(trip, new_profile, taste, personality)
             elif plan.action == TurnAction.EDIT_ITINERARY:
                 yield _progress("Updating your plan…")
                 updated = self.drafter.edit(itinerary, decision.edit_request, new_profile, taste,
-                                            self._viewport(trip), self._skipped(trip))
+                                            self._viewport(trip), self._skipped(trip), personality)
                 trip.itinerary = updated.model_dump(mode="json")
         except PlacesUnavailableError as e:
             logger.warning("Places unavailable: %s", e)
@@ -164,7 +169,8 @@ class TravelPlannerWorkflow:
     def _reset(self, trip: TripModel, message: str) -> Iterator[Event]:
         question, chips = VIBE_QUESTIONS["destination"]
         trip.profile = TripProfile().model_dump(mode="json")
-        trip.destination_area = trip.panel = trip.itinerary = None
+        # The next turn reseeds the personality from lasting taste.
+        trip.destination_area = trip.panel = trip.itinerary = trip.personality = None
         trip.drafts = []
         trip.title = "New trip"
         trip.state = {"answer_options": chips}
@@ -183,6 +189,11 @@ class TravelPlannerWorkflow:
         if itinerary:
             lines.append("Their chosen itinerary: " + "; ".join(
                 f"Day {d.day_number}: " + ", ".join(a.name for a in d.activities) for d in itinerary.days))
+        personality = self.trips.personality(trip)
+        if personality and personality.notes:
+            # Lets the model reuse a topic to replace a note, or name it in drop_note_topics.
+            lines.append("What they told us so far (topic: their words): " + "; ".join(
+                f"{n.topic}: '{n.text}'" for n in personality.notes))
         return "\n".join(lines)
 
     def _resolve(self, destination: str) -> dict | None:
@@ -199,18 +210,20 @@ class TravelPlannerWorkflow:
     def _skipped(self, trip: TripModel) -> set[str]:
         return {p.place_id for p in self.trips.feedback(trip.id, "skipped")}
 
-    def _show_options(self, trip: TripModel, profile: TripProfile, taste: Taste, request: OptionsRequest) -> Iterator[Event]:
+    def _show_options(self, trip: TripModel, profile: TripProfile, taste: Taste, request: OptionsRequest,
+                      personality: Personality) -> Iterator[Event]:
         label = "destination ideas" if request.kind == OptionsKind.DESTINATIONS else (request.query or request.kind.value.replace("_", " "))
         yield _progress(f"Finding {label}…")
-        option_set = self.options.build(request.kind, request.query, profile, taste, self._viewport(trip), self._skipped(trip))
+        option_set = self.options.build(request.kind, request.query, profile, taste, self._viewport(trip),
+                                        self._skipped(trip), personality)
         trip.panel = option_set.model_dump(mode="json")
         self.db.commit()
         yield {"type": "options", "options": trip.panel}
 
-    def _offer_drafts(self, trip: TripModel, profile: TripProfile, taste: Taste) -> Iterator[Event]:
+    def _offer_drafts(self, trip: TripModel, profile: TripProfile, taste: Taste, personality: Personality) -> Iterator[Event]:
         yield _progress(f"Gathering places in {profile.destination}…")
         trip.drafts = []
-        for i, draft in enumerate(self.drafter.generate(profile, taste, self._viewport(trip), self._skipped(trip))):
+        for i, draft in enumerate(self.drafter.generate(profile, taste, self._viewport(trip), self._skipped(trip), personality)):
             trip.drafts = [*trip.drafts, draft.model_dump(mode="json")]
             self.db.commit()
             yield {"type": "draft", "index": i, "draft": trip.drafts[-1]}
@@ -258,7 +271,8 @@ class TravelPlannerWorkflow:
             )
             # A liked stay over budget, or one the user called too pricey: find similar ones that fit.
             if action == "too_pricey" or over_budget:
-                option_set = self.options.similar_cheaper(pick, profile, taste, self._skipped(trip))
+                option_set = self.options.similar_cheaper(pick, profile, taste, self._skipped(trip),
+                                                          self.trips.personality(trip))
                 trip.panel = option_set.model_dump(mode="json")
                 self.db.commit()
                 return option_set
@@ -281,6 +295,7 @@ class TravelPlannerWorkflow:
         option_set = self.options.swap_options(
             SwapTarget(day_number=day_number, index=index), activity.name, activity.category,
             self.trips.profile(trip), self.users.taste(user), self._viewport(trip), used | self._skipped(trip),
+            self.trips.personality(trip),
         )
         trip.panel = option_set.model_dump(mode="json")
         self.db.commit()
@@ -296,6 +311,7 @@ class TravelPlannerWorkflow:
         day.activities[index] = old.model_copy(update={
             "name": pick.name, "category": pick.category.value, "description": pick.why,
             "place_id": pick.place_id, "photo_name": pick.photo_name, "maps_url": pick.maps_url,
+            "for_note": None,  # the replacement wasn't chosen for that moment
         })
         trip.itinerary = itinerary.model_dump(mode="json")
         trip.panel = None

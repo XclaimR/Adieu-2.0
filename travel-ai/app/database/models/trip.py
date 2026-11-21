@@ -25,6 +25,8 @@ class TripModel(Base):
     state: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     next_question: Mapped[str | None] = mapped_column(Text)
     itinerary: Mapped[dict | None] = mapped_column(JSON)
+    # Serialized app.schemas.personality.Personality: six scales with confidence (null on trips made before it).
+    personality: Mapped[dict | None] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

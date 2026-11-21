@@ -32,6 +32,8 @@ class PlaceCandidate(BaseModel):
 
 class Pick(PlaceCandidate):
     why: str | None = None
+    # The trip-personality trait (plain words, e.g. "Food is the point") this pick serves, if any.
+    trait: str | None = None
 
 
 class SwapTarget(BaseModel):

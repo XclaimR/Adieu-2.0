@@ -2,6 +2,7 @@ from enum import Enum
 
 from pydantic import BaseModel, Field
 
+from app.schemas.personality import NoteUpdate
 from app.schemas.taste import TasteUpdates
 from app.schemas.trip_profile import ProfileUpdates
 
@@ -30,6 +31,15 @@ class OptionsRequest(BaseModel):
 class TurnDecision(BaseModel):
     profile_updates: ProfileUpdates = Field(default_factory=ProfileUpdates)
     taste_updates: TasteUpdates = Field(default_factory=TasteUpdates)
+    notes: list[NoteUpdate] = Field(
+        default_factory=list,
+        description="What the latest message says the traveler wants from this trip, one note per intention, in "
+                    "their exact words: how the whole trip should feel ('a slow week', 'what locals love') and "
+                    "single things to fit in ('one big night out for my birthday'). Skip vague words like 'fun', "
+                    "places and dates already in the profile, and anything you'd have to guess. Usually 0-3.",
+    )
+    drop_note_topics: list[str] = Field(
+        default_factory=list, description="topics of earlier notes the traveler no longer wants")
     action: TurnAction
     reply: str = Field(description="short, friendly reply to the user's message")
     next_question: str | None = Field(

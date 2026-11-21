@@ -1,5 +1,6 @@
 import uuid
 
+from app.schemas.personality import Personality
 from app.schemas.place import OptionSet, Pick, PickCategory, PlaceCandidate, SwapTarget
 from app.schemas.taste import Taste
 from app.schemas.trip_profile import TripProfile
@@ -36,6 +37,7 @@ class OptionsService:
         taste: Taste,
         viewport: dict | None,
         exclude_ids: set[str],
+        personality: Personality | None = None,
     ) -> OptionSet:
         if kind == OptionsKind.DESTINATIONS:
             ideas = StarterIdeaService(self.places).generate(taste, hint=query or None)
@@ -47,7 +49,7 @@ class OptionsService:
         if category == PickCategory.STAY:
             candidates = self._fit_budget(candidates, profile)
 
-        picks = RankingService.rank(category, candidates, profile, taste, focus=query)
+        picks = RankingService.rank(category, candidates, profile, taste, focus=query, personality=personality)
         title = query.strip().capitalize() if query else f"{_TITLES[category]} in {profile.destination}"
         return OptionSet(id=_new_id(), kind=category.value, title=title, items=picks)
 
@@ -60,7 +62,8 @@ class OptionsService:
         fitting = [c for c in candidates if tier_rank(c.tier) <= limit]
         return fitting if len(fitting) >= MIN_AFTER_FILTER else candidates
 
-    def similar_cheaper(self, pick: Pick, profile: TripProfile, taste: Taste, exclude_ids: set[str]) -> OptionSet:
+    def similar_cheaper(self, pick: Pick, profile: TripProfile, taste: Taste, exclude_ids: set[str],
+                        personality: Personality | None = None) -> OptionSet:
         """Stays like `pick` (same kind of place, same area) but in a lower price tier."""
         target = profile.budget_level.value if profile.budget_level else "budget"
         if tier_rank(target) >= tier_rank(pick.tier):
@@ -79,7 +82,7 @@ class OptionsService:
         ] or [c for c in candidates if c.place_id != pick.place_id]
 
         focus = f"places similar to {pick.name} ({pick.type_label or 'stay'}) but at a {target} price"
-        picks = RankingService.rank(PickCategory.STAY, candidates, profile, taste, focus=focus)
+        picks = RankingService.rank(PickCategory.STAY, candidates, profile, taste, focus=focus, personality=personality)
         return OptionSet(id=_new_id(), kind="stay", title=f"Like {pick.name}, for less", items=picks)
 
     def swap_options(
@@ -91,6 +94,7 @@ class OptionsService:
         taste: Taste,
         viewport: dict | None,
         exclude_ids: set[str],
+        personality: Personality | None = None,
     ) -> OptionSet:
         """Alternatives for one itinerary activity."""
         cat = PickCategory(category) if category in PickCategory._value2member_map_ else PickCategory.DO
@@ -98,5 +102,6 @@ class OptionsService:
             c for c in self.places.candidates(profile.destination, cat, profile, viewport)
             if c.place_id not in exclude_ids
         ]
-        picks = RankingService.rank(cat, candidates, profile, taste, focus=f"an alternative to {activity_name}")
+        picks = RankingService.rank(cat, candidates, profile, taste, focus=f"an alternative to {activity_name}",
+                                    personality=personality)
         return OptionSet(id=_new_id(), kind="swap", title=f"Instead of {activity_name}", items=picks, swap_target=target)
