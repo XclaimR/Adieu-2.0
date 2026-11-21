@@ -120,7 +120,9 @@ def test_model_signals_count_only_with_the_travelers_own_words():
     assert name == "pace" and scale.value == -0.7 and scale.source == "said"
     assert said("nightlife", "party all week", msg) is None  # words not in the message
     assert said("nightlife", "fun", "Something fun!") is None  # vague on its own
-    assert said("packed", "not too packed", "Not too packed please") is None  # negated, list can't confirm
+    assert said("packed", "not too packed", "Not too packed please") is None  # "not X" says nothing firm
+    assert said("slow", "not too packed", "Not too packed please") is None
+    assert said("hidden_gems", "avoid the tourist traps", "Avoid the tourist traps!")[1].value < 0  # trust the model
     assert said("nightlife", "slow week", msg) is None  # words point the other way
     assert said("chill", "no nightlife", "No nightlife, we're tired")[1].value < 0
 

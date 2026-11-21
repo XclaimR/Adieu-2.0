@@ -157,8 +157,11 @@ def read_signal(signal: ScaleSignal, message: str) -> tuple[str, Scale] | None:
         return None  # the words are about another scale ("slow week" as proof of nightlife)
     if listed is not None and (listed > 0) != (direction > 0):
         return None  # the words point the other way
-    if listed is None and _NEGATION.search(quote):
+    if _NEGATION.search(quote) and any(
+            name in effects and stem not in _FLIPPABLE and re.search(rf"\b{re.escape(stem)}", quote)
+            for stem, effects in _WORDS.items()):
         return None  # "not too packed" isn't packed, and isn't firmly slow either
+    # Other negations are the model's reading in context: "avoid the tourist traps" is hidden gems.
     amount, confidence = (0.9, 0.85) if _STRONG.search(quote) else (0.4, 0.7) if _MILD.search(quote) else (0.7, 0.75)
     if _UNSURE.search(quote):
         confidence = 0.4  # a guess: kept as a weak lean, shown as unknown
