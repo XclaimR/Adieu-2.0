@@ -1,6 +1,6 @@
 # Adieu web
 
-React + Vite frontend for the `travel-ai` API. It replaces the old `travel-ai-ui` page.
+React + Vite frontend for the `travel-ai` API.
 
 ## Run everything
 
