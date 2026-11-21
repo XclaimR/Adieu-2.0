@@ -95,3 +95,12 @@ Events the browser handles: `progress` (step list), `reply`, `note`, `options`, 
 - `tests/v1/` — the live code: API flows with a fake LLM and fake Places (`conftest.py`), grounding, ranking, photo-name safety.
   Run: `docker compose exec api python -m pytest -q --ignore=tests/evals`
 - `tests/evals/` — real-model conversation checks: `docker compose exec api python -m tests.evals.run_turn_evals`
+- `tests/personas/` — six test travelers (bachelor group to Japan, Lisbon food couple, family beach, solo hiker,
+  budget backpacker, luxury weekend) chat with the **running** app over HTTP and get pass/fail per rule: no invented
+  profile facts, at most 8 questions before plans, drafts once destination/mood/party are known, picks fit the
+  traveler. Personas and their scripted answers live in `personas.py`; the checks in `run.py`. Needs
+  `ALLOW_DEV_LOGIN=true`; uses whatever model the server is configured with (local qwen3:8b takes a few minutes per
+  persona). Exits non-zero on any failure. Not part of the pytest run.
+  - All six, inside the container (after a rebuild so the image has the folder): `docker compose exec api python -m tests.personas.run`
+  - From the host against any server (stdlib only): `cd travel-ai && python3 -m tests.personas.run --base-url http://localhost:8000`
+  - One persona, longer per-turn timeout: `--persona bachelor --timeout 900` (`--persona` repeats)
