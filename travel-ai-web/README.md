@@ -22,14 +22,20 @@ The web container (nginx) serves the built app and forwards `/api/*` to the API 
 | `GOOGLE_OAUTH_CLIENT_ID` | Shows the "Sign in with Google" button. Add `http://localhost:8080` as an authorized JavaScript origin. |
 | `ALLOW_DEV_LOGIN` | Email-only sign-in for local development. Off by default; set `ALLOW_DEV_LOGIN=true` in `.env` for local development. |
 | `SESSION_SECRET` | Signs login sessions. |
-| `LLM_BASE_URL`, `LLM_MODEL`, `LLM_API_KEY` | Any OpenAI-compatible provider. Defaults to local Ollama with `qwen3:8b`. |
+| `LLM_BASE_URL`, `LLM_MODEL`, `LLM_API_KEY` | Any OpenAI-compatible provider. Without them the app uses local Ollama with `qwen3:8b`. |
 | `LLM_REASONING_EFFORT` | `none` by default (much faster on qwen3). Set it empty for providers that reject the parameter. |
 
-Switching to Gemini, for example:
+**Recommended: Gemini's free tier** (a turn with 3 drafts takes ~12s instead of minutes on qwen3:8b). Get a key at https://aistudio.google.com/apikey:
 
     LLM_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
-    LLM_MODEL=gemini-3.1-flash-lite     # the model the old code used
+    LLM_MODEL=gemini-3.5-flash-lite
     LLM_API_KEY=<your Gemini key>
+    LLM_REASONING_EFFORT=           # this model rejects the parameter
+
+Free-tier caveats:
+- **Privacy:** Google may use free-tier prompts to improve its products. Don't send anything private (screenshots and Instagram data stay on the local model).
+- **Rate limit:** 15 requests per minute per model. A chat turn with drafts uses ~4–5, so a few fast turns can hit it. The app waits the delay Gemini asks for (up to 30s) and retries once.
+- To go back to Ollama, remove the four `LLM_` lines and restart the API.
 
 After switching models, rerun the conversation evals:
 
