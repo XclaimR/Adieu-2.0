@@ -74,3 +74,20 @@ def test_avoided_things_reach_ranking_drafts_and_destination_ideas(fake_llm):
     assert 'key "avoid" are hard limits' in prompts["Ranking"]
     assert 'key "avoid" are hard limits' in DraftService._prompt(profile, Taste(), PlacePool([]), 3, "easy")
     assert "avoid destinations known for beach" in prompts["StarterIdeas"]
+
+
+@pytest.mark.parametrize("name,type_label,avoid,dropped", [
+    ("La Brisa Bali | Beach Club", "Bar", "beach", True),
+    ("La Brisa", "Beach club", "beaches", True),
+    ("Kecak Fire Dance Uluwatu", "Tourist attraction", "beach", False),
+    ("Sky Garden", "Night club", "night clubs", True),
+    ("Sky Garden", "Night club", "", False),
+    ("Café Bali", "Cafe", None, False),
+])
+def test_places_the_traveler_avoids_are_dropped(name, type_label, avoid, dropped):
+    from app.schemas.trip_profile import Preference
+    from app.services.places_service import _avoided
+
+    prefs = [Preference(key="avoid", value=avoid)] if avoid is not None else []
+    place = PlaceCandidate(place_id="p", name=name, category=PickCategory.DO, type_label=type_label)
+    assert _avoided(place, TripProfile(destination="Bali", preferences=prefs)) is dropped

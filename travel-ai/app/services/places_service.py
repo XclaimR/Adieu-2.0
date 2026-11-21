@@ -114,6 +114,15 @@ class PlacesUnavailableError(RuntimeError):
     pass
 
 
+def _avoided(place: PlaceCandidate, profile: TripProfile | None) -> bool:
+    """True when the place's name or type names something the traveler said to avoid ("Beach Club" for "beach")."""
+    # shortcut: matches the avoided word (and its plural), not meaning; "no nightlife" won't drop a "Speakeasy".
+    stems = [re.sub(r"(es|s)$", "", p.value.strip().lower()) for p in (profile.preferences if profile else [])
+             if p.key == "avoid" and p.value.strip()]
+    label = f"{place.name} {place.type_label or ''}"
+    return any(re.search(rf"\b{re.escape(stem)}", label, re.I) for stem in stems)
+
+
 def _to_candidate(raw: dict, category: PickCategory) -> PlaceCandidate:
     photos = raw.get("photos") or []
     location = raw.get("location") or {}
@@ -243,7 +252,8 @@ class PlacesService:
         hints = search_hints(category, profile) if profile else ""
         if hints:
             text = f"{hints} {text}"
-        return [_to_candidate(raw, category) for raw in self.text_search(text, viewport=viewport)]
+        found = [_to_candidate(raw, category) for raw in self.text_search(text, viewport=viewport)]
+        return [c for c in found if not _avoided(c, profile)]
 
     def nearby(self, query: str, category: PickCategory, lat: float, lng: float) -> list[PlaceCandidate]:
         return [_to_candidate(raw, category) for raw in self.text_search(query, near=(lat, lng))]
