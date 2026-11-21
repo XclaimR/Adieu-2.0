@@ -34,7 +34,7 @@ The web container (nginx) serves the built app and forwards `/api/*` to the API 
 
 Free-tier caveats:
 - **Privacy:** Google may use free-tier prompts to improve its products. Don't send anything private (screenshots and Instagram data stay on the local model).
-- **Rate limit:** 15 requests per minute per model. A chat turn with drafts uses ~4–5, so a few fast turns can hit it. The app waits the delay Gemini asks for (up to 30s) and retries once.
+- **Rate limit:** 15 requests per minute per model. A chat turn with drafts uses ~4–5, so a few fast turns can hit it. The app waits the delay Gemini asks for (up to 30s) and tries again; a rate-limited call makes at most 4 attempts (the OpenAI library's own retry, then one more round after the wait) before giving up.
 - To go back to Ollama, remove the four `LLM_` lines and restart the API.
 
 After switching models, rerun the conversation evals:

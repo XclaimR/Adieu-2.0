@@ -54,3 +54,11 @@ def test_no_wait_without_a_short_delay(fake, delay):
     with pytest.raises(RateLimitError):
         llm_client._create(model="m")
     assert completions.calls == 1 and sleeps == []
+
+
+def test_plain_text_error_is_passed_through(fake):
+    response = httpx.Response(429, request=httpx.Request("POST", "http://llm"))
+    completions, sleeps = fake(RateLimitError("rate limited", response=response, body={"error": "Too many requests"}))
+    with pytest.raises(RateLimitError):
+        llm_client._create(model="m")
+    assert completions.calls == 1 and sleeps == []

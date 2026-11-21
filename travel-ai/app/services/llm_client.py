@@ -29,7 +29,9 @@ def _retry_delay(error: RateLimitError) -> float | None:
     body = error.body[0] if isinstance(error.body, list) and error.body else error.body
     if not isinstance(body, dict):
         return None
-    details = (body.get("error") or body).get("details") or []
+    error_obj = body.get("error")
+    # Some providers send "error" as plain text, which has no details.
+    details = (error_obj if isinstance(error_obj, dict) else body).get("details") or []
     for d in details:
         if isinstance(d, dict) and str(d.get("@type", "")).endswith("RetryInfo"):
             match = re.fullmatch(r"([\d.]+)s", str(d.get("retryDelay", "")))
@@ -40,7 +42,8 @@ def _retry_delay(error: RateLimitError) -> float | None:
 
 def _create(**kwargs):
     """One chat call. On a rate limit with a provider-given wait (free tiers allow ~15 calls a minute),
-    wait that long (capped) and try once more; otherwise let the error through."""
+    wait that long (capped) and try once more; otherwise let the error through.
+    Each create() already includes the SDK's own single retry, so this is at most 4 attempts."""
     try:
         return _client.chat.completions.create(**kwargs)
     except RateLimitError as e:
