@@ -1,8 +1,9 @@
 import logging
 import re
+import time
 from typing import TypeVar
 
-from openai import OpenAI
+from openai import OpenAI, RateLimitError
 from pydantic import BaseModel, ValidationError
 
 from app.core.config import settings
@@ -19,6 +20,40 @@ _client = OpenAI(
     # stuck call into three; this caps a failing call at two attempts.
     max_retries=1,
 )
+
+_MAX_RATE_LIMIT_WAIT = 30.0
+
+
+def _retry_delay(error: RateLimitError) -> float | None:
+    """Seconds the provider asks us to wait (Gemini puts it in the body as RetryInfo.retryDelay, e.g. "2s")."""
+    body = error.body[0] if isinstance(error.body, list) and error.body else error.body
+    if not isinstance(body, dict):
+        return None
+    error_obj = body.get("error")
+    # Some providers send "error" as plain text, which has no details.
+    details = (error_obj if isinstance(error_obj, dict) else body).get("details") or []
+    for d in details:
+        if isinstance(d, dict) and str(d.get("@type", "")).endswith("RetryInfo"):
+            match = re.fullmatch(r"([\d.]+)s", str(d.get("retryDelay", "")))
+            if match:
+                return float(match.group(1))
+    return None
+
+
+def _create(**kwargs):
+    """One chat call. On a rate limit with a provider-given wait (free tiers allow ~15 calls a minute),
+    wait that long (capped) and try once more; otherwise let the error through.
+    Each create() already includes the SDK's own single retry, so this is at most 4 attempts."""
+    try:
+        return _client.chat.completions.create(**kwargs)
+    except RateLimitError as e:
+        delay = _retry_delay(e)
+        if delay is None or delay > _MAX_RATE_LIMIT_WAIT:
+            raise
+        logger.warning("LLM rate limited; waiting %.1fs before one more try", delay)
+        time.sleep(delay + 0.5)
+        return _client.chat.completions.create(**kwargs)
+
 
 _THINK_BLOCK = re.compile(r"<think>.*?</think>", re.DOTALL)
 
@@ -80,7 +115,7 @@ class LLMClient:
 
         last_error: Exception | None = None
         for _ in range(2):
-            response = _client.chat.completions.create(
+            response = _create(
                 model=settings.LLM_MODEL,
                 messages=messages,
                 response_format=response_format,
