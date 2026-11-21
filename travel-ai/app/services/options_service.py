@@ -38,7 +38,9 @@ class OptionsService:
         exclude_ids: set[str],
     ) -> OptionSet:
         if kind == OptionsKind.DESTINATIONS:
-            ideas = StarterIdeaService(self.places).generate(taste, hint=query or None)
+            avoid = ", ".join(p.value for p in profile.preferences if p.key == "avoid")
+            hint = "; ".join(filter(None, [query, avoid and f"avoid destinations known for {avoid}"]))
+            ideas = StarterIdeaService(self.places).generate(taste, hint=hint or None)
             return OptionSet(id=_new_id(), kind=kind.value, title="Where could you go?", ideas=ideas)
 
         category = PickCategory(kind.value)

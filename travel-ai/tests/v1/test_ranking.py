@@ -55,3 +55,22 @@ def test_search_hints_steer_queries_toward_the_traveler():
 def test_estimate_stay_tier(name, type_label, summary, price, expected):
     from app.services.places_service import estimate_stay_tier
     assert estimate_stay_tier(name, type_label, summary, price) == expected
+
+
+def test_avoided_things_reach_ranking_drafts_and_destination_ideas(fake_llm):
+    from types import SimpleNamespace
+
+    from app.schemas.trip_profile import Preference
+    from app.schemas.turn import OptionsKind
+    from app.services.draft_service import DraftService, PlacePool
+    from app.services.options_service import OptionsService
+
+    profile = TripProfile(destination="Bali", preferences=[Preference(key="avoid", value="beach")])
+    RankingService.rank(PickCategory.EAT, candidates(), profile, Taste())
+    OptionsService(SimpleNamespace(verify_destination=lambda d: None)).build(
+        OptionsKind.DESTINATIONS, "", profile, Taste(), None, set())
+
+    prompts = dict(fake_llm.prompts)
+    assert 'key "avoid" are hard limits' in prompts["Ranking"]
+    assert 'key "avoid" are hard limits' in DraftService._prompt(profile, Taste(), PlacePool([]), 3, "easy")
+    assert "avoid destinations known for beach" in prompts["StarterIdeas"]

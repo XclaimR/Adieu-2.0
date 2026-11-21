@@ -178,6 +178,7 @@ Places you may use (refer to them ONLY by [n]):
 
 Rules:
 - Exactly {days} days, 2-3 stops each, mixing things to do and places to eat.
+- Preferences with key "avoid" are hard limits: never plan a stop that is mainly about something avoided.
 - Each day uses morning, afternoon and evening at most once. Lunch is afternoon, dinner is evening.
 - Each stop's place and note must be about the same listed place. Don't plan anything that isn't on the list.
 - Group nearby places on the same day. Don't repeat a place.

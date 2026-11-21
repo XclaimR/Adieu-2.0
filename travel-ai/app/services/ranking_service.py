@@ -76,6 +76,7 @@ Candidates:
 
 Rules:
 - Only use [n] numbers from the list.
+- Preferences with key "avoid" are hard limits: never pick a place that is mainly about something avoided.
 - Price levels: $ cheap, $$ moderate, $$$ expensive, $$$$ very expensive. For a "budget" traveler put cheaper
   places first; for "luxury" the opposite.
 - Respect hard preferences (diet, mobility, kids): rank places that clearly fit them first.
