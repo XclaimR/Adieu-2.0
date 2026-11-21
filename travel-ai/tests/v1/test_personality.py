@@ -37,9 +37,32 @@ def test_words_that_dont_say_which_way_stay_unknown():
     assert p.traits == []
 
 
-def test_negation_stays_in_its_clause_and_family_means_chill_evenings():
+def test_one_word_sets_one_scale():
+    # "relaxed" is slow pace, not chill evenings; "adventurous" says nothing firm.
+    assert card(TripProfile(mood=["relaxed"])).traits == ["Slow pace"]
+    assert card(TripProfile(mood=["adventurous"])).traits == []
+
+
+def test_a_single_activity_doesnt_set_the_whole_trip():
+    for mood in ("a nice spa", "pub crawl", "fine dining", "hiking", "landmarks", "clubbing"):
+        assert card(TripProfile(mood=[mood])).traits == [], mood
+
+
+def test_only_trip_wide_preferences_count_so_diet_and_one_off_wishes_dont():
+    for key, value in [("diet", "don't eat meat"), ("diet", "vegetarian food only"), ("activity", "a luxury spa day")]:
+        assert card(TripProfile(preferences=[Preference(key=key, value=value)])).traits == [], value
+    assert card(TripProfile(preferences=[Preference(key="pace", value="slow mornings")])).traits == ["Slow pace"]
+
+
+def test_negation_flips_only_where_no_x_means_the_other_pole():
     p = card(TripProfile(mood=["no nightlife, lots of food"]))
     assert p.traits == ["Chill evenings", "Food is the point"]
+    assert card(TripProfile(mood=["not cheap"])).traits == []
+    assert card(TripProfile(mood=["no luxury"])).traits == []
+    assert card(TripProfile(mood=["not too packed"])).traits == []
+
+
+def test_family_means_chill_evenings():
     assert card(TripProfile(party=Party.FAMILY)).traits == ["Chill evenings"]
     assert card(TripProfile(budget_level=BudgetLevel.MID)).traits == ["Mid-range comfort"]
 
@@ -79,8 +102,8 @@ def test_trip_personality_is_stored_and_drives_the_draft_prompts(client, auth, f
 
     fake_llm.decisions.append(decision(destination="Lisbon", mood=["relaxed", "foodie"], party=Party.COUPLE))
     turn = say(client, auth, trip["id"], "Lisbon, slow and foodie, with my partner")
-    assert turn["trip"]["personality"]["traits"] == ["Slow pace", "Chill evenings", "Food is the point"]
+    assert turn["trip"]["personality"]["traits"] == ["Slow pace", "Food is the point"]
     say(client, auth, trip["id"], "not sure")  # drafts
 
     draft_prompts = [p for name, p in fake_llm.prompts if name == "DraftPlan"]
-    assert draft_prompts and all("personality: Slow pace; Chill evenings; Food is the point" in p for p in draft_prompts)
+    assert draft_prompts and all("personality: Slow pace; Food is the point" in p for p in draft_prompts)
