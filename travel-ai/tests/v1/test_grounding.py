@@ -44,3 +44,16 @@ def test_extract_duration(message, days):
 
 def test_missed_duration_is_read_from_the_text():
     assert ground_updates(ProfileUpdates(destination="Tokyo"), "Tokyo for 5 days").duration_days == 5
+
+
+@pytest.mark.parametrize("message,guess,kept", [
+    ("A group of friends are going on a bachelor trip to Japan", 6, None),
+    ("5 days in Japan with friends", 6, None),
+    ("6 of us friends heading to Japan", 6, 6),
+    ("Bachelor trip to Japan, eight friends", 8, 8),
+    ("Japan with my wife", 2, 2),
+])
+def test_party_size_must_be_stated_or_implied(message, guess, kept):
+    updates = ProfileUpdates(destination="Japan", party=Party.FRIENDS if "friends" in message else Party.COUPLE,
+                             party_size=guess)
+    assert ground_updates(updates, message).party_size == kept

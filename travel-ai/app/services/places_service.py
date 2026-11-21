@@ -72,6 +72,20 @@ def search_hints(category: PickCategory, profile: TripProfile) -> str:
     return " ".join(dict.fromkeys(w.strip() for w in words if w.strip()))[:80]
 
 
+_PARTY_FIT = {
+    "solo": "Solo traveler: easy to enjoy alone (counter seats, walkable sights); skip couple-oriented spots.",
+    "couple": "A couple: romantic and intimate places are welcome.",
+    "friends": "A group of friends: social, lively, group-friendly places (shared tables, bars, activities); "
+               "avoid romantic or couple-oriented spots.",
+    "family": "A family: relaxed, family-friendly places; avoid nightlife and romantic spots.",
+}
+
+
+def party_fit(profile: TripProfile) -> str:
+    """One plain instruction about who's travelling, for prompts that choose places. Empty if unknown."""
+    return f"- Who's going: {_PARTY_FIT[profile.party.value]}" if profile.party else ""
+
+
 _TIER_ORDER = {"budget": 0, "mid": 1, "luxury": 2}
 _BUDGET_STAY = re.compile(r"hostel|guest ?house|backpacker|b&b|bed (and|&) breakfast|pension|pensão|motel|capsule|budget|campground|homestay")
 _LUXURY_STAY = re.compile(r"palace|resort|luxury|5[- ]star|five[- ]star|grand hotel|ritz|four seasons|mandarin|bulgari|aman|six senses|st\.? regis|waldorf|peninsula")

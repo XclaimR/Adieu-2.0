@@ -15,7 +15,7 @@ from app.schemas.place import Pick, PickCategory, PlaceCandidate
 from app.schemas.taste import Taste
 from app.schemas.trip_profile import TripProfile
 from app.services.llm_client import LLMClient
-from app.services.places_service import PlacesService, tier_rank
+from app.services.places_service import PlacesService, party_fit, tier_rank
 from app.services.taste_service import TasteService
 
 logger = logging.getLogger(__name__)
@@ -182,6 +182,7 @@ Rules:
 - Each stop's place and note must be about the same listed place. Don't plan anything that isn't on the list.
 - Group nearby places on the same day. Don't repeat a place.
 - Respect diet, mobility, kids and budget preferences.
+{party_fit(profile)}
 - stay_ref must be a 'stay' place from the list, or null.
 """
 

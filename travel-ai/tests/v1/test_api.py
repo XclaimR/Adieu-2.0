@@ -324,3 +324,13 @@ def test_trip_list_shows_the_chosen_plan_name_and_length(client, auth, fake_llm)
     assert summary["title"] == draft["title"]
     assert summary["duration_days"] == 4
     assert summary["photo_name"]
+
+
+def test_friends_trip_tells_the_planner_to_skip_romantic_spots(client, auth, fake_llm):
+    trip = new_trip(client, auth)
+    fake_llm.decisions.append(decision(destination="Lisbon", mood=["foodie"], party=Party.FRIENDS))
+    say(client, auth, trip["id"], "Lisbon food trip with friends")  # asks duration
+    say(client, auth, trip["id"], "not sure")  # drafts
+
+    draft_prompts = [p for name, p in fake_llm.prompts if name == "DraftPlan"]
+    assert draft_prompts and all("group of friends" in p and "avoid romantic" in p for p in draft_prompts)

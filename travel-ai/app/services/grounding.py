@@ -88,7 +88,11 @@ def ground_updates(updates: ProfileUpdates, message: str) -> ProfileUpdates:
 
     if u.party and not _has(_PARTY_WORDS[u.party], text):
         u.party = None
-    if u.party_size is not None and not (_has(_NUM, text) or u.party):
+    # Keep a size only if the user said that number, or the party implies it ("my wife" = 2).
+    # "Group of friends" says nothing about how many; the model likes to guess 4 or 6.
+    said = {_to_int(m.group(1)) for m in re.finditer(rf"\b{_NUM}\b", text)}
+    implied = {Party.COUPLE: 2, Party.SOLO: 1}.get(u.party)
+    if u.party_size is not None and u.party_size not in said | {implied}:
         u.party_size = None
     if u.kids is True and not _has(_KIDS, text):
         u.kids = None

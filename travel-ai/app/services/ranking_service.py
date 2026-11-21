@@ -6,6 +6,7 @@ from app.schemas.place import Pick, PickCategory, PlaceCandidate
 from app.schemas.taste import Taste
 from app.schemas.trip_profile import TripProfile
 from app.services.llm_client import LLMClient
+from app.services.places_service import party_fit
 from app.services.taste_service import TasteService
 
 logger = logging.getLogger(__name__)
@@ -78,6 +79,7 @@ Rules:
 - Price levels: $ cheap, $$ moderate, $$$ expensive, $$$$ very expensive. For a "budget" traveler put cheaper
   places first; for "luxury" the opposite.
 - Respect hard preferences (diet, mobility, kids): rank places that clearly fit them first.
+{party_fit(profile)}
 - "why" must connect the place to something specific about this traveler, using only the facts listed.
   Never claim a place is cheap, vegetarian, accessible, etc. unless the facts say so. Keep it under 12 words.
 - If little is known about the traveler, favour well-rated, distinctive places.
