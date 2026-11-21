@@ -1,6 +1,6 @@
 import re
 
-from app.schemas.personality import Personality, Scale
+from app.schemas.personality import Personality, Scale, ScaleSignal
 from app.schemas.taste import Taste
 from app.schemas.trip_profile import BudgetLevel, Party, TripProfile
 
@@ -17,7 +17,9 @@ KNOWN = 0.5  # below this a scale is shown as unknown
 LEAN = 0.25  # |value| below this reads as the middle
 TASTE_CONFIDENCE = 0.3
 CHAT_CONFIDENCE = 0.7
-DERIVED = {"taste", "chat"}  # recomputed every turn; other sources (answers to questions, #20) are kept
+# "taste" and "chat" (the word list over the profile) are recomputed every turn. Others are kept until replaced:
+# "said" (a checked ScaleSignal from one message) and, later, "asked" (answers to questions, #20).
+DERIVED = {"taste", "chat"}
 
 # Lasting-taste vibes (TasteService.VIBES) -> leanings.
 _VIBES: dict[str, dict[str, float]] = {
@@ -57,6 +59,20 @@ _WHOLE_WORD = {"party"}  # would otherwise match "party of four"
 # nothing firm ("not cheap" isn't luxury), so the word is ignored.
 _FLIPPABLE = {"nightlife", "party", "partying"}
 _NEGATION = re.compile(r"\b(no|not|avoid\w*|without|skip|less|hate|away from|don't|dont)\b")
+# pole -> (scale, direction)
+POLES = {
+    "slow": ("pace", -1), "packed": ("pace", 1), "spend_on_stay": ("money", -1), "spend_on_experiences": ("money", 1),
+    "chill": ("energy", -1), "nightlife": ("energy", 1), "hidden_gems": ("crowds", -1), "icons": ("crowds", 1),
+    "food_as_fuel": ("food", -1), "food_focus": ("food", 1), "backpacker": ("comfort", -1), "luxury": ("comfort", 1),
+}
+# Intensity, read from the traveler's own words around the trait.
+_STRONG = re.compile(r"\b(very|really|super|so|extremely|totally|absolutely|all about|only|lots of|tons of)\b")
+_MILD = re.compile(r"\b(a bit|a little|slightly|somewhat|kind of|kinda|sort of|fairly|bit of)\b")
+_UNSURE = re.compile(r"\b(maybe|perhaps|might|not sure|probably|possibly|i guess|could be)\b")
+# Words that sound positive but don't say which way any scale goes. A quote made only of these proves nothing.
+_VAGUE = {"fun", "nice", "amazing", "great", "cool", "good", "awesome", "best", "exciting", "interesting", "special",
+          "memorable", "unique", "different", "epic", "lovely", "perfect", "trip", "holiday", "vacation", "a", "an",
+          "the", "and", "with", "we", "i", "want", "something", "really", "very", "so", "super"}
 _BUDGET = {BudgetLevel.BUDGET: -0.8, BudgetLevel.MID: 0.0, BudgetLevel.LUXURY: 0.8}
 
 
@@ -108,7 +124,10 @@ def trait(name: str, scale: Scale | None) -> str | None:
     if scale is None or scale.confidence < KNOWN:
         return None
     _, left, right, middle = SCALES[name]
-    return left if scale.value <= -LEAN else right if scale.value >= LEAN else middle
+    if abs(scale.value) < LEAN:
+        return middle
+    pole = left if scale.value < 0 else right
+    return f"{pole} (strongly)" if abs(scale.value) >= 0.85 else f"{pole} (a little)" if abs(scale.value) < 0.5 else pole
 
 
 def leaning(name: str, scale: Scale | None) -> str | None:
@@ -119,14 +138,44 @@ def leaning(name: str, scale: Scale | None) -> str | None:
     return left if scale.value < 0 else right
 
 
+def _words(text: str) -> str:
+    return " ".join(re.findall(r"[a-z0-9']+", text.lower().replace("’", "'")))
+
+
+def read_signal(signal: ScaleSignal, message: str) -> tuple[str, Scale] | None:
+    """Check a model-read signal against what the traveler actually wrote, and size it from their words.
+    The model picks the scale and direction in context; the code decides whether it counts and by how much."""
+    quote = _words(signal.quote)
+    if not quote or quote not in _words(message):
+        return None  # not their words
+    if set(quote.split()) <= _VAGUE:
+        return None  # "fun" alone says nothing
+    name, direction = POLES[signal.toward]
+    known = _word_signals(quote)
+    listed = known.get(name)
+    if known and listed is None:
+        return None  # the words are about another scale ("slow week" as proof of nightlife)
+    if listed is not None and (listed > 0) != (direction > 0):
+        return None  # the words point the other way
+    if listed is None and _NEGATION.search(quote):
+        return None  # "not too packed" isn't packed, and isn't firmly slow either
+    amount, confidence = (0.9, 0.85) if _STRONG.search(quote) else (0.4, 0.7) if _MILD.search(quote) else (0.7, 0.75)
+    if _UNSURE.search(quote):
+        confidence = 0.4  # a guess: kept as a weak lean, shown as unknown
+    return name, Scale(value=direction * amount, confidence=confidence, source="said")
+
+
 class PersonalityService:
 
     @staticmethod
-    def update(stored: Personality | None, profile: TripProfile, taste: Taste) -> Personality:
-        """Recompute the derived scales from taste and the chat, keeping any set another way."""
+    def update(stored: Personality | None, profile: TripProfile, taste: Taste,
+               signals: list[ScaleSignal] = (), message: str = "") -> Personality:
+        """Recompute the derived scales from taste and the chat, keep any set another way, then apply what the
+        latest message said (newest wins)."""
         scales = {**seed(taste), **from_profile(profile)}
         if stored:
             scales.update({n: s for n, s in stored.scales.items() if s.source not in DERIVED})
+        scales.update(dict(filter(None, (read_signal(s, message) for s in signals))))
         return Personality(scales=scales)
 
     @staticmethod

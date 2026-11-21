@@ -109,7 +109,8 @@ class TravelPlannerWorkflow:
 
         self.users.set_taste(user, TripProfileService.merge_taste(taste, decision.taste_updates))
         taste = self.users.taste(user)
-        personality = PersonalityService.update(self.trips.personality(trip), new_profile, taste)
+        personality = PersonalityService.update(self.trips.personality(trip), new_profile, taste,
+                                                decision.scale_signals, shown_message)
         trip.personality = personality.model_dump(mode="json", include={"scales"})
 
         progressed = new_profile != profile

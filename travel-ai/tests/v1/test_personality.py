@@ -1,11 +1,12 @@
-from app.schemas.personality import Personality, Scale
+from app.schemas.personality import Personality, Scale, ScaleSignal
 from app.schemas.place import PickCategory, PlaceCandidate
 from app.schemas.taste import Taste
 from app.schemas.trip_profile import BudgetLevel, Party, Preference, TripProfile
 from app.services.llm_client import LLMClient
-from app.services.personality_service import PersonalityService
+from app.services.personality_service import PersonalityService, read_signal
 from app.services.places_service import traveler_fit
 from app.services.ranking_service import Ranking, RankedItem, RankingService
+from app.schemas.turn import TurnAction, TurnDecision
 from tests.v1.test_api import decision, new_trip, say
 
 
@@ -70,7 +71,7 @@ def test_family_means_chill_evenings():
 def test_chat_overrides_taste_and_answers_from_elsewhere_are_kept():
     asked = Personality(scales={"money": Scale(value=0.9, confidence=0.9, source="asked")})
     p = card(TripProfile(budget_level=BudgetLevel.BUDGET), Taste(vibes=["luxury"]), stored=asked)
-    assert p.traits == ["Money goes to experiences", "Backpacker comfort"]
+    assert p.traits == ["Money goes to experiences (strongly)", "Backpacker comfort"]
 
 
 def test_prompts_get_known_traits_and_weak_guesses_separately():
@@ -107,3 +108,43 @@ def test_trip_personality_is_stored_and_drives_the_draft_prompts(client, auth, f
 
     draft_prompts = [p for name, p in fake_llm.prompts if name == "DraftPlan"]
     assert draft_prompts and all("personality: Slow pace; Food is the point" in p for p in draft_prompts)
+
+
+def said(toward, quote, message):
+    return read_signal(ScaleSignal(toward=toward, quote=quote), message)
+
+
+def test_model_signals_count_only_with_the_travelers_own_words():
+    msg = "A slow week in Lisbon, but one big night out for my birthday!"
+    name, scale = said("slow", "a slow week", msg)
+    assert name == "pace" and scale.value == -0.7 and scale.source == "said"
+    assert said("nightlife", "party all week", msg) is None  # words not in the message
+    assert said("nightlife", "fun", "Something fun!") is None  # vague on its own
+    assert said("packed", "not too packed", "Not too packed please") is None  # negated, list can't confirm
+    assert said("nightlife", "slow week", msg) is None  # words point the other way
+    assert said("chill", "no nightlife", "No nightlife, we're tired")[1].value < 0
+
+
+def test_intensity_and_certainty_come_from_the_words():
+    strong = said("slow", "really slow", "We want it really slow.")[1]
+    mild = said("slow", "a bit slow", "A bit slow is fine.")[1]
+    unsure = said("slow", "maybe slow", "Maybe slow? Not sure.")[1]
+    assert strong.value == -0.9 and mild.value == -0.4 and unsure.confidence < 0.5
+    cards = [PersonalityService.card(Personality(scales={"pace": s})).traits for s in (strong, mild, unsure)]
+    assert cards == [["Slow pace (strongly)"], ["Slow pace (a little)"], []]
+
+
+def test_what_they_said_persists_across_turns_and_newest_wins(client, auth, fake_llm):
+    trip = new_trip(client, auth)
+    fake_llm.decisions.append(TurnDecision(action=TurnAction.ASK, reply="ok", scale_signals=[
+        ScaleSignal(toward="slow", quote="really slow"), ScaleSignal(toward="luxury", quote="invented words")]))
+    turn = say(client, auth, trip["id"], "Lisbon, and we want it really slow")
+    assert turn["trip"]["personality"]["traits"] == ["Slow pace (strongly)"]
+
+    turn = say(client, auth, trip["id"], "what about Porto?")  # says nothing about pace
+    assert turn["trip"]["personality"]["traits"] == ["Slow pace (strongly)"]
+
+    fake_llm.decisions.append(TurnDecision(action=TurnAction.ASK, reply="ok", scale_signals=[
+        ScaleSignal(toward="packed", quote="actually packed days")]))
+    turn = say(client, auth, trip["id"], "Hmm, actually packed days")
+    assert turn["trip"]["personality"]["traits"] == ["Packed days"]

@@ -1,4 +1,16 @@
+from typing import Literal
+
 from pydantic import BaseModel, Field
+
+# Each pole of the six scales, as the model names it.
+Pole = Literal["slow", "packed", "spend_on_stay", "spend_on_experiences", "chill", "nightlife",
+               "hidden_gems", "icons", "food_as_fuel", "food_focus", "backpacker", "luxury"]
+
+
+class ScaleSignal(BaseModel):
+    """What the traveler said about the whole trip, read in context by the model. Code checks it and sets the amount."""
+    toward: Pole
+    quote: str = Field(description="the traveler's exact words from their latest message that say this")
 
 
 class Scale(BaseModel):
