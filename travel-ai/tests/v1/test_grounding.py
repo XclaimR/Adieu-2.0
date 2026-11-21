@@ -1,7 +1,9 @@
 import pytest
 
 from app.schemas.trip_profile import BudgetLevel, Party, ProfileUpdates
-from app.services.grounding import extract_duration, ground_updates
+from app.services.grounding import extract_duration, extract_mood, ground_updates
+from app.schemas.trip_profile import TripProfile
+from app.services.trip_profile_service import TripProfileService
 
 
 def test_invented_details_are_dropped():
@@ -57,3 +59,37 @@ def test_party_size_must_be_stated_or_implied(message, guess, kept):
     updates = ProfileUpdates(destination="Japan", party=Party.FRIENDS if "friends" in message else Party.COUPLE,
                              party_size=guess)
     assert ground_updates(updates, message).party_size == kept
+
+
+@pytest.mark.parametrize("message,moods", [
+    ("Going solo on a hiking trip in the Dolomites for 5 days.", ["adventurous", "nature"]),
+    ("Trekking in Nepal", ["adventurous", "nature"]),
+    ("A ski trip to Niseko", ["adventurous"]),
+    ("Scuba diving in Bali", ["adventurous"]),
+    ("A beach holiday in Goa", ["beach"]),
+    ("A slow food week in Lisbon", ["foodie"]),
+    # Vague or ambiguous words must not become a mood: ask instead of guessing.
+    ("A fun trip to Rome", []),
+    ("Something nice in Paris", []),
+    ("Tokyo", []),
+    ("Barcelona, love a good dive bar", []),
+    ("Just me", []),
+])
+def test_extract_mood(message, moods):
+    assert extract_mood(message) == moods
+
+
+def test_missed_mood_is_read_from_the_text():
+    # Issue #41: gemini sometimes returns no mood for this and files "hiking" under interests.
+    message = "Going solo on a hiking trip in the Dolomites for 5 days."
+    merged = TripProfileService.merge(TripProfile(), ProfileUpdates(destination="Dolomites", party=Party.SOLO), message)
+    assert merged.mood == ["adventurous", "nature"]
+
+
+def test_hiking_supports_a_nature_mood():
+    assert ground_updates(ProfileUpdates(mood=["adventurous", "nature"]), "a hiking trip").mood == ["adventurous", "nature"]
+
+
+def test_activity_words_do_not_add_to_a_known_mood():
+    merged = TripProfileService.merge(TripProfile(mood=["relaxed"]), ProfileUpdates(), "add a short hike on day 2")
+    assert merged.mood == ["relaxed"]

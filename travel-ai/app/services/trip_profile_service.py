@@ -4,7 +4,7 @@ from pydantic import ValidationError
 
 from app.schemas.taste import Taste, TasteUpdates
 from app.schemas.trip_profile import ProfileUpdates, TripProfile
-from app.services.grounding import ground_updates
+from app.services.grounding import extract_mood, ground_updates
 
 _CORE_FIELDS = (
     "destination",
@@ -62,6 +62,9 @@ class TripProfileService:
         updates = _promote_core_preferences(updates)
         if message is not None:
             updates = ground_updates(updates, message)
+            # The model sometimes files "hiking" under interests and leaves mood empty (#41); only fill an unknown mood.
+            if not updates.mood and not merged.mood:
+                updates.mood = extract_mood(message)
 
         for field in _CORE_FIELDS:
             value = getattr(updates, field)

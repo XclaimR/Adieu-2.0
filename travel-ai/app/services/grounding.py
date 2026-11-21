@@ -34,11 +34,19 @@ _MOOD_SYNONYMS = {
     "food": r"food|eat|culinar|cuisine|restaurant|street food|wine",
     "cultur": r"cultur|histor|museum|art|temple|heritage|architect",
     "night": r"night|party|club|bar|drink",
-    "natur": r"natur|outdoor|park|mountain|wildlife|forest|lake",
+    "natur": r"natur|outdoor|park|mountain|wildlife|forest|lake|hik|trek",
     "beach": r"beach|sea|island|coast|ocean|swim|sun",
     "shop": r"shop|market|boutique",
     "luxur": r"luxur|treat|spa|fancy",
 }
+
+# Activity words that name the trip's mood on their own. Only unambiguous ones: "fun" or "nice" stay unanswered.
+_ACTIVITY_MOODS = [
+    (r"\b(hik\w*|trek\w*)\b", ["adventurous", "nature"]),
+    (r"\b(ski|skiing|scuba|diving|snorkel\w*|surf\w*|rafting)\b", ["adventurous"]),
+    (r"\bbeach\w*\b", ["beach"]),
+    (r"\b(food (tour|trip|week|holiday)|foodie|culinary)\b", ["foodie"]),
+]
 
 
 def _has(pattern: str, text: str) -> bool:
@@ -62,6 +70,12 @@ def extract_duration(message: str) -> int | None:
     if re.search(r"\bweekend\b", text):
         return 2
     return None
+
+
+def extract_mood(message: str) -> list[str]:
+    """Moods named by clear activity words: "a hiking trip" -> adventurous, nature; "a beach holiday" -> beach."""
+    moods = [m for pattern, ms in _ACTIVITY_MOODS if _has(pattern, message) for m in ms]
+    return list(dict.fromkeys(moods))
 
 
 def _to_int(token: str) -> int:
