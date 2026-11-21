@@ -23,7 +23,7 @@ Agreed 2026-11-21. Adieu is a one-stop travel planner that understands the trave
 - Group trips: the organizer answers for now. Later, each friend answers from a share link and the plan handles where the group splits.
 
 ### B. "Worth the hype?"
-A personal verdict on viral and famous places: *worth it / worth it if… / skip*, for this traveler. It covers what and where it is, how to get there, how long it takes, when to go to beat the crowds, what people say (Reddit and the web, with sources) and an alternative. It's triggered on demand, then as badges on plan stops, then as a "viral right now" list.
+A personal verdict on viral and famous places: *worth it / worth it if… / skip*, for this traveler. It covers what and where it is, how to get there, how long it takes, when to go to beat the crowds, what people say (Reddit threads and the web via Gemini search, with sources) and an alternative. It's triggered on demand, then as badges on plan stops, then as a "viral right now" list.
 
 ### C. "You'd never have found this"
 Local favorites that aren't tourist spots, events unique to the place, festivals, concerts by artists you like, and small workshops, all during your dates, offered as "would you be into this?". Every specific event has a source link and a date; general tips are labelled as tips. Nothing is auto-added.
@@ -40,7 +40,7 @@ Pre-filled links to Google Flights, Booking.com, Klook and GetYourGuide for now;
 |---|---|---|
 | Chat, drafts, search | Gemini free tier (with Google Search) | Gemini paid tier |
 | Private material (screenshots, Instagram) | Local model via Ollama | same, or a private hosted model |
-| Opinions and events | Reddit API, Gemini search, Ticketmaster | commercial Reddit terms, partner feeds |
+| Opinions and events | Gemini search (reaches Reddit threads and blogs through Google), Ticketmaster | paid search, partner feeds |
 | Places, photos, routes | Google Places / Routes free allowances | paid usage |
 | Hosting | Laptop + Cloudflare Tunnel → Oracle Cloud free tier | own cloud account (e.g. AWS) |
 
