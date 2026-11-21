@@ -1,4 +1,6 @@
 import logging
+import re
+import unicodedata
 import uuid
 from collections.abc import Iterator
 from typing import Literal
@@ -29,7 +31,9 @@ FLAVORS = [
 
 
 class PlanStop(BaseModel):
-    ref: int = Field(description="the [n] number of a place from the list")
+    # Naming the place first keeps the note about that place; the name is checked against ref.
+    place: str = Field(description="the exact name of the place, copied from the list")
+    ref: int = Field(description="the [n] number of that same place")
     time_of_day: Literal["morning", "afternoon", "evening"]
     note: str = Field(description="what to do there, max 12 words")
 
@@ -45,6 +49,33 @@ class DraftPlan(BaseModel):
     stay_ref: int | None = Field(default=None, description="[n] of a place to stay from the list, or null")
     # The cap stops runaway generation (each extra day costs ~10 s on a local model).
     days: list[PlanDay] = Field(min_length=1, max_length=10)
+
+
+_SLOTS = ["morning", "afternoon", "evening"]
+
+
+def _norm(name: str) -> str:
+    """Lowercase letters and digits only, accents dropped: "Jerónimos Monastery" == "jeronimos monastery"."""
+    plain = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode()
+    return re.sub(r"[^a-z0-9]", "", plain.lower())
+
+
+def _same(a: str, b: str) -> bool:
+    # Containment allows "Pantheon" for "National Pantheon"; the length floor stops "Bar" matching everything.
+    return bool(a and b) and (a == b or (min(len(a), len(b)) >= 6 and (a in b or b in a)))
+
+
+def _one_per_slot(activities: list[Activity]) -> list[Activity]:
+    """Move a repeated time of day to a free one, then order the day morning → evening."""
+    taken: set[str] = set()
+    for a in activities:
+        if a.time_of_day in taken:
+            free = [s for s in _SLOTS if s not in taken]
+            if free:  # with 4 stops one slot must repeat
+                later = [s for s in free if _SLOTS.index(s) > _SLOTS.index(a.time_of_day)]
+                a.time_of_day = (later or free)[0]
+        taken.add(a.time_of_day)
+    return sorted(activities, key=lambda a: _SLOTS.index(a.time_of_day) if a.time_of_day in _SLOTS else len(_SLOTS))
 
 
 class PlacePool:
@@ -74,13 +105,21 @@ class PlacePool:
     def get(self, ref: int | None) -> PlaceCandidate | None:
         return self.places[ref] if ref is not None and 0 <= ref < len(self.places) else None
 
+    def resolve(self, stop: PlanStop) -> PlaceCandidate | None:
+        """The place the stop's note is about: its ref if the names agree, else the place it names, else None."""
+        named = _norm(stop.place)
+        place = self.get(stop.ref)
+        if place and _same(named, _norm(place.name)):
+            return place
+        return next((p for p in self.places if _same(named, _norm(p.name))), None)
+
     def to_itinerary(self, plan: DraftPlan, destination: str) -> Itinerary:
         days = []
         used: set[str] = set()
         for day in plan.days:
             activities = []
             for stop in day.stops:
-                place = self.get(stop.ref)
+                place = self.resolve(stop)
                 # Unknown refs and stays are dropped; repeats of the same place too.
                 if place is None or place.category == PickCategory.STAY or place.place_id in used:
                     continue
@@ -95,7 +134,7 @@ class PlacePool:
                     maps_url=place.maps_url,
                 ))
             if activities:
-                days.append(DayPlan(day_number=len(days) + 1, theme=day.theme, activities=activities))
+                days.append(DayPlan(day_number=len(days) + 1, theme=day.theme, activities=_one_per_slot(activities)))
 
         stay = self.get(plan.stay_ref)
         return Itinerary(
@@ -138,7 +177,9 @@ Places you may use (refer to them ONLY by [n]):
 {pool.listing()}
 
 Rules:
-- Exactly {days} days, 2-4 stops each, mixing things to do and places to eat.
+- Exactly {days} days, 2-3 stops each, mixing things to do and places to eat.
+- Each day uses morning, afternoon and evening at most once. Lunch is afternoon, dinner is evening.
+- Each stop's place and note must be about the same listed place. Don't plan anything that isn't on the list.
 - Group nearby places on the same day. Don't repeat a place.
 - Respect diet, mobility, kids and budget preferences.
 - stay_ref must be a 'stay' place from the list, or null.
