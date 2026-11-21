@@ -110,8 +110,8 @@ class TravelPlannerWorkflow:
         self.users.set_taste(user, TripProfileService.merge_taste(taste, decision.taste_updates))
         taste = self.users.taste(user)
         personality = PersonalityService.update(self.trips.personality(trip), new_profile, taste,
-                                                decision.scale_signals, shown_message)
-        trip.personality = personality.model_dump(mode="json", include={"scales"})
+                                                decision.notes, shown_message, decision.drop_note_topics)
+        trip.personality = personality.model_dump(mode="json", include={"scales", "notes"})
 
         progressed = new_profile != profile
         plan = TurnService.plan(
@@ -306,6 +306,7 @@ class TravelPlannerWorkflow:
         day.activities[index] = old.model_copy(update={
             "name": pick.name, "category": pick.category.value, "description": pick.why,
             "place_id": pick.place_id, "photo_name": pick.photo_name, "maps_url": pick.maps_url,
+            "for_note": None,  # the replacement wasn't chosen for that moment
         })
         trip.itinerary = itinerary.model_dump(mode="json")
         trip.panel = None

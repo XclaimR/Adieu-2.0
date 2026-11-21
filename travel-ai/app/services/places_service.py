@@ -91,7 +91,12 @@ def traveler_fit(profile: TripProfile, personality: Personality | None = None) -
     if known:
         lines.append(f"- This trip's personality: {'; '.join(known)}. Let it shape what you choose.")
     if leans:
-        lines.append(f"- Weak guesses from their usual taste (don't over-weight): {'; '.join(leans)}.")
+        lines.append(f"- Weak guesses, from their usual taste or a hint (don't over-weight): {'; '.join(leans)}.")
+    notes = personality.notes if personality else []
+    if trip_notes := [f"'{n.text}'" for n in notes if n.scope == "trip"]:
+        lines.append(f"- What they told us about the whole trip, in their words: {'; '.join(trip_notes)}.")
+    if moments := [f"[m{i}] '{m}'" for i, m in enumerate(PersonalityService.moments(personality))]:
+        lines.append(f"- Moments they want to fit in: {'; '.join(moments)}.")
     return "\n".join(lines)
 
 

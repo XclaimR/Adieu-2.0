@@ -1,6 +1,6 @@
 import re
 
-from app.schemas.personality import Personality, Scale, ScaleSignal
+from app.schemas.personality import Note, NoteUpdate, Personality, Scale
 from app.schemas.taste import Taste
 from app.schemas.trip_profile import BudgetLevel, Party, TripProfile
 
@@ -18,7 +18,7 @@ LEAN = 0.25  # |value| below this reads as the middle
 TASTE_CONFIDENCE = 0.3
 CHAT_CONFIDENCE = 0.7
 # "taste" and "chat" (the word list over the profile) are recomputed every turn. Others are kept until replaced:
-# "said" (a checked ScaleSignal from one message) and, later, "asked" (answers to questions, #20).
+# "said" (the traveler's words, read from one message) and, later, "asked" (answers to questions, #20).
 DERIVED = {"taste", "chat"}
 
 # Lasting-taste vibes (TasteService.VIBES) -> leanings.
@@ -78,7 +78,9 @@ _VAGUE = {"fun", "nice", "amazing", "great", "cool", "good", "awesome", "best", 
           "going", "go", "visit", "visiting", "travel", "traveling", "travelling", "to", "in", "for", "my", "our",
           "friends", "partner", "wife", "husband", "family", "kids", "us", "me", "love", "like", "would", "we'd",
           "i'd", "some", "somewhere", "place", "of", "on", "at", "it", "is", "be"}
-_MAX_QUOTE_WORDS = 6
+_MAX_QUOTE_WORDS = 12  # a note is a phrase; a whole paragraph quoted as proof proves nothing
+MODEL_ONLY_CONFIDENCE = 0.4  # a pole only the model read: a weak guess for prompts, "not sure yet" on the card
+MAX_NOTES = 30  # shortcut: oldest notes drop off past this; summarise instead if real trips hit it
 _BUDGET = {BudgetLevel.BUDGET: -0.8, BudgetLevel.MID: 0.0, BudgetLevel.LUXURY: 0.8}
 
 
@@ -127,32 +129,52 @@ def _listed(clause: str) -> dict[str, tuple[int, int]]:
     return out
 
 
-def read_message(message: str, signals: list[ScaleSignal] = (), destination: str | None = None) -> dict[str, Scale]:
-    """What the latest message says about the whole trip.
-    The word list reads the traveler's own words; the model's signals (read in context) add what the list doesn't
-    know. Either way the code checks it's really their words and sizes it from them."""
-    clauses = [c for c in _clauses(message) if not _ONE_OFF.search(c)]
-    place = set(_words(destination or "").split())  # shortcut: other place names in the message still count as words
-    scales: dict[str, Scale] = {}
-    for clause in clauses:
-        for name, (direction, at) in _listed(clause).items():
-            scales[name] = _size(direction, _lead(clause, at, clause[at:].split(" ", 1)[0]), clause)
-    for signal in signals:
-        name, direction = POLES[signal.toward]
-        quote = _words(signal.quote)
-        clause = next((c for c in clauses if quote and f" {quote} " in f" {c} "), None)  # whole words only
-        if name in scales or clause is None or len(quote.split()) > _MAX_QUOTE_WORDS:
-            continue  # the list already read it / not their words, or a one-off / a whole sentence isn't proof
-        if not [w for w in quote.split() if w not in _VAGUE | place and w[0].isalpha()]:
-            continue  # "fun", "planning a trip to Japan": nothing that says which way
+def _check_note(update: NoteUpdate, clauses: list[str], place: set[str]) -> tuple[Note, str] | None:
+    """Keep a model-read note only if it is the traveler's own words and says something. Code, not the model,
+    decides it's a one-off ("one big night out" is a moment), and drops a pole the words don't support."""
+    quote = _words(update.quote)
+    clause = next((c for c in clauses if quote and f" {quote} " in f" {c} "), None)  # whole words only
+    if clause is None or len(quote.split()) > _MAX_QUOTE_WORDS:
+        return None  # not their words, or a whole paragraph
+    if not [w for w in quote.split() if w not in _VAGUE | place and w[0].isalpha()]:
+        return None  # "fun", "planning a trip to Japan": nothing to keep
+    scope = "moment" if _ONE_OFF.search(clause) else update.scope
+    toward = update.toward if scope == "trip" else None
+    if toward:
+        name, direction = POLES[toward]
         listed = _listed(quote)
         if listed and (name not in listed or listed[name][0] != direction):
-            continue  # the words point the other way, or are about another scale
-        if _NEGATION.search(quote) and any(name in _WORDS[st] for st, _ in _stems(quote)):
-            continue  # "not too packed" isn't packed, and isn't firmly slow either
-        # Other negations are the model's reading in context: "avoid the tourist traps" is hidden gems.
-        scales[name] = _size(direction, _lead(clause, f" {clause} ".index(f" {quote} "), quote), clause)
-    return scales
+            toward = None  # the words point the other way, or are about another scale
+        elif _NEGATION.search(quote) and any(name in _WORDS[st] for st, _ in _stems(quote)):
+            toward = None  # "not too packed" isn't packed, and isn't firmly slow either
+    topic = "_".join(_words(update.topic).split())[:40] or "note"
+    return Note(topic=topic, text=update.quote.strip(), scope=scope, toward=toward), clause
+
+
+def read_message(message: str, notes: list[NoteUpdate] = (), destination: str | None = None
+                 ) -> tuple[dict[str, Scale], list[Note]]:
+    """What the latest message says: scales from the traveler's own words (word list), and the checked notes.
+    A pole only the model read (no listed word confirms it) is kept as a weak guess."""
+    clauses = _clauses(message)
+    trip_wide = [c for c in clauses if not _ONE_OFF.search(c)]
+    place = set(_words(destination or "").split())  # shortcut: other place names in the message still count as words
+    scales: dict[str, Scale] = {}
+    for clause in trip_wide:
+        for name, (direction, at) in _listed(clause).items():
+            scales[name] = _size(direction, _lead(clause, at, clause[at:].split(" ", 1)[0]), clause)
+    kept: list[Note] = []
+    for update in notes:
+        checked = _check_note(update, clauses, place)
+        if checked is None:
+            continue
+        note, clause = checked
+        kept.append(note)
+        if note.toward and POLES[note.toward][0] not in scales:
+            name, direction = POLES[note.toward]
+            quote = _words(note.text)
+            scale = _size(direction, _lead(clause, f" {clause} ".index(f" {quote} "), quote), clause)
+            scales[name] = scale.model_copy(update={"confidence": min(scale.confidence, MODEL_ONLY_CONFIDENCE)})
+    return scales, kept
 
 
 def seed(taste: Taste) -> dict[str, Scale]:
@@ -197,15 +219,22 @@ def leaning(name: str, scale: Scale | None) -> str | None:
 class PersonalityService:
 
     @staticmethod
-    def update(stored: Personality | None, profile: TripProfile, taste: Taste,
-               signals: list[ScaleSignal] = (), message: str = "") -> Personality:
+    def update(stored: Personality | None, profile: TripProfile, taste: Taste, notes: list[NoteUpdate] = (),
+               message: str = "", drop_topics: list[str] = ()) -> Personality:
         """Taste and checked profile facts are recomputed; what earlier messages said is kept; what the latest
-        message says wins."""
+        message says wins. A note on the same topic replaces the old one ("actually, packed days")."""
         scales = {**seed(taste), **from_profile(profile)}
         if stored:
             scales.update({n: s for n, s in stored.scales.items() if s.source not in DERIVED})
-        scales.update(read_message(message, signals, profile.destination))
-        return Personality(scales=scales)
+        said, new_notes = read_message(message, notes, profile.destination)
+        for name, scale in said.items():
+            old = scales.get(name)
+            # A weak model-only guess never overwrites something the traveler clearly said earlier.
+            if scale.confidence >= KNOWN or not (old and old.source not in DERIVED and old.confidence >= KNOWN):
+                scales[name] = scale
+        dropped = {"_".join(_words(t).split()) for t in drop_topics} | {n.topic for n in new_notes}
+        kept = [n for n in (stored.notes if stored else []) if n.topic not in dropped] + new_notes
+        return Personality(scales=scales, notes=kept[-MAX_NOTES:])
 
     @staticmethod
     def card(personality: Personality | None) -> Personality:
@@ -223,6 +252,11 @@ class PersonalityService:
         known = [t for n in SCALES if (t := trait(n, scales.get(n)))]
         leans = [t for n in SCALES if (t := leaning(n, scales.get(n)))]
         return known, leans
+
+    @staticmethod
+    def moments(personality: Personality | None) -> list[str]:
+        """The one-off things to fit in, in the order the prompts number them ([m0], [m1], ...)."""
+        return [n.text for n in (personality.notes if personality else []) if n.scope == "moment"]
 
     @staticmethod
     def match_trait(said: str | None, allowed: list[str]) -> str | None:

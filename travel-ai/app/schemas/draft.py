@@ -12,4 +12,6 @@ class Draft(BaseModel):
     photo_name: str | None = None
     # The trip-personality trait this version serves most, if any.
     trait: str | None = None
+    # Moments the traveler asked for that this version doesn't fit in yet.
+    unplanned: list[str] = []
     itinerary: Itinerary

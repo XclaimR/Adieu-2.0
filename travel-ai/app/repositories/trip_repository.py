@@ -17,7 +17,7 @@ class TripRepository:
 
     def create(self, user_id: str, title: str, profile: TripProfile, personality: Personality | None = None) -> TripModel:
         trip = TripModel(user_id=user_id, title=title, profile=profile.model_dump(mode="json"), drafts=[], state={},
-                         personality=personality.model_dump(mode="json", include={"scales"}) if personality else None)
+                         personality=personality.model_dump(mode="json", include={"scales", "notes"}) if personality else None)
         self.db.add(trip)
         self.db.commit()
         self.db.refresh(trip)

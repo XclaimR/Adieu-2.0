@@ -38,6 +38,7 @@ class PlanStop(BaseModel):
     ref: int = Field(description="the [n] number of that same place")
     time_of_day: Literal["morning", "afternoon", "evening"]
     note: str = Field(description="what to do there, max 12 words")
+    for_moment: int | None = Field(default=None, description="N of the [mN] moment this stop fulfils, or null")
 
 
 class PlanDay(BaseModel):
@@ -116,7 +117,7 @@ class PlacePool:
             return place
         return next((p for p in self.places if _same(named, _norm(p.name))), None)
 
-    def to_itinerary(self, plan: DraftPlan, destination: str) -> Itinerary:
+    def to_itinerary(self, plan: DraftPlan, destination: str, moments: list[str] = ()) -> Itinerary:
         days = []
         used: set[str] = set()
         for day in plan.days:
@@ -132,6 +133,8 @@ class PlacePool:
                     category=place.category.value,
                     time_of_day=stop.time_of_day,
                     description=stop.note,
+                    for_note=moments[stop.for_moment] if stop.for_moment is not None
+                    and 0 <= stop.for_moment < len(moments) else None,
                     place_id=place.place_id,
                     photo_name=place.photo_name,
                     maps_url=place.maps_url,
@@ -146,6 +149,10 @@ class PlacePool:
             stay=Pick(**stay.model_dump()) if stay and stay.category == PickCategory.STAY else None,
             days=days,
         )
+
+
+def fulfilled(itinerary: Itinerary) -> set[str]:
+    return {a.for_note for d in itinerary.days for a in d.activities if a.for_note}
 
 
 class DraftService:
@@ -189,6 +196,8 @@ Rules:
 - Respect diet, mobility, kids and budget preferences.
 {traveler_fit(profile, personality)}
 {f"- trait: copy the one personality trait above that this version serves best (exactly as written), or null. Options: {', '.join(allowed)}." if allowed else "- trait: null."}
+- Fit each [mN] moment into one stop on a fitting day and set that stop's for_moment to N. Skip a moment only if
+  no listed place fits it.
 - stay_ref must be a 'stay' place from the list, or null.
 """
 
@@ -198,13 +207,14 @@ Rules:
         pool = self.pool(profile, viewport, exclude_ids)
         days = min(profile.duration_days or DEFAULT_DAYS, MAX_DAYS)
         allowed = PersonalityService.traits(personality)[0]  # only known traits; guesses stay off the cards
+        moments = PersonalityService.moments(personality)
         for flavor, brief in FLAVORS:
             try:
                 plan = LLMClient.generate_structured(self._prompt(profile, taste, pool, days, brief, personality), DraftPlan)
             except Exception:
                 logger.exception("Draft %s failed", flavor)
                 continue
-            itinerary = pool.to_itinerary(plan, profile.destination)
+            itinerary = pool.to_itinerary(plan, profile.destination, moments)
             if not itinerary.days:
                 logger.warning("Draft %s referenced no valid places", flavor)
                 continue
@@ -216,6 +226,7 @@ Rules:
                 summary=plan.summary,
                 photo_name=first_photo,
                 trait=PersonalityService.match_trait(plan.trait, allowed),
+                unplanned=[m for m in moments if m not in fulfilled(itinerary)],
                 itinerary=itinerary,
             )
 
@@ -252,7 +263,7 @@ The traveler wants this change: {request}
 Return the full updated plan with the same title unless the change calls for a new one.
 """
         plan = LLMClient.generate_structured(prompt, DraftPlan)
-        updated = pool.to_itinerary(plan, itinerary.destination)
+        updated = pool.to_itinerary(plan, itinerary.destination, PersonalityService.moments(personality))
         if not updated.days:
             return itinerary
         if updated.stay is None:

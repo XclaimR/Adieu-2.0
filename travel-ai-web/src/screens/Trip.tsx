@@ -34,7 +34,8 @@ function profileFacts(p: TripProfile): string[] {
 
 /** The trip's personality in plain words: "Slow pace, food is the point". Unknown scales are named, never guessed. */
 function PersonalityCard({ personality }: { personality: Personality }) {
-  const { traits, unknown } = personality;
+  const { traits, unknown, notes } = personality;
+  const moments = notes.filter((n) => n.scope === "moment").map((n) => n.text);
   const sentence = traits.map((t, i) => (i ? t.toLowerCase() : t)).join(", ");
   return (
     <div className="personality" title="This trip's personality">
@@ -43,6 +44,7 @@ function PersonalityCard({ personality }: { personality: Personality }) {
       {traits.length > 0 && unknown.length > 0 && (
         <span className="small muted">Not sure yet: {unknown.join(", ").toLowerCase()}</span>
       )}
+      {moments.length > 0 && <span className="small">To fit in: {moments.join(", ")}</span>}
     </div>
   );
 }
