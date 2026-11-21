@@ -16,7 +16,8 @@ class Settings:
     LLM_BASE_URL = os.getenv("LLM_BASE_URL", "http://localhost:11434/v1")
     LLM_MODEL = os.getenv("LLM_MODEL", "qwen3:8b")
     LLM_API_KEY = os.getenv("LLM_API_KEY", "ollama")
-    LLM_TIMEOUT_SECONDS = float(os.getenv("LLM_TIMEOUT_SECONDS", "180"))
+    # A 7-day draft takes ~140s on qwen3:8b locally; nginx allows 600s, enough for one retry.
+    LLM_TIMEOUT_SECONDS = float(os.getenv("LLM_TIMEOUT_SECONDS", "240"))
     # "none" turns off slow hidden reasoning on models like qwen3 (27s -> 2s per call locally).
     # Set to empty to omit the parameter for providers that don't accept it.
     LLM_REASONING_EFFORT = os.getenv("LLM_REASONING_EFFORT", "none")

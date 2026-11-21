@@ -1,4 +1,4 @@
-import type { PickAction, Trip, TripSummary, TripUpdate, TurnEvent, User, Vibe } from "./types";
+import type { PickAction, StarterIdea, Trip, TripSummary, TripUpdate, TurnEvent, User, Vibe } from "./types";
 
 const BASE = "/api";
 const TOKEN_KEY = "adieu.token";
@@ -63,6 +63,7 @@ export const api = {
   vibes: () => request<Vibe[]>("GET", "/vibes"),
   setVibes: (vibes: string[]) => request<User>("POST", "/me/taste", { vibes }),
   trips: () => request<TripSummary[]>("GET", "/trips"),
+  starterIdeas: () => request<StarterIdea[]>("GET", "/starter-ideas"),
   createTrip: () => request<Trip>("POST", "/trips", {}),
   trip: (id: string) => request<Trip>("GET", `/trips/${id}`),
   chooseDraft: (id: string, draftId: string) => request<Trip>("POST", `/trips/${id}/drafts/${draftId}/choose`),
@@ -75,9 +76,15 @@ export const api = {
 };
 
 /** Sends a chat message and calls onEvent for each event the server streams back (NDJSON). */
-export async function sendStream(tripId: string, message: string, onEvent: (e: TurnEvent) => void) {
+export async function sendStream(
+  tripId: string,
+  message: string,
+  signal: AbortSignal,
+  onEvent: (e: TurnEvent) => void,
+) {
   const res = await fetch(`${BASE}/trips/${tripId}/messages/stream`, {
     method: "POST",
+    signal,
     headers: {
       "Content-Type": "application/json",
       ...(memoryToken ? { Authorization: `Bearer ${memoryToken}` } : {}),
@@ -86,7 +93,7 @@ export async function sendStream(tripId: string, message: string, onEvent: (e: T
   });
   if (!res.ok || !res.body) {
     if (res.status === 401) setToken(null);
-    throw new ApiError(res.status, res.statusText || "Request failed");
+    throw new ApiError(res.status, res.status >= 500 ? "I can't reach Adieu right now — please try again." : res.statusText || "Request failed");
   }
 
   const reader = res.body.getReader();

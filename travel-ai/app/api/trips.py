@@ -97,7 +97,7 @@ def stream_message(
                 yield json.dumps(event) + "\n"
         except (APIConnectionError, APITimeoutError, APIStatusError):
             logger.exception("LLM unavailable during stream")
-            yield json.dumps({"type": "error", "detail": "The AI model is unavailable. Is Ollama running?"}) + "\n"
+            yield json.dumps({"type": "error", "detail": "I can't think straight right now — please try again in a moment."}) + "\n"
         except LLMOutputError:
             yield json.dumps({"type": "error", "detail": "The AI gave an unusable answer. Please try again."}) + "\n"
         except Exception:

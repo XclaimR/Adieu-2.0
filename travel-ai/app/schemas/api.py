@@ -50,6 +50,8 @@ class TripSummary(BaseModel):
     id: str
     title: str
     destination: str | None
+    duration_days: int | None = None
+    photo_name: str | None = None
     updated_at: datetime
 
 

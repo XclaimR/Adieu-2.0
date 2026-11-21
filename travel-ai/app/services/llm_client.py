@@ -15,8 +15,9 @@ _client = OpenAI(
     base_url=settings.LLM_BASE_URL,
     api_key=settings.LLM_API_KEY,
     timeout=settings.LLM_TIMEOUT_SECONDS,
-    # The SDK retries timeouts twice by default, turning one stuck 3-minute call into 9 minutes.
-    max_retries=0,
+    # One retry (with backoff) on timeouts, connection and 5xx errors. The SDK default of 2 turned one
+    # stuck call into three; this caps a failing call at two attempts.
+    max_retries=1,
 )
 
 _THINK_BLOCK = re.compile(r"<think>.*?</think>", re.DOTALL)
