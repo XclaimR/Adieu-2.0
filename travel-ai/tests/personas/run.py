@@ -57,7 +57,9 @@ def pick_reply(persona: dict, question: str, chips: list[str], used: set[int]) -
 
 def converse(api: Api, persona: dict) -> dict:
     """Plays one persona until drafts appear (or it gives up). Returns the transcript and timings."""
-    api.token = api.post("/auth/dev", {"email": f"persona-{persona['name']}@personas.test"})["token"]
+    # A fresh user per run: the app saves learned taste on the user, which would carry into the next run.
+    email = f"persona-{persona['name']}-{time.time_ns()}@personas.test"
+    api.token = api.post("/auth/dev", {"email": email})["token"]
     trip = api.post("/trips", {"title": f"persona {persona['name']}"})
     trip_id = trip["id"]
     facts = {k: list(v) for k, v in persona["facts"].items()}

@@ -21,7 +21,7 @@ PERSONAS = [
         "name": "bachelor",
         "opening": "Planning a fun, lively bachelor trip to Japan with a group of friends!",
         "facts": {
-            "destination": ["Japan"], "party": ["friends"],
+            "destination": ["Japan"], "party": ["friends"], "kids": [False],
             "mood": ["bachelor", "party", "celebrat", "nightlife", "fun", "lively", "social", "adventur", "food"],
         },
         "answers": [
@@ -38,7 +38,7 @@ PERSONAS = [
         "name": "lisbon_couple",
         "opening": "My wife and I want a slow food week in Lisbon.",
         "facts": {
-            "destination": ["Lisbon"], "party": ["couple"], "party_size": [2], "duration_days": [7],
+            "destination": ["Lisbon"], "party": ["couple"], "party_size": [2], "kids": [False], "duration_days": [7],
             "mood": ["food", "slow", "relax", "culinar", "gastro", "leisur", "romantic"],
         },
         "answers": [
@@ -70,7 +70,7 @@ PERSONAS = [
         "name": "solo_hiker",
         "opening": "Going solo on a hiking trip in the Dolomites for 5 days.",
         "facts": {
-            "destination": ["Dolomites"], "party": ["solo"], "party_size": [1], "duration_days": [5],
+            "destination": ["Dolomites"], "party": ["solo"], "party_size": [1], "kids": [False], "duration_days": [5],
             "mood": ["hik", "nature", "adventur", "outdoor", "active", "mountain", "trek"],
         },
         "answers": [NOT_SURE_DATES],
@@ -87,7 +87,7 @@ PERSONAS = [
         },
         "answers": [
             (MOOD, "Adventurous: street food and exploring.", {}),
-            (WHO, "Just me.", {"party": ["solo"], "party_size": [1]}),
+            (WHO, "Just me.", {"party": ["solo"], "party_size": [1], "kids": [False]}),
             (HOW_LONG, "Two weeks.", {"duration_days": [14]}),
             NOT_SURE_DATES,
         ],
@@ -99,7 +99,8 @@ PERSONAS = [
         "name": "luxury_weekend",
         "opening": "A luxury weekend in Paris with my partner.",
         "facts": {
-            "destination": ["Paris"], "party": ["couple"], "party_size": [2], "budget_level": ["luxury"],
+            "destination": ["Paris"], "party": ["couple"], "party_size": [2], "kids": [False],
+            "budget_level": ["luxury"],
             "duration_days": [2, 3],
             "mood": ["luxur", "romantic", "indulg", "relax", "fine", "elegant", "pamper", "upscale"],
         },
