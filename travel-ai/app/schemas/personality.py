@@ -17,7 +17,8 @@ class Scale(BaseModel):
     """One sliding scale: -1 is the left pole (e.g. slow), +1 the right (e.g. packed)."""
     value: float = 0.0
     confidence: float = 0.0
-    # Where the value came from: "taste" (lasting taste), "chat" (what they said this trip), later "asked" (#20).
+    # Where it came from: "taste" (lasting vibes), "chat" (budget/kids in the profile), "said" (the traveler's words),
+    # later "asked" (#20).
     source: str | None = None
 
 

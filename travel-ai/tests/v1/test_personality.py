@@ -67,6 +67,7 @@ def test_model_signals_add_what_the_list_doesnt_know_but_only_with_their_words()
     assert card(msg, signals=[("slow", "avoid tourist traps")]).traits == ["Avoids crowds"]  # "slow": not their words
     assert card("honestly just doing nothing", signals=[("luxury", "prioritizing comfort")]).traits == []  # invented
     assert card("Something fun!", signals=[("nightlife", "fun")]).traits == []  # vague
+    assert card("partying", signals=[("icons", "art")]).traits == ["Nightlife"]  # "art" isn't a word in "partying"
     fun = "Planning a fun trip to Japan with friends!"
     assert card(fun, signals=[("slow", fun)]).traits == []  # a whole sentence isn't proof
     assert card(fun, signals=[("slow", "fun trip to Japan")], profile=TripProfile(destination="Japan")).traits == []

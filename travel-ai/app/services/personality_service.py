@@ -140,7 +140,7 @@ def read_message(message: str, signals: list[ScaleSignal] = (), destination: str
     for signal in signals:
         name, direction = POLES[signal.toward]
         quote = _words(signal.quote)
-        clause = next((c for c in clauses if quote and quote in c), None)
+        clause = next((c for c in clauses if quote and f" {quote} " in f" {c} "), None)  # whole words only
         if name in scales or clause is None or len(quote.split()) > _MAX_QUOTE_WORDS:
             continue  # the list already read it / not their words, or a one-off / a whole sentence isn't proof
         if not [w for w in quote.split() if w not in _VAGUE | place and w[0].isalpha()]:
@@ -151,7 +151,7 @@ def read_message(message: str, signals: list[ScaleSignal] = (), destination: str
         if _NEGATION.search(quote) and any(name in _WORDS[st] for st, _ in _stems(quote)):
             continue  # "not too packed" isn't packed, and isn't firmly slow either
         # Other negations are the model's reading in context: "avoid the tourist traps" is hidden gems.
-        scales[name] = _size(direction, _lead(clause, clause.index(quote), quote), clause)
+        scales[name] = _size(direction, _lead(clause, f" {clause} ".index(f" {quote} "), quote), clause)
     return scales
 
 
