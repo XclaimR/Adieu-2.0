@@ -19,7 +19,7 @@ Agreed 2026-11-21. Adieu is a one-stop travel planner that understands the trave
 - Words like "fun" are never mapped to a scale automatically. The app **asks**, adaptively, the question that removes the most uncertainty for this trip, and stops when confident (usually 4–6 questions, at most 8). "Show me plans" is always one tap away, and it keeps learning with questions about the plan itself.
 - Questions are mostly concrete scenarios with tap answers, mixed with photo this-or-that. Free text is always accepted, with a "something else…" option.
 - Your lasting taste is the low-confidence starting point for each new trip. Only lasting traits feed back from a trip.
-- Instagram: personal accounts can't connect (Meta removed that API). Instead, shared post links and screenshots are read by a **local** model. Adieu keeps what it learned (with where it came from), never the raw screenshots. A "What Adieu knows about me" page allows editing, deleting and "forget everything".
+- Instagram: personal accounts can't connect (Meta removed that API), and Meta's open embed API returns no captions (tested 2026-11-21). So **screenshots**, read by a **local** model, are the main route; a pasted link is accepted and answered with a request for a screenshot. Adieu keeps what it learned (with where it came from), never the raw screenshots. A "What Adieu knows about me" page allows editing, deleting and "forget everything".
 - Group trips: the organizer answers for now. Later, each friend answers from a share link and the plan handles where the group splits.
 
 ### B. "Worth the hype?"
