@@ -1,7 +1,8 @@
 import re
+import uuid
 
-from app.schemas.personality import Note, NoteUpdate, Personality, Scale
-from app.schemas.taste import Taste
+from app.schemas.itinerary import STAY_ID, Itinerary
+from app.schemas.personality import Note, NoteChange, Personality, Scale
 from app.schemas.trip_profile import BudgetLevel, Party, TripProfile
 
 # name: (card label, left pole, right pole, middle) in plain words.
@@ -15,209 +16,55 @@ SCALES: dict[str, tuple[str, str, str, str]] = {
 }
 KNOWN = 0.5  # below this a scale is shown as unknown
 LEAN = 0.25  # |value| below this reads as the middle
-TASTE_CONFIDENCE = 0.3
+STATED_CONFIDENCE = 0.75
+INFERRED_CONFIDENCE = 0.4  # a guess for prompts, "not sure yet" on the card
 CHAT_CONFIDENCE = 0.7
-# "taste" and "chat" (the word list over the profile) are recomputed every turn. Others are kept until replaced:
-# "said" (the traveler's words, read from one message) and, later, "asked" (answers to questions, #20).
-DERIVED = {"taste", "chat"}
-
-# Lasting-taste vibes (TasteService.VIBES) -> leanings.
-_VIBES: dict[str, dict[str, float]] = {
-    "food": {"food": 0.7},
-    "nightlife": {"energy": 0.7},
-    "city": {"energy": 0.3},
-    "wellness": {"pace": -0.6, "energy": -0.5},
-    "beach": {"pace": -0.4},
-    "luxury": {"comfort": 0.7, "money": -0.4},
-    "budget": {"comfort": -0.7},
-    "adventure": {"pace": 0.4, "money": 0.5},
-    "photo": {"crowds": 0.4},
-    "nature": {"crowds": -0.4},
-}
-
-# Words that describe the WHOLE trip and clearly point at one pole of ONE scale. Left out on purpose:
-# - vague words ("fun", "nice", "adventurous"): they don't say which way a scale goes;
-# - single activities ("a spa", "pub crawl", "fine dining", "a hike", "landmarks"): a wish for one day, not the trip;
-# - second effects ("relaxed" is slow pace, not chill evenings).
-# Anything not here stays unknown for the questions in #20 to settle.
-_WORDS: dict[str, dict[str, float]] = {
-    "slow": {"pace": -0.7}, "relax": {"pace": -0.7}, "leisur": {"pace": -0.7},
-    "unwind": {"pace": -0.6}, "laid-back": {"pace": -0.6}, "chill": {"pace": -0.6},
-    "packed": {"pace": 0.7}, "fast-paced": {"pace": 0.7}, "see everything": {"pace": 0.7}, "active": {"pace": 0.5},
-    "nightlife": {"energy": 0.8}, "party": {"energy": 0.8}, "partying": {"energy": 0.8},
-    "hidden gem": {"crowds": -0.7}, "off the beaten": {"crowds": -0.7},
-    "avoid crowd": {"crowds": -0.7}, "no crowd": {"crowds": -0.7}, "away from the crowd": {"crowds": -0.7},
-    "tourist trap": {"crowds": 0.6}, "iconic": {"crowds": 0.7}, "the icons": {"crowds": 0.7}, "must-see": {"crowds": 0.7},
-    "food": {"food": 0.8}, "culinar": {"food": 0.8}, "gastro": {"food": 0.8},
-    "luxur": {"comfort": 0.8}, "upscale": {"comfort": 0.8}, "five-star": {"comfort": 0.8}, "5-star": {"comfort": 0.8},
-    "backpack": {"comfort": -0.8}, "shoestring": {"comfort": -0.8}, "cheap": {"comfort": -0.6},
-}
-# Words that need context, as they're read from raw messages: "good food near the airport" isn't a food trip,
-# and "a party of four" isn't nightlife. Other stems match at any word start.
-_PATTERNS = {
-    "food": r"\bfoodie|\b(slow|street|love|love good|lots of|all about) food\b"
-            r"|\bfood (week|trip|holiday|first|lovers?)\b|\bfood is (the point|everything)\b|^(and )?food( and\b|$)",
-    "party": r"(?<!\bour )(?<!\bmy )(?<!\btravel )\bparty\b(?! of\b| size\b)",
-}
-# A diet is a rule for restaurants, never a food trait (owner's decision).
-_DIET = re.compile(r"\b(veg|veggie|vegetarian|vegan|eggitarian|eggetarian|pescatarian|halal|kosher|jain|allerg\w*"
-                   r"|intoleran\w*|gluten|dietary|don't eat|no (meat|pork|beef))\b")
-# Only for these does "no X" mean the other pole ("no nightlife" = chill evenings). Elsewhere a negation says
-# nothing firm ("not cheap" isn't luxury), so the word is ignored.
-_FLIPPABLE = {"nightlife", "party", "partying", "tourist trap"}
-_NEGATION = re.compile(r"\b(no|not|avoid\w*|without|skip|less|hate|away from|don't|dont)\b")
+# Scales kept from before: older trips' "said" ones and, later, answers to questions (#20).
+KEPT = {"said", "asked"}
 # pole -> (scale, direction)
 POLES = {
     "slow": ("pace", -1), "packed": ("pace", 1), "spend_on_stay": ("money", -1), "spend_on_experiences": ("money", 1),
     "chill": ("energy", -1), "nightlife": ("energy", 1), "hidden_gems": ("crowds", -1), "icons": ("crowds", 1),
     "food_as_fuel": ("food", -1), "food_focus": ("food", 1), "backpacker": ("comfort", -1), "luxury": ("comfort", 1),
 }
-# Intensity, read from the traveler's own words around the trait.
-_STRONG = re.compile(r"\b(very|really|super|so|extremely|totally|absolutely|all about|only|lots of|tons of)\b")
-_MILD = re.compile(r"\b(a bit|a little|slightly|somewhat|kind of|kinda|sort of|fairly|bit of)\b")
-_UNSURE = re.compile(r"\b(maybe|perhaps|might|not sure|probably|possibly|i guess|could be)\b")
-# A phrase about one moment ("one big night out", "a spa afternoon") is a wish for that day, not the trip's personality.
-_ONE_OFF = re.compile(r"\b(one|a single|once)\b(?! (week|month|fortnight|trip|holiday|vacation))"
-                      r"|\ban? (\w+ )?(afternoon|evening|morning|night|day|dinner|lunch)\b")
-# Words that don't say which way any scale goes: vague praise and generic trip talk. A quote made only of these
-# (plus place names) proves nothing; neither does a whole sentence quoted as proof.
-_VAGUE = {"fun", "nice", "amazing", "great", "cool", "good", "awesome", "best", "exciting", "interesting", "special",
-          "memorable", "unique", "different", "epic", "lovely", "perfect", "trip", "holiday", "vacation", "a", "an",
-          "the", "and", "with", "we", "i", "want", "something", "really", "very", "so", "super", "planning", "plan",
-          "going", "go", "visit", "visiting", "travel", "traveling", "travelling", "to", "in", "for", "my", "our",
-          "friends", "partner", "wife", "husband", "family", "kids", "us", "me", "love", "like", "would", "we'd",
-          "i'd", "some", "somewhere", "place", "of", "on", "at", "it", "is", "be"}
-_MAX_QUOTE_WORDS = 12  # a note is a phrase; a whole paragraph quoted as proof proves nothing
-MODEL_ONLY_CONFIDENCE = 0.4  # a pole only the model read: a weak guess for prompts, "not sure yet" on the card
-MAX_NOTES = 30  # shortcut: oldest notes drop off past this; summarise instead if real trips hit it
 _BUDGET = {BudgetLevel.BUDGET: -0.8, BudgetLevel.MID: 0.0, BudgetLevel.LUXURY: 0.8}
 
 
-def _clauses(message: str) -> list[str]:
-    """The message in phrases, so "no" and "one" stay with the words they belong to."""
-    # "but" opens the next phrase (kept, so quotes that include it still match the traveler's words).
-    return [c for c in (_words(c) for c in re.split(r"[,;.!?:]|(?= but )", message.lower())) if c]
-
-
 def _words(text: str) -> str:
-    return " ".join(re.findall(r"[a-z0-9'-]+", text.lower().replace("’", "'")))
+    return " ".join(re.findall(r"[\w'-]+", text.lower().replace("’", "'")))
 
 
-def _stems(clause: str) -> list[tuple[str, int]]:
-    """(listed stem, position) found in a clause."""
-    found = []
-    diet = _DIET.search(clause)
-    for stem, effects in _WORDS.items():
-        if diet and "food" in effects:
+def _clean(text: str) -> str:
+    """Small models sometimes leak JSON punctuation into strings."""
+    return re.sub(r"[\[\]{}\"]+", "", text.split("',")[0]).strip(" '\t\n,.:;")[:120]
+
+
+def check_changes(changes: list[NoteChange], message: str, stored: Personality | None,
+                  itinerary: Itinerary | None) -> list[NoteChange]:
+    """Code checks structure only, never meaning: real words, ids that exist, targets that exist."""
+    said = f" {_words(message)} "
+    ids = {n.id for n in stored.notes} if stored else set()
+    targets = {"trip", *(itinerary.target_ids() if itinerary else ())}
+    kept = []
+    for change in changes:
+        quote, text = _words(change.quote), _clean(change.text)
+        # Scripts without spaces (Japanese, Thai) have no word edges to match on.
+        real = f" {quote} " in said or (not quote.isascii() and quote in said)
+        if not quote or not real or not text:
             continue
-        match = re.search(_PATTERNS.get(stem, rf"\b{re.escape(stem)}"), clause)
-        if match:
-            # The stem's own position, so "lots of" in "lots of food" is still read as intensity.
-            found.append((stem, clause.index(stem, match.start())))
-    return found
-
-
-def _size(direction: int, lead: str, clause: str) -> Scale:
-    """How strongly and how surely, from the traveler's words just before the trait and the rest of the phrase."""
-    amount, confidence = (0.9, 0.85) if _STRONG.search(lead) else (0.4, 0.7) if _MILD.search(lead) else (0.7, 0.75)
-    if _UNSURE.search(clause):
-        confidence = 0.4  # a guess: kept as a weak lean, shown as unknown
-    return Scale(value=direction * amount, confidence=confidence, source="said")
-
-
-def _lead(clause: str, at: int, words: str) -> str:
-    """The trait's words plus the three before them: where "really" or "a bit" would be."""
-    return " ".join(clause[:at].split()[-3:] + [words])
-
-
-def _listed(clause: str) -> dict[str, tuple[int, int]]:
-    """Scales the word list reads in one phrase: name -> (direction, position). "no nightlife" flips; other
-    negations ("not cheap") say nothing firm, so the word is ignored."""
-    out = {}
-    for stem, at in _stems(clause):
-        negated = _NEGATION.search(clause[:at])
-        if negated and stem not in _FLIPPABLE:
+        if change.op == "remove" and change.id not in ids:
             continue
-        for name, v in _WORDS[stem].items():
-            out[name] = (-1 if (v < 0) != bool(negated) else 1, at)
-    return out
+        target, then = change.target, change.then
+        if itinerary and then == "change" and change.category == "stay" and re.fullmatch(r"d\d+", target):
+            target = STAY_ID  # one stay serves every night, whichever day they mention
+        if target not in targets:
+            # Without a plan everything is about the trip; with one, a wrong id must not edit the whole trip.
+            target, then = "trip", "none" if itinerary else then
+        kept.append(change.model_copy(update={"text": text, "target": target, "then": then}))
+    return kept
 
 
-def _covering(quote: str, clauses: list[str]) -> list[str]:
-    """The phrases of the message a quote spans, or [] if those aren't the traveler's exact words."""
-    text, spans, at = " ".join(clauses), [], 0
-    for c in clauses:
-        spans.append((at, at + len(c), c))
-        at += len(c) + 1
-    start = f" {text} ".find(f" {quote} ") if quote else -1
-    if start < 0:
-        return []
-    return [c for s, e, c in spans if s < start + len(quote) and e > start]
-
-
-def _check_note(update: NoteUpdate, clauses: list[str], place: set[str]) -> tuple[Note, str] | None:
-    """Keep a model-read note only if it is the traveler's own words and says something. Code, not the model,
-    decides it's a one-off ("one big night out" is a moment), and drops a pole the words don't support."""
-    quote = _words(update.quote)
-    covered = _covering(quote, clauses)  # whole words only; may run across a comma
-    if not covered or len(quote.split()) > _MAX_QUOTE_WORDS:
-        return None  # not their words, or a whole paragraph
-    if not [w for w in quote.split() if w not in _VAGUE | place and w[0].isalpha()]:
-        return None  # "fun", "planning a trip to Japan": nothing to keep
-    clause = " ".join(covered)
-    scope = "moment" if any(_ONE_OFF.search(c) for c in covered) else update.scope
-    toward = update.toward if scope == "trip" else None
-    if toward and POLES[toward][0] == "food" and _DIET.search(clause):
-        toward = None
-    if toward:
-        name, direction = POLES[toward]
-        listed = _listed(quote)
-        if listed and (name not in listed or listed[name][0] != direction):
-            toward = None  # the words point the other way, or are about another scale
-        elif _NEGATION.search(quote) and any(name in _WORDS[st] for st, _ in _stems(quote)):
-            toward = None  # "not too packed" isn't packed, and isn't firmly slow either
-    topic = "_".join(_words(update.topic).split())[:40] or "note"
-    return Note(topic=topic, text=update.quote.strip(), scope=scope, toward=toward), clause
-
-
-def read_message(message: str, notes: list[NoteUpdate] = (), destination: str | None = None
-                 ) -> tuple[dict[str, Scale], list[Note]]:
-    """What the latest message says: scales from the traveler's own words (word list), and the checked notes.
-    A pole only the model read (no listed word confirms it) is kept as a weak guess."""
-    clauses = _clauses(message)
-    trip_wide = [c for c in clauses if not _ONE_OFF.search(c)]
-    place = set(_words(destination or "").split())  # shortcut: other place names in the message still count as words
-    scales: dict[str, Scale] = {}
-    for clause in trip_wide:
-        for name, (direction, at) in _listed(clause).items():
-            scales[name] = _size(direction, _lead(clause, at, clause[at:].split(" ", 1)[0]), clause)
-    kept: list[Note] = []
-    for update in notes:
-        checked = _check_note(update, clauses, place)
-        if checked is None:
-            continue
-        note, clause = checked
-        kept.append(note)
-        if note.toward and POLES[note.toward][0] not in scales:
-            name, direction = POLES[note.toward]
-            quote = _words(note.text)
-            scale = _size(direction, _lead(clause, f" {clause} ".index(f" {quote} "), quote), clause)
-            scales[name] = scale.model_copy(update={"confidence": min(scale.confidence, MODEL_ONLY_CONFIDENCE)})
-    return scales, kept
-
-
-def seed(taste: Taste) -> dict[str, Scale]:
-    """Leanings from lasting taste, at low confidence: a starting point, never shown as known."""
-    values: dict[str, list[float]] = {}
-    for vibe in taste.vibes:
-        for name, v in _VIBES.get(vibe, {}).items():
-            values.setdefault(name, []).append(v)
-    return {n: Scale(value=round(sum(vs) / len(vs), 2), confidence=TASTE_CONFIDENCE, source="taste")
-            for n, vs in values.items()}
-
-
-def from_profile(profile: TripProfile) -> dict[str, Scale]:
-    """Checked profile facts: budget and kids. Mood words aren't read here; the model may have written them."""
+def _from_profile(profile: TripProfile) -> dict[str, Scale]:
     scales: dict[str, Scale] = {}
     if profile.budget_level:
         scales["comfort"] = Scale(value=_BUDGET[profile.budget_level], confidence=CHAT_CONFIDENCE, source="chat")
@@ -238,37 +85,89 @@ def trait(name: str, scale: Scale | None) -> str | None:
 
 
 def leaning(name: str, scale: Scale | None) -> str | None:
-    """A weak guess (from lasting taste) in plain words, or None."""
+    """A weak guess in plain words, or None."""
     if scale is None or scale.confidence >= KNOWN or abs(scale.value) < LEAN:
         return None
     _, left, right, _ = SCALES[name]
     return left if scale.value < 0 else right
 
 
+def describe_note(note: Note) -> str:
+    guess = ", inferred: a guess, never a reason to drop what they said" if note.source == "inferred" else ""
+    return f"{note.kind}: {note.text}{guess}"
+
+
 class PersonalityService:
 
     @staticmethod
-    def update(stored: Personality | None, profile: TripProfile, taste: Taste, notes: list[NoteUpdate] = (),
-               message: str = "", drop_topics: list[str] = ()) -> Personality:
-        """Taste and checked profile facts are recomputed; what earlier messages said is kept; what the latest
-        message says wins. A note on the same topic replaces the old one ("actually, packed days")."""
-        scales = {**seed(taste), **from_profile(profile)}
+    def update(stored: Personality | None, profile: TripProfile, changes: list[NoteChange] = ()) -> Personality:
+        """Applies checked changes. Nothing is ever overwritten: a changed mind is a remove plus an add."""
+        old = stored.notes if stored else []
+        gone = {c.id for c in changes if c.op == "remove"}
+        notes = [n for n in old if n.id not in gone]
+        have = {(n.target, n.kind, n.text.lower()) for n in notes}
+        for c in changes:
+            key = (c.target, c.kind, c.text.lower())
+            if c.op != "add" or key in have:
+                continue
+            have.add(key)
+            # shortcut: no cap, dropping the oldest would lose "no beach"; summarise if trips pass ~50 notes.
+            notes.append(Note(id=f"n{uuid.uuid4().hex[:6]}",
+                              **c.model_dump(include=set(Note.model_fields) - {"id"})))
+
+        scales = _from_profile(profile)
         if stored:
-            scales.update({n: s for n, s in stored.scales.items() if s.source not in DERIVED})
-        gone = {"_".join(_words(t).split()) for t in drop_topics}
-        for n in (stored.notes if stored else []):
-            if n.topic in gone and n.toward and scales.get(POLES[n.toward][0], Scale()).source == "said":
-                del scales[POLES[n.toward][0]]  # "forget the slow thing": the card forgets it too
-        said, new_notes = read_message(message, notes, profile.destination)
-        for name, scale in said.items():
-            old = scales.get(name)
-            # A weak guess never overwrites a known scale (said earlier, or a profile fact like kids).
-            if scale.confidence >= KNOWN or not (old and old.confidence >= KNOWN):
-                scales[name] = scale
-        new_notes = list({n.topic: n for n in new_notes}.values())
-        dropped = gone | {n.topic for n in new_notes}
-        kept = [n for n in (stored.notes if stored else []) if n.topic not in dropped] + new_notes
-        return Personality(scales=scales, notes=kept[-MAX_NOTES:])
+            forgotten = {POLES[n.toward][0] for n in old if n.id in gone and n.toward}
+            scales.update({k: s for k, s in stored.scales.items() if s.source in KEPT and k not in forgotten})
+        for n in notes:
+            if n.toward and n.target == "trip" and not n.once and n.category != "diet":
+                name, direction = POLES[n.toward]
+                confidence = INFERRED_CONFIDENCE if n.source == "inferred" else STATED_CONFIDENCE
+                # A guess never overwrites something known.
+                if confidence < KNOWN and name in scales and scales[name].confidence >= KNOWN:
+                    continue
+                scales[name] = Scale(value=direction * (0.9 if n.strong else 0.7), confidence=confidence, source="note")
+        return Personality(scales=scales, notes=notes)
+
+    @staticmethod
+    def moods(current: list[str], before: Personality | None, after: Personality) -> list[str]:
+        """The trip's moods follow its stated notes: taking a note back takes its mood with it."""
+        def said(p: Personality | None) -> list[str]:
+            return [n.mood.strip().lower() for n in (p.notes if p else [])
+                    if n.mood and n.target == "trip" and n.source == "stated" and not n.once and n.kind != "avoid"]
+        now = said(after)
+        lost = set(said(before)) - set(now)
+        return list(dict.fromkeys([m for m in current if m not in lost] + now))
+
+    @staticmethod
+    def detach(personality: Personality, keep: set[str] = frozenset()) -> Personality:
+        """Notes whose slot is gone (new destination, another plan) become things to fit in."""
+        notes = [n if n.target in {"trip", *keep} else n.model_copy(update={"target": "trip", "once": True})
+                 for n in personality.notes]
+        return personality.model_copy(update={"notes": notes})
+
+    @staticmethod
+    def plan_view(itinerary: Itinerary | None, personality: Personality | None,
+                  days: set[str] | None = None) -> str:
+        """The trip with each note under what it is about. `days` limits it to the part being worked on."""
+        notes = personality.notes if personality else []
+
+        def under(target: str, pad: str = "  ") -> list[str]:
+            return [f"{pad}note {n.id} ({describe_note(n)})" for n in notes if n.target == target]
+
+        lines = ["TRIP [trip]", *under("trip")]
+        if not itinerary:
+            return "\n".join(lines)
+        stay = itinerary.stay
+        price = f", est. {stay.tier} price" if stay and stay.tier else ""
+        lines += [f"STAY [{STAY_ID}] {stay.name if stay else 'none chosen yet'}{price}, all nights", *under(STAY_ID)]
+        for day in itinerary.days:
+            if days is not None and day.id not in days:
+                continue
+            lines += [f"DAY {day.day_number} [{day.id}] {day.theme or ''}".rstrip(), *under(day.id)]
+            for a in day.activities:
+                lines += [f"  [{a.id}] {a.name} ({a.category}, {a.time_of_day or 'any time'})", *under(a.id, "    ")]
+        return "\n".join(lines)
 
     @staticmethod
     def card(personality: Personality | None) -> Personality:
@@ -290,7 +189,8 @@ class PersonalityService:
     @staticmethod
     def moments(personality: Personality | None) -> list[str]:
         """The one-off things to fit in, in the order the prompts number them ([m0], [m1], ...)."""
-        return [n.text for n in (personality.notes if personality else []) if n.scope == "moment"]
+        return [n.text for n in (personality.notes if personality else [])
+                if n.once and n.target == "trip" and n.kind != "avoid"]
 
     @staticmethod
     def match_trait(said: str | None, allowed: list[str]) -> str | None:

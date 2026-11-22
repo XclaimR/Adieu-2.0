@@ -6,17 +6,16 @@ from app.services.grounding import extract_duration, ground_updates
 
 def test_invented_details_are_dropped():
     # What qwen3:8b returned for "I want to go to Japan".
-    invented = ProfileUpdates(destination="Japan", mood=["adventurous", "culture", "foodie"], start_date="2024-04-01",
+    invented = ProfileUpdates(destination="Japan", start_date="2024-04-01",
                               duration_days=7, party=Party.SOLO, party_size=1, budget_level=BudgetLevel.MID)
     grounded = ground_updates(invented, "I want to go to Japan")
     assert grounded.destination == "Japan"
-    assert grounded.mood == []
     assert (grounded.start_date, grounded.duration_days, grounded.party, grounded.party_size, grounded.budget_level) == \
         (None, None, None, None, None)
 
 
 def test_stated_details_are_kept():
-    updates = ProfileUpdates(destination="Tokyo", mood=["relaxed"], party=Party.COUPLE, party_size=2,
+    updates = ProfileUpdates(destination="Tokyo", party=Party.COUPLE, party_size=2,
                              duration_days=5, budget_level=BudgetLevel.BUDGET, start_date="May")
     grounded = ground_updates(updates, "Tokyo in May, something chill with my wife, 5 days, tight budget")
     assert grounded == updates
@@ -26,8 +25,6 @@ def test_stated_details_are_kept():
     ("Just me", ProfileUpdates(party=Party.SOLO)),
     ("My partner", ProfileUpdates(party=Party.COUPLE)),
     ("Family with kids", ProfileUpdates(party=Party.FAMILY, kids=True)),
-    ("Foodie", ProfileUpdates(mood=["foodie"])),
-    ("Relaxed", ProfileUpdates(mood=["relaxed"])),
 ])
 def test_chip_answers_are_kept(chip, updates):
     assert ground_updates(updates, chip) == updates

@@ -56,6 +56,7 @@ export type TripProfile = {
 };
 
 export type Activity = {
+  id: string;
   name: string;
   category: string;
   time_of_day: string | null;
@@ -87,7 +88,15 @@ export type Draft = {
 export type Scale = { value: number; confidence: number; source: string | null };
 
 /** Six scales with confidence; `traits` are the known ones in plain words, `unknown` the scale labels still open. */
-export type Note = { topic: string; text: string; scope: "trip" | "moment"; toward: string | null };
+export type Note = {
+  id: string;
+  /** What it is about: "trip", a day ("d2"), the stay ("s1") or an activity id. */
+  target: string;
+  kind: "must" | "avoid" | "want";
+  text: string;
+  source: "stated" | "inferred";
+  once: boolean;
+};
 
 export type Personality = { scales: Record<string, Scale>; notes: Note[]; traits: string[]; unknown: string[] };
 

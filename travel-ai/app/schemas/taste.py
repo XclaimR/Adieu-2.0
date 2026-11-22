@@ -13,8 +13,3 @@ class Vibe(BaseModel):
     label: str
     emoji: str
     description: str
-
-
-class TasteUpdates(BaseModel):
-    likes: list[str] = Field(default_factory=list)
-    dislikes: list[str] = Field(default_factory=list)

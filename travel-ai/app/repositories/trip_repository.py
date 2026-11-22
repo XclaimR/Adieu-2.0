@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from app.database.models.trip import MessageModel, PickFeedbackModel, TripModel
 from app.schemas.api import MessageOut, TripOut, TripSummary
 from app.schemas.draft import Draft
-from app.schemas.personality import Personality
+from app.schemas.personality import Note, Personality
 from app.schemas.itinerary import Itinerary
 from app.schemas.place import OptionSet, Pick
 from app.schemas.trip_profile import TripProfile
@@ -15,9 +15,8 @@ class TripRepository:
     def __init__(self, db: Session):
         self.db = db
 
-    def create(self, user_id: str, title: str, profile: TripProfile, personality: Personality | None = None) -> TripModel:
-        trip = TripModel(user_id=user_id, title=title, profile=profile.model_dump(mode="json"), drafts=[], state={},
-                         personality=personality.model_dump(mode="json", include={"scales", "notes"}) if personality else None)
+    def create(self, user_id: str, title: str, profile: TripProfile) -> TripModel:
+        trip = TripModel(user_id=user_id, title=title, profile=profile.model_dump(mode="json"), drafts=[], state={})
         self.db.add(trip)
         self.db.commit()
         self.db.refresh(trip)
@@ -79,8 +78,24 @@ class TripRepository:
         return TripProfile.model_validate(trip.profile or {})
 
     @staticmethod
-    def personality(trip: TripModel) -> Personality | None:
-        return Personality.model_validate(trip.personality) if trip.personality else None
+    def personality(trip: TripModel) -> Personality:
+        personality = Personality.model_validate(trip.personality or {})
+        # Trips from before notes kept these in profile.preferences; the next turn saves them as notes.
+        ids = {n.id for n in personality.notes}
+        for pref in TripProfile.model_validate(trip.profile or {}).preferences:
+            key = pref.key.lower()
+            if f"p_{key}" in ids:
+                continue
+            category = ("diet" if "diet" in key else "access" if key in ("mobility", "accessibility") else "general")
+            kind = "avoid" if key.startswith("avoid") else "must" if category != "general" else "want"
+            text = pref.value if category != "general" or kind == "avoid" else f"{pref.key.replace('_', ' ')}: {pref.value}"
+            personality.notes.append(Note(id=f"p_{key}", text=text, category=category, kind=kind,
+                                          source="inferred" if pref.source == "inferred" else "stated"))
+        return personality
+
+    @staticmethod
+    def save_personality(trip: TripModel, personality: Personality) -> None:
+        trip.personality = personality.model_dump(mode="json", include={"scales", "notes"})
 
     @staticmethod
     def panel(trip: TripModel) -> OptionSet | None:

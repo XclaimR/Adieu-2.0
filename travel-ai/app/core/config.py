@@ -15,6 +15,8 @@ class Settings:
     # Switching providers is a config change only.
     LLM_BASE_URL = os.getenv("LLM_BASE_URL", "http://localhost:11434/v1")
     LLM_MODEL = os.getenv("LLM_MODEL", "qwen3:8b")
+    # Optional stronger model for drafts and edits. Empty means LLM_MODEL does everything.
+    LLM_MODEL_PLAN = os.getenv("LLM_MODEL_PLAN") or LLM_MODEL
     LLM_API_KEY = os.getenv("LLM_API_KEY", "ollama")
     # A 7-day draft takes ~140s on qwen3:8b locally; nginx allows 600s, enough for one retry.
     LLM_TIMEOUT_SECONDS = float(os.getenv("LLM_TIMEOUT_SECONDS", "240"))

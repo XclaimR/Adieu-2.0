@@ -1,232 +1,246 @@
-from app.schemas.personality import NoteUpdate, Personality, Scale
-from app.schemas.place import PickCategory, PlaceCandidate
-from app.schemas.taste import Taste
+import pytest
+
+from app.schemas.activity import Activity
+from app.schemas.dayplan import DayPlan
+from app.schemas.itinerary import Itinerary
+from app.schemas.personality import Note, NoteChange
+from app.schemas.place import Pick, PickCategory, PlaceCandidate
 from app.schemas.trip_profile import BudgetLevel, Party, TripProfile
 from app.schemas.turn import TurnAction, TurnDecision
-from app.services.llm_client import LLMClient
-from app.services.personality_service import PersonalityService
+from app.services.draft_service import DraftPlan, DraftService, PlacePool, PlanDay, PlanEdit, PlanStop, fulfilled
+from app.services.personality_service import PersonalityService, check_changes
 from app.services.places_service import traveler_fit
 from app.services.ranking_service import Ranking, RankedItem, RankingService
-from tests.v1.test_api import new_trip, say
+from app.services.llm_client import LLMClient
+from app.services.turn_service import TurnService, decision_schema
+from tests.v1.test_api import new_trip, ready_trip, say
 
 
-def notes(*pairs):
-    """(toward, quote) pairs as trip notes the model proposed."""
-    return [NoteUpdate(quote=q, topic=t, scope="trip", toward=t) for t, q in pairs]
+def add(text, quote=None, **kw):
+    return NoteChange(op="add", text=text, quote=quote or text, **kw)
 
 
-def card(message="", signals=(), profile=TripProfile(), taste=Taste(), stored=None):
-    return PersonalityService.card(PersonalityService.update(stored, profile, taste, notes(*signals), message))
+def update(*changes, stored=None, profile=TripProfile()):
+    return PersonalityService.update(stored, profile, changes)
 
 
-def test_lasting_taste_seeds_leanings_but_the_card_shows_them_as_unknown():
-    p = card(taste=Taste(vibes=["food", "nightlife", "wellness"]))
-    assert p.scales["food"].confidence < 0.5 and p.scales["food"].value > 0
-    assert p.traits == []
-    assert p.unknown == ["Pace", "Money", "Energy", "Crowds", "Food", "Comfort"]
-    known, leans = PersonalityService.traits(p)
-    assert known == [] and "Food is the point" in leans
+def plan():
+    return Itinerary(destination="Tokyo", stay=Pick(place_id="palace", name="Palace", category="stay", tier="luxury"),
+                     days=[DayPlan(day_number=1, activities=[
+                               Activity(id="i1", name="Temple", category="do", time_of_day="morning", place_id="p1")]),
+                           DayPlan(day_number=2, activities=[
+                               Activity(id="i2", name="Museum", category="do", time_of_day="morning", place_id="p2"),
+                               Activity(id="i3", name="Narisawa", category="eat", time_of_day="evening", place_id="p3")])])
 
 
-def test_the_travelers_own_words_set_the_matching_scales():
-    p = card("A slow food week, away from the crowds", profile=TripProfile(budget_level=BudgetLevel.LUXURY))
-    assert p.traits == ["Slow pace", "Avoids crowds", "Food is the point", "Luxury"]
-    assert p.unknown == ["Money", "Energy"]
+def test_a_second_avoid_never_erases_the_first():
+    p = update(add("beach", kind="avoid"))
+    p = update(add("nightlife", kind="avoid"), stored=p)
+    assert [n.text for n in p.notes] == ["beach", "nightlife"]
+    assert [n.text for n in update(add("beach", kind="avoid"), add("nightlife", kind="avoid")).notes] == \
+        ["beach", "nightlife"]
 
 
-def test_model_written_mood_words_dont_count_only_what_they_said():
-    # The model stored mood "luxury" for a spa wish; the card reads the message, not the mood.
-    assert card("Paris with my partner", profile=TripProfile(mood=["luxury", "relaxed"])).traits == []
+def test_taking_a_note_back_removes_only_that_note():
+    p = update(add("beach", kind="avoid"), add("nightlife", kind="avoid"))
+    back = NoteChange(op="remove", id=p.notes[0].id, text="beach is fine", quote="beach is fine")
+    assert [n.text for n in update(back, stored=p).notes] == ["nightlife"]
 
 
-def test_vague_words_and_single_activities_set_nothing():
-    for message in ("Planning a fun trip to Spain!", "We're adventurous", "Paris, and one spa afternoon",
-                    "A slow week, but one big night out for my birthday"):
-        traits = card(message, signals=[("luxury", "spa afternoon"), ("nightlife", "one big night out")]).traits
-        assert not any(t.startswith(("Luxury", "Nightlife", "Packed")) for t in traits), message
-    assert card("A slow week, but one big night out").traits == ["Slow pace"]
-    assert card("One week in Lisbon, slow").traits == ["Slow pace"]  # a trip length isn't a one-off
+def test_a_one_time_instruction_stores_nothing_and_keeps_the_notes_on_that_slot():
+    p = update(add("birthday dinner", target="i3"))
+    do = NoteChange(op="do", id=p.notes[0].id, target="i3", text="change restaurant", quote="change that restaurant")
+    assert update(do, stored=p).notes == p.notes
 
 
-def test_negation_flips_only_where_no_x_means_the_other_pole():
-    assert card("No nightlife, lots of food").traits == ["Chill evenings", "Food is the point (strongly)"]
-    for message in ("Not cheap", "No luxury please", "Not too packed"):
-        assert card(message, signals=[("packed", "not too packed"), ("slow", "not too packed")]).traits == [], message
+def test_only_real_quotes_and_existing_note_ids_are_kept():
+    stored = update(add("beach", kind="avoid"))
+    changes = [add("slow", "really slow"), add("party", "party every night"), add("art", "art"),
+               NoteChange(op="remove", id="nope", text="beach", quote="beach")]
+    kept = check_changes(changes, "Really slow, partying at the beach", stored, None)
+    assert [c.text for c in kept] == ["slow"]
 
 
-def test_intensity_and_certainty_come_from_their_words():
-    assert card("We want it really slow").traits == ["Slow pace (strongly)"]
-    assert card("A bit slow is fine").traits == ["Slow pace (a little)"]
-    assert card("Maybe slow? Not sure").traits == []  # a guess stays unknown
-    # The model read "quiet" as chill evenings: no listed word confirms it, so it stays a weak guess.
-    p = card("we want it really slow and quiet", signals=[("chill", "quiet")])
-    assert p.traits == ["Slow pace (strongly)"] and "Chill evenings" in PersonalityService.traits(p)[1]
+@pytest.mark.parametrize("message,quote", [
+    ("Sin museos, por favor", "sin museos"),
+    ("美術館は行きたくない", "美術館"),
+    ("I don’t want crowds", "don't want crowds"),
+])
+def test_quotes_work_in_any_language(message, quote):
+    assert check_changes([add("a wish", quote)], message, None, None)
 
 
-def test_model_only_poles_are_weak_guesses_and_need_their_words():
-    msg = "Barcelona, avoid the tourist traps, we want what locals love"
-    assert card(msg).traits == ["Avoids crowds"]  # the list reads "avoid the tourist traps" on its own
-    # "exploring" read as hidden gems (seen live on Gemini): kept as a guess, never shown as known.
-    p = card("Adventurous: street food and exploring", signals=[("hidden_gems", "exploring")])
-    assert p.traits == ["Food is the point"] and "Avoids crowds" in PersonalityService.traits(p)[1]
-    assert card(msg, signals=[("slow", "avoid tourist traps")]).traits == ["Avoids crowds"]  # "slow": not their words
-    assert card("honestly just doing nothing", signals=[("luxury", "prioritizing comfort")]).traits == []  # invented
-    assert card("Something fun!", signals=[("nightlife", "fun")]).traits == []  # vague
-    assert card("partying", signals=[("icons", "art")]).traits == ["Nightlife"]  # "art" isn't a word in "partying"
-    fun = "Planning a fun trip to Japan with friends!"
-    assert card(fun, signals=[("slow", fun)]).traits == []  # a whole sentence isn't proof
-    assert card(fun, signals=[("slow", "fun trip to Japan")], profile=TripProfile(destination="Japan")).traits == []
-    assert card("A slow week", signals=[("nightlife", "slow week")]).traits == ["Slow pace"]  # about another scale
+def test_targets_must_exist_and_a_stay_wish_for_a_day_means_the_stay():
+    cheaper = add("cheaper", target="d1", category="stay", then="change")
+    assert check_changes([cheaper], "cheaper", None, plan())[0].target == "s1"
+    unknown = check_changes([add("sushi", target="i9", then="change")], "sushi", None, plan())[0]
+    assert (unknown.target, unknown.then) == ("trip", "none")  # never a whole-trip edit by accident
 
 
-def test_family_and_budget_are_checked_facts():
-    assert card(profile=TripProfile(party=Party.FAMILY)).traits == ["Chill evenings"]
-    # A weak model-only guess ("beach holiday" read as chill) doesn't wipe the fact (seen live).
-    assert card("a beach holiday", signals=[("chill", "beach holiday")],
-                profile=TripProfile(party=Party.FAMILY)).traits == ["Chill evenings"]
-    assert card(profile=TripProfile(budget_level=BudgetLevel.MID)).traits == ["Mid-range comfort"]
+def test_the_models_schema_only_allows_ids_on_this_trip():
+    schema = decision_schema(plan())
+    change = {"op": "add", "text": "x", "quote": "x", "target": "i2"}
+    assert schema.model_validate({"action": "chat", "reply": "ok", "note_changes": [change]})
+    with pytest.raises(ValueError):
+        schema.model_validate({"action": "chat", "reply": "ok", "note_changes": [{**change, "target": "i9"}]})
 
 
-def test_answers_from_elsewhere_are_kept():
-    asked = Personality(scales={"money": Scale(value=0.9, confidence=0.9, source="asked")})
-    p = card(profile=TripProfile(budget_level=BudgetLevel.BUDGET), taste=Taste(vibes=["luxury"]), stored=asked)
-    assert p.traits == ["Money goes to experiences (strongly)", "Backpacker comfort"]
+def test_taking_a_note_back_never_edits_the_plan():
+    back = NoteChange(op="remove", id="n1", text="beach", quote="beach is fine", then="change")
+    d = TurnDecision(action=TurnAction.EDIT_ITINERARY, reply="ok", note_changes=[back], edit_request="beach is fine")
+    ready = TripProfile(destination="Bali", mood=["relaxed"], party=Party.COUPLE, duration_days=3)
+    turn = TurnService.plan(d, ready, message="beach is fine", asked=[], questions_streak=0, has_drafts=True,
+                            has_itinerary=True)
+    assert turn.action == TurnAction.CHAT
 
 
-def test_prompts_get_known_traits_and_weak_guesses_separately():
-    p = PersonalityService.update(None, TripProfile(party=Party.SOLO), Taste(vibes=["nightlife"]), message="slow")
-    text = traveler_fit(TripProfile(party=Party.SOLO), p)
-    assert "Solo traveler" in text
-    assert "personality: Slow pace." in text
-    assert "Weak guesses, from their usual taste or a hint (don't over-weight): Nightlife." in text
-    assert traveler_fit(TripProfile(), None) == ""
+def test_an_edit_the_model_forgot_to_mark_still_changes_its_target():
+    d = TurnDecision(action=TurnAction.EDIT_ITINERARY, reply="ok", note_changes=[add("more relaxed", target="d2")])
+    assert [c.target for c in TurnService.to_change(d)] == ["d2"]
+
+
+def test_mood_follows_stated_notes_only():
+    before = update()
+    after = update(add("hiking trip", mood="adventurous"), add("early nights", source="inferred", mood="relaxed"))
+    moods = PersonalityService.moods([], before, after)
+    assert moods == ["adventurous"]
+    back = NoteChange(op="remove", id=after.notes[0].id, text="hiking", quote="no hiking")
+    assert PersonalityService.moods(moods, after, update(back, stored=after)) == []
+
+
+def test_the_card_is_derived_from_trip_wide_notes():
+    slow = add("slow", toward="slow", strong=True)
+    night = add("one big night out", toward="nightlife", once=True)
+    p = update(slow, night)
+    assert PersonalityService.card(p).traits == ["Slow pace (strongly)"]
+    assert PersonalityService.moments(p) == ["one big night out"]
+    back = NoteChange(op="remove", id=p.notes[0].id, text="slow", quote="forget slow")
+    assert PersonalityService.card(update(back, stored=p)).traits == []
+
+
+def test_inferred_is_a_guess_and_never_beats_a_known_fact():
+    guess = add("out late", toward="nightlife", source="inferred")
+    assert PersonalityService.traits(update(guess)) == ([], ["Nightlife"])
+    family = TripProfile(party=Party.FAMILY, budget_level=BudgetLevel.MID)
+    assert PersonalityService.card(update(guess, profile=family)).traits == ["Chill evenings", "Mid-range comfort"]
+
+
+def test_prompts_separate_hard_limits_wishes_and_moments():
+    p = update(add("beach", kind="avoid"), add("slow"), add("cooking class", once=True),
+               add("bars", kind="avoid", source="inferred"))
+    limits, wishes, moments = [line for line in traveler_fit(TripProfile(), p).split("\n") if "personality" not in line]
+    assert "avoid: beach" in limits and "bars" not in limits  # a guess never removes places
+    assert "slow" in wishes and "bars, inferred" in wishes
+    assert "[m0] 'cooking class'" in moments
+
+
+def test_each_note_is_shown_under_what_it_is_about():
+    p = update(add("nothing early", target="d2"), add("birthday", target="i3"), add("slow"))
+    view = PersonalityService.plan_view(plan(), p, {"d2"})
+    assert "Temple" not in view
+    assert view.index("slow") < view.index("[d2]") < view.index("nothing early") < view.index("[i3]") < view.index("birthday")
+
+
+def test_edits_touch_only_what_is_in_scope():
+    before, after = plan(), plan()
+    hotel = PlaceCandidate(place_id="mid", name="Niwa", category=PickCategory.STAY, tier="mid")
+    cafe = PlaceCandidate(place_id="cafe", name="Cafe", category=PickCategory.EAT)
+    DraftService._apply_edits(after, [
+        PlanEdit(op="replace", item_id="i3", place="c1"),
+        PlanEdit(op="replace", item_id="i1", place="c1"),  # out of scope
+        PlanEdit(op="replace", item_id="s1", place="c0"),  # out of scope
+        PlanEdit(op="remove", item_id="i2"),  # out of scope
+    ], {"c0": hotel, "c1": cafe}, {"i3"}, set(), {"d1", "d2"})
+    assert after.stay == before.stay and after.days[0] == before.days[0]
+    museum, dinner = after.days[1].activities
+    assert museum == before.days[1].activities[0]
+    assert (dinner.id, dinner.name, dinner.time_of_day) == ("i3", "Cafe", "evening")
+
+
+def test_the_stay_changes_alone_and_only_to_a_stay():
+    before, after = plan(), plan()
+    places = {"c0": PlaceCandidate(place_id="bar", name="Bar", category=PickCategory.DO),
+              "c1": PlaceCandidate(place_id="mid", name="Niwa", category=PickCategory.STAY)}
+    DraftService._apply_edits(after, [PlanEdit(op="replace", item_id="s1", place="c0")], places, {"s1"}, set(), set())
+    assert after == before
+    DraftService._apply_edits(after, [PlanEdit(op="replace", item_id="s1", place="c1")], places, {"s1"}, set(), set())
+    assert after.stay.name == "Niwa" and after.days == before.days
+
+
+def test_moving_an_item_keeps_its_id():
+    after = plan()
+    DraftService._apply_edits(after, [PlanEdit(op="move", item_id="i3", day_id="d1")], {}, {"i3"}, set(), {"d1", "d2"})
+    assert [a.id for a in after.days[0].activities] == ["i1", "i3"]
+
+
+def test_plans_and_notes_saved_before_ids_still_load():
+    old = {"destination": "Rome", "days": [{"day_number": 1, "activities": [{"name": "Forum", "category": "do"}]}]}
+    assert Itinerary.model_validate(old) == Itinerary.model_validate(old)
+    note = Note.model_validate({"topic": "birthday", "text": "one big night", "scope": "moment", "toward": None})
+    assert (note.target, note.once, note.text) == ("trip", True, "one big night")
+    assert note.id == Note.model_validate({"topic": "birthday", "text": "one big night", "scope": "moment"}).id
+
+
+def test_old_preferences_become_notes_on_the_next_turn(client, auth, db_session):
+    from app.database.models.trip import TripModel
+    trip = new_trip(client, auth)
+    row = db_session.get(TripModel, trip["id"])
+    row.profile = {"preferences": [{"key": "diet", "value": "vegan", "source": "stated"}]}
+    db_session.commit()
+    turn = say(client, auth, trip["id"], "hello")
+    assert turn["trip"]["profile"]["preferences"] == []
+    assert [(n["text"], n["category"], n["kind"]) for n in turn["trip"]["personality"]["notes"]] == [("vegan", "diet", "must")]
+
+
+def test_drafts_say_which_stop_fulfils_each_moment_and_choosing_maps_the_note():
+    places = [PlaceCandidate(place_id=f"p{i}", name=n, category=PickCategory.DO)
+              for i, n in enumerate(["Rooftop Bar", "Old Museum"])]
+    made = DraftPlan(title="t", summary="s", days=[PlanDay(theme="d", stops=[
+        PlanStop(place="Rooftop Bar", ref=0, time_of_day="evening", note="party", for_moment=0),
+        PlanStop(place="Old Museum", ref=1, time_of_day="morning", note="look", for_moment=7)])])
+    itinerary = PlacePool(places).to_itinerary(made, "Rome", ["one big night out"])
+    assert fulfilled(itinerary) == {"one big night out"}
+    [note] = DraftService.map_moments(itinerary, update(add("one big night out", once=True)).notes)
+    assert note.target == itinerary.days[0].activities[1].id
 
 
 def test_picks_name_only_a_known_trait(monkeypatch):
     monkeypatch.setattr(LLMClient, "generate_structured", staticmethod(lambda prompt, schema: Ranking(ranked=[
         RankedItem(ref=0, why="a", trait="food is the point."),
-        RankedItem(ref=1, why="b", trait="Nightlife"),  # only a weak guess: not shown
+        RankedItem(ref=1, why="b", trait="Nightlife"),
         RankedItem(ref=2, why="c", trait="fun"),
     ])))
-    p = PersonalityService.update(None, TripProfile(), Taste(vibes=["nightlife"]), message="foodie trip")
     places = [PlaceCandidate(place_id=f"p{i}", name=f"P{i}", category=PickCategory.EAT) for i in range(3)]
-    picks = RankingService.rank(PickCategory.EAT, places, TripProfile(), Taste(), personality=p)
+    picks = RankingService.rank(PickCategory.EAT, places, TripProfile(), personality=update(add("food", toward="food_focus")))
     assert [x.trait for x in picks] == ["Food is the point", None, None]
 
 
-def test_what_they_said_persists_across_turns_drives_drafts_and_newest_wins(client, auth, fake_llm):
-    client.post("/me/taste", json={"vibes": ["food"]}, headers=auth)
-    trip = new_trip(client, auth)
-    assert trip["personality"]["traits"] == [] and len(trip["personality"]["unknown"]) == 6
-    assert trip["personality"]["scales"]["food"]["source"] == "taste"
+def test_cheaper_stay_is_one_note_and_one_change(client, auth, fake_llm):
+    trip = ready_trip(client, auth, fake_llm, budget_level=BudgetLevel.BUDGET)
+    draft = say(client, auth, trip["id"], "not sure")["drafts"][0]
+    client.post(f"/trips/{trip['id']}/drafts/{draft['id']}/choose", headers=auth)
+    fake_llm.decisions.append(TurnDecision(
+        action=TurnAction.EDIT_ITINERARY, reply="On it.", profile_updates={"budget_level": "luxury"},
+        note_changes=[add("similar but cheaper", "cheaper", target="s1", category="stay", then="change")]))
+    fake_llm.edits = [{"op": "replace", "item_id": "s1", "place": "c0"}]
 
-    turn = say(client, auth, trip["id"], "Lisbon, and we want it really slow")
-    assert turn["trip"]["personality"]["traits"] == ["Slow pace (strongly)"]
+    turn = say(client, auth, trip["id"], "A cheaper hotel than this luxury one")
 
-    turn = say(client, auth, trip["id"], "what about Porto?")  # says nothing about pace
-    assert turn["trip"]["personality"]["traits"] == ["Slow pace (strongly)"]
-
-    turn = say(client, auth, trip["id"], "Hmm, actually packed days")
-    assert turn["trip"]["personality"]["traits"] == ["Packed days"]
-
-
-def note(quote, topic, scope="trip", toward=None):
-    return NoteUpdate(quote=quote, topic=topic, scope=scope, toward=toward)
+    after = turn["trip"]["itinerary"]
+    assert after["stay"]["place_id"] != draft["itinerary"]["stay"]["place_id"]
+    assert after["days"] == draft["itinerary"]["days"]
+    assert turn["trip"]["profile"]["budget_level"] == "budget"  # one item never changes the trip's budget
+    assert ("s1", "similar but cheaper") in [(n["target"], n["text"]) for n in turn["trip"]["personality"]["notes"]]
 
 
-def test_notes_keep_their_words_and_code_decides_what_is_a_moment():
-    msg = "A slow week in Rome, but one big night out for my birthday!"
-    p = PersonalityService.update(None, TripProfile(destination="Rome"), Taste(), [
-        note("a slow week", "pace", toward="slow"),
-        note("one big night out for my birthday", "birthday", scope="trip", toward="nightlife"),  # model said trip
-        note("party every night", "nights"),  # not their words
-        note("Rome", "destination"),  # nothing but the place
-    ], msg)
-    assert [(n.topic, n.text, n.scope, n.toward) for n in p.notes] == [
-        ("pace", "a slow week", "trip", "slow"),
-        ("birthday", "one big night out for my birthday", "moment", None),
-    ]
-    assert PersonalityService.card(p).traits == ["Slow pace"]
-    assert PersonalityService.moments(p) == ["one big night out for my birthday"]
+def test_removing_a_stop_moves_its_notes_to_the_day(client, auth, fake_llm):
+    trip = ready_trip(client, auth, fake_llm)
+    draft = say(client, auth, trip["id"], "not sure")["drafts"][0]
+    client.post(f"/trips/{trip['id']}/drafts/{draft['id']}/choose", headers=auth)
+    item = draft["itinerary"]["days"][0]["activities"][0]["id"]
+    fake_llm.decisions.append(TurnDecision(action=TurnAction.CHAT, reply="ok", note_changes=[add("birthday", target=item)]))
+    say(client, auth, trip["id"], "that's for the birthday")
 
+    result = client.post(f"/trips/{trip['id']}/itinerary/days/1/activities/0", json={"action": "remove"}, headers=auth).json()
 
-def test_a_note_on_the_same_topic_replaces_the_old_one_and_dropped_topics_go():
-    p = PersonalityService.update(None, TripProfile(), Taste(), [note("a slow week", "pace"),
-                                                                note("one cooking class", "cooking", "moment")],
-                                  "A slow week, and one cooking class")
-    p = PersonalityService.update(p, TripProfile(), Taste(), [note("packed days", "pace")],
-                                  "Actually packed days, and skip the cooking class", drop_topics=["cooking"])
-    assert [(n.topic, n.text) for n in p.notes] == [("pace", "packed days")]
-    assert PersonalityService.card(p).traits == ["Packed days"]
-
-
-def test_prompts_get_the_notes_and_numbered_moments():
-    p = PersonalityService.update(None, TripProfile(), Taste(), [
-        note("what locals love", "crowds"), note("one big night out", "birthday", "moment")],
-        "We want what locals love, and one big night out")
-    text = traveler_fit(TripProfile(), p)
-    assert "whole trip, in their words: 'what locals love'." in text
-    assert "Moments they want to fit in: [m0] 'one big night out'." in text
-
-
-def test_drafts_say_which_stop_fulfils_each_moment_and_what_is_left():
-    from app.services.draft_service import DraftPlan, PlacePool, PlanDay, PlanStop, fulfilled
-    places = [PlaceCandidate(place_id=f"p{i}", name=n, category=PickCategory.DO)
-              for i, n in enumerate(["Rooftop Bar", "Old Museum"])]
-    plan = DraftPlan(title="t", summary="s", days=[PlanDay(theme="d", stops=[
-        PlanStop(place="Rooftop Bar", ref=0, time_of_day="evening", note="party", for_moment=0),
-        PlanStop(place="Old Museum", ref=1, time_of_day="morning", note="look", for_moment=7)])])
-    itinerary = PlacePool(places).to_itinerary(plan, "Rome", ["one big night out", "a cooking class"])
-    assert [a.for_note for a in itinerary.days[0].activities] == [None, "one big night out"]  # 7 doesn't exist
-    assert fulfilled(itinerary) == {"one big night out"}
-
-
-def test_a_quote_may_run_across_a_comma():
-    msg = "Backpacking Vietnam on a shoestring, every night out partying!"
-    p = PersonalityService.update(None, TripProfile(), Taste(), [
-        note("Backpacking Vietnam on a shoestring, every night out partying", "style", toward="nightlife")], msg)
-    assert [(n.scope, n.toward) for n in p.notes] == [("trip", "nightlife")]
-    # Spanning a one-off phrase makes the whole note a moment.
-    p = PersonalityService.update(None, TripProfile(), Taste(), [
-        note("a slow week, but one big night out", "mix")], "A slow week, but one big night out")
-    assert p.notes[0].scope == "moment"
-
-
-def test_one_note_per_topic_per_message_and_dropping_a_note_drops_its_trait():
-    p = PersonalityService.update(None, TripProfile(), Taste(), [
-        note("a slow week", "pace", toward="slow"), note("slow mornings", "pace", toward="slow")],
-        "A slow week, slow mornings")
-    assert [n.text for n in p.notes] == ["slow mornings"]
-    assert PersonalityService.card(p).traits == ["Slow pace"]
-    p = PersonalityService.update(p, TripProfile(), Taste(), [], "forget that, we're flexible", drop_topics=["pace"])
-    assert p.notes == [] and PersonalityService.card(p).traits == []
-
-
-def test_the_model_sees_the_notes_so_it_can_replace_or_drop_them(client, auth, fake_llm):
-    trip = new_trip(client, auth)
-    fake_llm.decisions.append(TurnDecision(action=TurnAction.ASK, reply="ok", notes=[
-        note("one cooking class", "cooking", "moment")]))
-    say(client, auth, trip["id"], "Lisbon, and one cooking class")
-    fake_llm.decisions.append(TurnDecision(action=TurnAction.ASK, reply="ok", drop_note_topics=["cooking"]))
-    turn = say(client, auth, trip["id"], "Skip the cooking class")
-    turn_prompts = [p for name, p in fake_llm.prompts if name == "TurnDecision"]
-    assert "What they told us so far (topic: their words): cooking: 'one cooking class'" in turn_prompts[-1]
-    assert turn["trip"]["personality"]["notes"] == []
-
-
-def test_diet_food_logistics_and_group_size_are_not_traits():
-    for message in ("We don't eat meat, vegetarian food only", "I'm allergic to some food",
-                    "Is there good food near the airport?", "We are a party of four", "Four of us in our party",
-                    "Lots of food allergies", "Vegan street food"):
-        assert card(message).traits == [], message
-    # Not even as a weak guess when the model proposes it: diet is a rule for restaurants (owner's decision).
-    p = card("Vegetarian food only", signals=[("food_focus", "vegetarian food only")])
-    assert PersonalityService.traits(p) == ([], [])
-
-
-def test_food_and_party_still_count_when_they_describe_the_trip():
-    for message, expected in (("A slow food week", "Food is the point"), ("Foodie", "Food is the point"),
-                              ("Food", "Food is the point"), ("Nightlife, food and a bit of adventure", "Food is the point"),
-                              ("Street food and exploring", "Food is the point"), ("We love food", "Food is the point"),
-                              ("A bachelor party", "Nightlife"), ("We want to party", "Nightlife")):
-        assert expected in card(message).traits, message
+    assert ("d1", "birthday") in [(n["target"], n["text"]) for n in result["trip"]["personality"]["notes"]]

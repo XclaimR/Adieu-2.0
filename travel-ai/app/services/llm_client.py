@@ -97,6 +97,7 @@ class LLMClient:
         schema: type[T],
         history: list[dict] | None = None,
         system: str | None = None,
+        model: str | None = None,
     ) -> T:
         """Ask the model for JSON matching `schema`; retry once with the error if it doesn't."""
         messages: list[dict] = []
@@ -116,7 +117,7 @@ class LLMClient:
         last_error: Exception | None = None
         for _ in range(2):
             response = _create(
-                model=settings.LLM_MODEL,
+                model=model or settings.LLM_MODEL,
                 messages=messages,
                 response_format=response_format,
                 **({"reasoning_effort": settings.LLM_REASONING_EFFORT} if settings.LLM_REASONING_EFFORT else {}),

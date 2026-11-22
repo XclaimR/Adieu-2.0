@@ -57,10 +57,13 @@ class FakeLLM:
     def __init__(self):
         self.decisions: list[TurnDecision] = []
         self.prompts: list[tuple[str, str]] = []
+        self.edits: list[dict] = []
 
-    def __call__(self, prompt, schema, history=None, system=None):
+    def __call__(self, prompt, schema, history=None, system=None, model=None):
         self.prompts.append((schema.__name__, prompt))
-        if schema is TurnDecision:
+        if schema.__name__ == "PlanEdits":
+            return schema.model_validate({"edits": self.edits})
+        if issubclass(schema, TurnDecision):
             return self.decisions.pop(0) if self.decisions else TurnDecision(action=TurnAction.CHAT, reply="ok")
         if schema is Ranking:
             # 99 doesn't exist and must be ignored; 1 is ranked above 0.

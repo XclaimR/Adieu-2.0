@@ -1,7 +1,15 @@
-from pydantic import BaseModel
+import uuid
+
+from pydantic import BaseModel, Field
+
+
+def new_item_id() -> str:
+    return f"i{uuid.uuid4().hex[:6]}"
 
 
 class Activity(BaseModel):
+    # The slot's id: swapping or moving keeps it, so the notes pointing at it stay attached.
+    id: str = Field(default_factory=new_item_id)
     name: str
     category: str
     time_of_day: str | None = None

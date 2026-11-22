@@ -2,7 +2,8 @@
 
 Small local models fill in plausible guesses ("solo", "mid" budget, 7 days, a date) that the user never mentioned,
 which would skip the questions that gather the trip's vibe. Each core field is kept only if the message contains
-words that support it. Durations are also read directly from the text as a fallback.
+words that support it. Durations are also read directly from the text as a fallback. Wishes and mood are not
+word-checked: the model reads those into notes, see personality_service.check_changes.
 """
 import re
 
@@ -26,20 +27,6 @@ _BUDGET = r"\b(budget|cheap|tight|affordable|backpack\w*|save|saving|mid|moderat
 _DATE = (r"\b(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\b|\b(spring|summer|autumn|fall|winter|"
          r"christmas|easter|diwali|new year|holiday|holidays|next|this)\b|\d")
 _DURATION_CUE = rf"{_NUM}|\b(week|weekend|fortnight|days?|nights?)\b"
-
-_MOOD_SYNONYMS = {
-    "relax": r"relax|chill|slow|calm|easy|quiet|unwind|rest|peace",
-    "adventur": r"adventur|hik|trek|thrill|active|explor|outdoor",
-    "romant": r"romant|honeymoon|anniversar|couple",
-    "food": r"food|eat|culinar|cuisine|restaurant|street food|wine",
-    "cultur": r"cultur|histor|museum|art|temple|heritage|architect",
-    "night": r"night|party|club|bar|drink",
-    "natur": r"natur|outdoor|park|mountain|wildlife|forest|lake",
-    "beach": r"beach|sea|island|coast|ocean|swim|sun",
-    "shop": r"shop|market|boutique",
-    "luxur": r"luxur|treat|spa|fancy",
-}
-
 
 def _has(pattern: str, text: str) -> bool:
     return re.search(pattern, text, re.I) is not None
@@ -68,13 +55,6 @@ def _to_int(token: str) -> int:
     return int(token) if token.isdigit() else _NUMBER_WORDS[token]
 
 
-def _mood_supported(mood: str, text: str) -> bool:
-    mood = mood.lower()
-    if mood[:5] and mood[:5] in text:
-        return True
-    return any(stem in mood and _has(pattern, text) for stem, pattern in _MOOD_SYNONYMS.items())
-
-
 def ground_updates(updates: ProfileUpdates, message: str) -> ProfileUpdates:
     text = message.lower()
     u = updates.model_copy(deep=True)
@@ -83,8 +63,6 @@ def ground_updates(updates: ProfileUpdates, message: str) -> ProfileUpdates:
         words = [w for w in re.split(r"[\s,]+", u.destination.lower()) if len(w) >= 3]
         if not any(w in text for w in words):
             u.destination = None
-
-    u.mood = [m for m in u.mood if _mood_supported(m, text)]
 
     if u.party and not _has(_PARTY_WORDS[u.party], text):
         u.party = None
