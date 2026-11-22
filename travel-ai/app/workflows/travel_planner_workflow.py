@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 RESET_PHRASES = ("start over", "reset")
 DRAFT_COUNT = 3
 PLANS_READY = f"Here are {DRAFT_COUNT} ways your trip could look — pick the one that feels right."
-# Google says "SearchTextRequest per day", Gemini "GenerateRequestsPerDayPerProjectPerModel".
+# A source that is out for the day says "per day" or "PerDay": trying again right away can't work.
 _DAILY_LIMIT = re.compile(r"per ?day", re.I)
 
 Event = dict
@@ -48,16 +48,16 @@ def _reply(text: str, question: str | None = None, options: list[str] | None = N
 
 def _why_no_plans(error: Exception, destination: str) -> NoPlans:
     cause = error.__cause__ if isinstance(error, NoUsableDraftError) else error
-    if isinstance(cause, (PlacesUnavailableError, RateLimitError)) and _DAILY_LIMIT.search(str(cause)):
-        used_up = "place searches" if isinstance(cause, PlacesUnavailableError) else "the AI planner"
-        return NoPlans(retry_now=False, reason=f"Plans are unavailable for now: I've reached today's limit for "
-                                               f"{used_up}. It resets once a day, so please come back later.")
+    no_place_data = isinstance(cause, (PlacesUnavailableError, httpx.HTTPError))
+    out_for_today = isinstance(cause, (PlacesUnavailableError, RateLimitError)) and bool(_DAILY_LIMIT.search(str(cause)))
+    if no_place_data or out_for_today:
+        what = "Place data" if no_place_data else "The AI planner"
+        when = "Please come back later." if out_for_today else "Please try again in a moment."
+        return NoPlans(retry_now=not out_for_today,
+                       reason=f"{what} is unavailable for now, so I can't make plans. {when}")
     if isinstance(error, NotEnoughPlacesError):
         return NoPlans(reason=f"I couldn't find enough places in {destination} to build a plan. "
                               "Try naming a town or a bigger area there.")
-    if isinstance(error, (PlacesUnavailableError, httpx.HTTPError)):
-        return NoPlans(reason="I couldn't reach the places service, so I have no plans to show yet. "
-                              "Please try again in a moment.")
     if isinstance(error, NoUsableDraftError):
         if cause:
             return NoPlans(reason="The AI planner couldn't write your plans just now. Please try again in a moment.")

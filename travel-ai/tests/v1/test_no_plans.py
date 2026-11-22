@@ -1,4 +1,5 @@
 import json
+import re
 
 import httpx
 import pytest
@@ -43,6 +44,7 @@ def assert_no_plans(client, auth, trip_id, events, reason, retry_now=True):
     shown = " ".join(e["text"] for e in events if e["type"] in ("reply", "note"))
     assert "Here are" not in shown
     assert reason in shown
+    assert not re.search("google|quota|limit", shown, re.I), "provider detail shown to the traveler"
     reloaded = client.get(f"/trips/{trip_id}", headers=auth).json()
     assert reloaded["messages"][-1]["content"] == shown
     assert reloaded["drafts"] == []
@@ -124,12 +126,12 @@ def google_times_out(*a, **k):
 
 @pytest.mark.parametrize("google, reason, retry_now", [
     (google_says(429, "Quota exceeded for quota metric 'SearchTextRequest' and limit 'SearchTextRequest per day' "
-                      "of service 'places.googleapis.com'"), "unavailable for now", False),
+                      "of service 'places.googleapis.com'"), "Place data is unavailable", False),
     (google_says(429, "Quota exceeded for quota metric 'SearchTextRequest'. " + "x" * 250,
-                 details=[{"quota_limit": "SearchTextRequestPerDayPerProject"}]), "unavailable for now", False),
-    (google_says(429, "Quota exceeded for limit 'SearchTextRequest per minute'"), "places service", True),
-    (google_says(500, "Internal error"), "places service", True),
-    (google_times_out, "places service", True),
+                 details=[{"quota_limit": "SearchTextRequestPerDayPerProject"}]), "Place data is unavailable", False),
+    (google_says(429, "Quota exceeded for limit 'SearchTextRequest per minute'"), "Place data is unavailable", True),
+    (google_says(500, "Internal error"), "Place data is unavailable", True),
+    (google_times_out, "Place data is unavailable", True),
 ])
 def test_places_failing_before_the_first_draft(client, auth, fake_llm, monkeypatch, google, reason, retry_now):
     trip = ready_trip(client, auth, fake_llm)
@@ -181,7 +183,7 @@ def llm_out_for_today():
 @pytest.mark.parametrize("answer, reason, retry_now", [
     (invented_plan, "real places", True),
     (llm_down, "AI planner", True),
-    (llm_out_for_today, "unavailable for now", False),
+    (llm_out_for_today, "AI planner is unavailable", False),
 ])
 def test_every_draft_lost(client, auth, fake_llm, monkeypatch, answer, reason, retry_now):
     trip = ready_trip(client, auth, fake_llm)
@@ -227,7 +229,7 @@ CLAIM = "I've put together a few relaxed ways to spend your days. Take a look."
 
 
 def test_the_models_own_claim_waits_for_a_draft(client, auth, fake_llm, monkeypatch):
-    # Seen live with gemini-3.1-flash-lite, right above the quota error.
+    # Seen live with gemini-3.1-flash-lite, right above the failure.
     trip = ready_trip(client, auth, fake_llm)
     fake_llm.decisions.append(TurnDecision(action=TurnAction.OFFER_DRAFTS, reply=CLAIM))
     monkeypatch.setattr(PlacesService, "_post", lambda self, body, mask: [])

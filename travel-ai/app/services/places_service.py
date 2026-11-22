@@ -132,14 +132,14 @@ class PlacesUnavailableError(RuntimeError):
     pass
 
 
-_PIN_SPAN = 0.004  # degrees. Google's box around a bare pin is 0.0027; Vatican City's is 0.013 wide.
+_PIN_SPAN = 0.004  # degrees. A box around a bare pin is about 0.0027; Vatican City's is 0.013 wide.
 _PIN_REACH = 0.5  # degrees each way from the pin
 
 
 def _search_area(viewport: dict) -> dict:
-    """Where to search. For natural features (Ari Atoll) Google gives a 300 m box around a pin, not the place."""
+    """Where to search. A natural feature (Ari Atoll) can come as a 300 m box around a pin, not the place."""
     low, high = viewport["low"], viewport["high"]
-    south, west = low.get("latitude", 0), low.get("longitude", 0)  # Google omits zeros
+    south, west = low.get("latitude", 0), low.get("longitude", 0)  # zeros can be omitted
     height, width = high.get("latitude", 0) - south, (high.get("longitude", 0) - west) % 360
     if max(height, width) >= _PIN_SPAN:
         return {"low": low, "high": high}
