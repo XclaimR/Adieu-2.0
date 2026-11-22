@@ -100,12 +100,12 @@ class FakePlaces:
             return []
         if field_mask == places_service._RESOLVE_FIELD_MASK:
             as_country = query.endswith(" country")
-            place = query.removesuffix(" country")
+            place = query.removesuffix(" country").strip()
             wanted = body.get("includedType")
             kind = "locality" if place.startswith(CITIES) else "country"
             if as_country and place == "panama city":
                 kind = "country"  # like the real API: "Panama City country" finds Panama
-            if place == "jordan" and not as_country:
+            if place in ("jordan", "iceland") and not as_country:
                 # Like the real API: shops, and nothing at all when filtered to a type.
                 return [] if wanted else [{"id": "shop", "viewport": VIEWPORT, "types": ["store"]}]
             if wanted and wanted != kind and "korea" not in place:

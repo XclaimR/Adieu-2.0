@@ -220,7 +220,8 @@ class PlacesService:
         key = f"resolve-geo:{name.strip().lower()}"
         cached = self._cached(key)
         if cached is not None:
-            return cached.get("area")
+            # Misses are kept a week, so ones from before the country check need it too (it has its own cache).
+            return cached.get("area") or self._country_named(name)
 
         raw = self._first_geographic(self._post({"textQuery": name, "maxResultCount": 5}, _RESOLVE_FIELD_MASK))
         for place_type in _GEO_FALLBACK_TYPES:
@@ -231,9 +232,14 @@ class PlacesService:
                 _RESOLVE_FIELD_MASK,
             ))
 
-        area = self._to_area(raw, name) if raw else None
+        area = self._to_area(raw, name) if raw else self._country_named(name)
         self._store(key, {"area": area})
         return area
+
+    def _country_named(self, name: str) -> dict | None:
+        """Last resort: "Jordan" alone finds only shops. Exact name only, so a typed city can't become a country."""
+        country = self.resolve_country(name)
+        return country if country and country["name"].lower() == name.strip().lower() else None
 
     def resolve_country(self, name: str) -> dict | None:
         """The country of this name, or None if it names anything else. One search per name, then cached."""
