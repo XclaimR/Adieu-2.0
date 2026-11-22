@@ -21,7 +21,7 @@ class TripModel(Base):
     panel: Mapped[dict | None] = mapped_column(JSON)
     # Draft itineraries offered to the user: [Draft, ...]
     drafts: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
-    # Conversation bookkeeping: {questions_streak, asked_fields, answer_options}
+    # Conversation bookkeeping: {questions_streak, asked_fields, answer_options, no_plans}
     state: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     next_question: Mapped[str | None] = mapped_column(Text)
     itinerary: Mapped[dict | None] = mapped_column(JSON)

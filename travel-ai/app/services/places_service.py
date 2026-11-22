@@ -132,6 +132,24 @@ class PlacesUnavailableError(RuntimeError):
     pass
 
 
+_PIN_SPAN = 0.004  # degrees. A box around a bare pin is about 0.0027; Vatican City's is 0.013 wide.
+_PIN_REACH = 0.5  # degrees each way from the pin
+
+
+def _search_area(viewport: dict) -> dict:
+    """Where to search. A natural feature (Ari Atoll) can come as a 300 m box around a pin, not the place."""
+    low, high = viewport["low"], viewport["high"]
+    south, west = low.get("latitude", 0), low.get("longitude", 0)  # zeros can be omitted
+    height, width = high.get("latitude", 0) - south, (high.get("longitude", 0) - west) % 360
+    if max(height, width) >= _PIN_SPAN:
+        return {"low": low, "high": high}
+    lat, lng = south + height / 2, west + width / 2
+    return {
+        "low": {"latitude": max(lat - _PIN_REACH, -90), "longitude": (lng - _PIN_REACH + 180) % 360 - 180},
+        "high": {"latitude": min(lat + _PIN_REACH, 90), "longitude": (lng + _PIN_REACH + 180) % 360 - 180},
+    }
+
+
 def _to_candidate(raw: dict, category: PickCategory) -> PlaceCandidate:
     photos = raw.get("photos") or []
     location = raw.get("location") or {}
@@ -188,7 +206,7 @@ class PlacesService:
             timeout=15,
         )
         if response.status_code != 200:
-            raise PlacesUnavailableError(f"Places search failed ({response.status_code}): {response.text[:200]}")
+            raise PlacesUnavailableError(f"Places search failed ({response.status_code}): {response.text[:2000]}")
         return response.json().get("places", [])
 
     def text_search(
@@ -201,7 +219,7 @@ class PlacesService:
         """Text search. `viewport` restricts results to the destination; `near` biases toward a point."""
         body: dict = {"textQuery": query, "maxResultCount": max_results}
         if viewport:
-            body["locationRestriction"] = {"rectangle": {"low": viewport["low"], "high": viewport["high"]}}
+            body["locationRestriction"] = {"rectangle": _search_area(viewport)}
         elif near:
             body["locationBias"] = {"circle": {"center": {"latitude": near[0], "longitude": near[1]}, "radius": 2000.0}}
 
