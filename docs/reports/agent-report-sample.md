@@ -1,5 +1,8 @@
 # Traveler agent report
 
+> Out of date: run on 2026-11-21 against b489023, before trip notes (PR #53) and before the agent was adapted to
+> them. To be replaced by a run on current main once the Google Places quota allows one.
+
 6 failure(s) across 6 persona(s)
 
 ## bachelor
