@@ -72,7 +72,8 @@ def travel_minutes(here: tuple[float, float], there: tuple[float, float]) -> flo
     # shortcut: straight line plus 30%, blind to water, mountains and timetables; use real routes with Ticket #28.
     km = 1.3 * 2 * 6371 * asin(sqrt(min(h, 1)))
     on_foot = km * 60 / 4.5
-    riding = 10 + min(km, 20) * 60 / 20 + max(km - 20, 0) * 60 / 70
+    # A wait, then about 20 km/h in town, 60 out to 70 km and 120 beyond (motorway or train).
+    riding = 10 + min(km, 10) * 3 + min(max(km - 10, 0), 60) + max(km - 70, 0) / 2
     return min(on_foot, riding)
 
 
