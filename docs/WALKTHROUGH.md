@@ -57,6 +57,9 @@ Every later request sends it as `Authorization: Bearer …`, checked by `api/dep
 ### A chat turn (the core loop)
 `screens/Trip.tsx:send` → `api.ts:sendStream` → `POST /trips/{id}/messages/stream` (streams NDJSON events) →
 `TravelPlannerWorkflow.run_turn`:
+
+"reset" or "start over" as the whole message never reaches the model: the workflow asks "Are you sure?" and deletes
+only on a clear yes while that is the current question. A no brings back the question from before. Otherwise:
 1. `TurnService.decide` — LLM reads the message + history and returns a `TurnDecision` (core facts, note changes, reply, intent). Its schema only allows note targets that exist on this trip.
 2. `TripProfileService.merge` + `grounding.ground_updates` — keeps only facts the user actually said (e.g. `extract_duration` turns "a slow week" into 7 days).
 3. New destination? `PlacesService.resolve_destination` checks it's a real place (not a business) and stores its map area.

@@ -27,6 +27,13 @@ logger = logging.getLogger(__name__)
 
 # The whole message must be the command: a reset deletes the plan, and "I need a mental reset" isn't one.
 _RESET_COMMAND = re.compile(r"\W*(please\W+)?(start over|reset)(\W+please)?\W*", re.I)
+_RESET_QUESTION = ("Are you sure you want to start from scratch? This clears the destination, plans and notes, "
+                   "and can't be undone.")
+_RESET_ANSWERS = ["Yes, start from scratch", "No, keep my trip"]
+# Both must be the whole answer, and "yes?" is not a yes.
+_CONFIRM_RESET = re.compile(r"[^\w?]*((yes|yeah|yep|yup)(\W+(please|i\W?m sure|start over|start from scratch|reset))?"
+                            r"|sure|i\W?m sure|confirm)[^\w?]*", re.I)
+_DECLINE_RESET = re.compile(r"\W*(no(\W+(thanks|keep my trip))?|nope|nah|cancel|never ?mind|don\W?t)\W*", re.I)
 DRAFT_COUNT = 3
 PLANS_READY = f"Here are {DRAFT_COUNT} ways your trip could look — pick the one that feels right."
 # A source that is out for the day says "per day" or "PerDay": trying again right away can't work.
@@ -102,18 +109,36 @@ class TravelPlannerWorkflow:
 
     def run_turn(self, trip: TripModel, user: UserModel, message: str) -> Iterator[Event]:
         shown_message = SHOW_PLANS_TEXT if message == SHOW_PLANS else message
-        if _RESET_COMMAND.fullmatch(message):
+        state = dict(trip.state or {})
+        before_reset = state.pop("before_reset", None)
+        # A yes counts only while that question is the current one: choosing a plan, for one, replaces it.
+        confirming = before_reset is not None and trip.next_question == _RESET_QUESTION
+        if confirming and _CONFIRM_RESET.fullmatch(message):
             yield from self._reset(trip, message)
             return
+        if confirming and _DECLINE_RESET.fullmatch(message):
+            trip.state = state
+            yield from self._answer(trip, message, "Okay, I kept your trip as it is.", *before_reset)
+            return
+        if _RESET_COMMAND.fullmatch(message):
+            if not confirming:  # asked twice, a "no" still returns to the question before the first
+                before_reset = [trip.next_question, state.get("answer_options", [])]
+            trip.state = {**state, "before_reset": before_reset}
+            yield from self._answer(trip, message, "I haven't deleted anything yet.", _RESET_QUESTION, _RESET_ANSWERS)
+            return
+        not_reset = "I didn't start over. " if confirming else ""
 
         yield _progress("Thinking…")
         profile = self.trips.profile(trip)
         before = self.trips.personality(trip)
-        state = dict(trip.state or {})
         itinerary = self.trips.itinerary(trip)
 
+        history = self.trips.history(trip.id)
+        if not_reset:
+            # Or the model reads "ok" as a yes to the question above and talks, or edits, as if it had reset.
+            history.append({"role": "assistant", "content": not_reset.strip()})
         decision = TurnService.decide(
-            shown_message, self.trips.history(trip.id), profile, self._context(trip, itinerary, before),
+            shown_message, history, profile, self._context(trip, itinerary, before),
             itinerary,
         )
         decision.note_changes = check_changes(decision.note_changes, shown_message, before, itinerary)
@@ -161,11 +186,11 @@ class TravelPlannerWorkflow:
             new_profile.duration_days = DEFAULT_DAYS
         trip.profile = new_profile.model_dump(mode="json")
 
-        reply = TurnService.strip_questions(decision.reply, plan.next_question) + note
+        reply = not_reset + TurnService.strip_questions(decision.reply, plan.next_question) + note
         if plan.action == TurnAction.OFFER_DRAFTS:
             # The model talks as if the plans exist ("I've put together a few"), so its words wait for the first draft.
             reply_with_plans = f"{reply.rstrip()} {PLANS_READY}"
-            reply = f"Let me put some plans together for {new_profile.destination}.{note}"
+            reply = f"{not_reset}Let me put some plans together for {new_profile.destination}.{note}"
         yield _reply(reply, plan.next_question, plan.answer_options)
 
         # Save the exchange before the slow work (drafts take minutes), so anything the user does
@@ -214,12 +239,17 @@ class TravelPlannerWorkflow:
         trip.destination_area = trip.panel = trip.itinerary = trip.personality = None
         trip.drafts = []
         trip.title = "New trip"
-        trip.state = {"answer_options": chips}
+        trip.state = {}
+        yield from self._answer(trip, message, "Fresh start!", question, chips)
+
+    def _answer(self, trip: TripModel, message: str, text: str, question: str | None, chips: list[str]) -> Iterator[Event]:
+        """A whole turn with a fixed reply, no model."""
+        trip.state = {**(trip.state or {}), "answer_options": chips}
         trip.next_question = question
         self.trips.add_message(trip.id, "user", message)
-        self.trips.add_message(trip.id, "assistant", f"Fresh start!\n\n{question}")
+        self.trips.add_message(trip.id, "assistant", f"{text}\n\n{question}" if question else text)
         self.db.commit()
-        yield {"type": "reply", "text": "Fresh start!", "next_question": question, "answer_options": chips}
+        yield _reply(text, question, chips)
         yield {"type": "done", "trip": self.trips.to_out(trip).model_dump(mode="json")}
 
     def _context(self, trip: TripModel, itinerary: Itinerary | None, personality: Personality) -> str:

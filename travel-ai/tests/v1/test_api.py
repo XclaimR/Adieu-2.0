@@ -5,6 +5,7 @@ import pytest
 from app.schemas.trip_profile import BudgetLevel, Party, ProfileUpdates
 from app.schemas.personality import NoteChange
 from app.schemas.turn import OptionsKind, OptionsRequest, TurnAction, TurnDecision
+from app.services.llm_client import LLMClient
 from tests.v1.conftest import VIEWPORT
 
 
@@ -289,7 +290,8 @@ def test_users_cannot_see_each_others_trips(client, auth):
 
 def test_reset_clears_the_trip(client, auth, fake_llm):
     trip = ready_trip(client, auth, fake_llm)
-    turn = say(client, auth, trip["id"], "start over")
+    say(client, auth, trip["id"], "start over")
+    turn = say(client, auth, trip["id"], "yes")
     assert turn["trip"]["profile"]["destination"] is None
     assert turn["trip"]["drafts"] == []
 
@@ -366,6 +368,7 @@ def planned_trip(client, auth, fake_llm):
     "don't reset",
     "no need to start over",
     "presets",
+    "Reset and recharge in Bali",
 ])
 def test_reset_words_inside_a_message_keep_the_trip(client, auth, fake_llm, message):
     before = planned_trip(client, auth, fake_llm)
@@ -373,6 +376,7 @@ def test_reset_words_inside_a_message_keep_the_trip(client, auth, fake_llm, mess
     turn = say(client, auth, before["id"], message)
 
     assert turn["reply"] != "Fresh start!"
+    assert "Are you sure" not in (turn["next_question"] or "")  # not even asked
     assert turn["trip"]["itinerary"] == before["itinerary"]
     assert turn["trip"]["drafts"] == before["drafts"]
     assert turn["trip"]["profile"]["destination"] == before["profile"]["destination"]
@@ -387,14 +391,141 @@ def test_tapping_an_idea_called_reset_sets_the_destination(client, auth, fake_ll
     assert turn["trip"]["profile"]["destination"] == "Japan"
 
 
+def assert_kept(turn, before):
+    assert turn["reply"] != "Fresh start!"
+    assert turn["trip"]["itinerary"] == before["itinerary"]
+    assert turn["trip"]["drafts"] == before["drafts"]
+    assert turn["trip"]["profile"] == before["profile"]
+
+
 @pytest.mark.parametrize("message", [
-    "reset", "Reset.", "Start over!", "please start over", "START OVER, please", "“reset”", "Please, reset 🙏",
+    "reset", "Reset.", "Start over!", "start over?", "please start over", "START OVER, please", "“reset”",
+    "Please, reset 🙏",
 ])
-def test_the_whole_message_as_a_command_still_resets(client, auth, fake_llm, message):
+def test_a_reset_command_asks_before_deleting_anything(client, auth, fake_llm, message):
     before = planned_trip(client, auth, fake_llm)
+    calls = len(fake_llm.prompts)
 
     turn = say(client, auth, before["id"], message)
 
+    assert_kept(turn, before)
+    assert "Are you sure you want to start from scratch?" in turn["next_question"]
+    assert turn["answer_options"] == ["Yes, start from scratch", "No, keep my trip"]
+    assert turn["trip"]["answer_options"] == turn["answer_options"]  # still there after a reload
+    assert len(fake_llm.prompts) == calls
+
+
+@pytest.mark.parametrize("answer", [
+    "Yes, start from scratch", "yes", "Yes!", "yeah", "yep", "sure", "yes please", "Yes, I’m sure", "I'm sure",
+    "confirm", "yes, reset",
+])
+def test_a_clear_yes_resets(client, auth, fake_llm, answer):
+    before = planned_trip(client, auth, fake_llm)
+    say(client, auth, before["id"], "reset")
+
+    turn = say(client, auth, before["id"], answer)
+
     assert turn["reply"] == "Fresh start!"
+    assert turn["next_question"] == "Where would you like to go?"
     assert turn["trip"]["itinerary"] is None and turn["trip"]["drafts"] == []
     assert turn["trip"]["profile"]["destination"] is None
+
+
+@pytest.mark.parametrize("answer", ["No, keep my trip", "no", "Nope.", "no thanks", "cancel", "never mind", "don’t"])
+def test_a_no_keeps_the_trip_and_returns_to_the_question_before(client, auth, fake_llm, answer):
+    before = planned_trip(client, auth, fake_llm)
+    say(client, auth, before["id"], "reset")
+    calls = len(fake_llm.prompts)
+
+    turn = say(client, auth, before["id"], answer)
+
+    assert_kept(turn, before)
+    assert (turn["next_question"], turn["answer_options"]) == (before["next_question"], before["answer_options"])
+    assert len(fake_llm.prompts) == calls
+
+
+@pytest.mark.parametrize("answer", ["yes?", "not sure", "yes but keep the hotel", "maybe", "ok wait", "__show_plans__"])
+def test_anything_but_a_clear_yes_does_not_reset(client, auth, fake_llm, answer):
+    before = planned_trip(client, auth, fake_llm)
+    say(client, auth, before["id"], "reset")
+
+    turn = say(client, auth, before["id"], answer)
+
+    assert turn["reply"].startswith("I didn't start over.")
+    assert turn["trip"]["itinerary"] == before["itinerary"]
+    assert turn["trip"]["profile"] == before["profile"]
+
+
+def test_the_model_is_told_the_trip_was_not_reset(client, auth, fake_llm, monkeypatch):
+    before = planned_trip(client, auth, fake_llm)
+    say(client, auth, before["id"], "reset")
+    seen = []
+
+    def model(prompt, schema, history=None, **kwargs):
+        seen.extend(history or [])
+        return fake_llm(prompt, schema)
+
+    monkeypatch.setattr(LLMClient, "generate_structured", staticmethod(model))
+    say(client, auth, before["id"], "maybe")
+
+    assert seen[-1] == {"role": "assistant", "content": "I didn't start over."}
+
+
+def test_a_yes_after_moving_on_does_not_reset(client, auth, fake_llm):
+    before = planned_trip(client, auth, fake_llm)
+    say(client, auth, before["id"], "reset")
+    say(client, auth, before["id"], "what's the weather like?")
+
+    assert_kept(say(client, auth, before["id"], "yes"), before)
+
+
+def test_a_yes_after_choosing_a_plan_does_not_reset(client, auth, fake_llm):
+    trip = ready_trip(client, auth, fake_llm)
+    draft = say(client, auth, trip["id"], "4 days")["drafts"][0]
+    say(client, auth, trip["id"], "reset")
+    chosen = client.post(f"/trips/{trip['id']}/drafts/{draft['id']}/choose", headers=auth).json()
+
+    assert_kept(say(client, auth, trip["id"], "yes"), chosen)
+
+
+def test_a_yes_with_no_reset_question_does_not_reset(client, auth, fake_llm):
+    before = planned_trip(client, auth, fake_llm)
+
+    assert_kept(say(client, auth, before["id"], "Yes, start from scratch"), before)
+
+
+def test_asking_twice_is_not_a_yes(client, auth, fake_llm):
+    before = planned_trip(client, auth, fake_llm)
+    say(client, auth, before["id"], "reset")
+
+    again = say(client, auth, before["id"], "reset")
+
+    assert_kept(again, before)
+    assert "Are you sure" in again["next_question"]
+    assert say(client, auth, before["id"], "no")["next_question"] == before["next_question"]
+
+
+def test_confirming_works_over_the_stream(client, auth, fake_llm):
+    before = planned_trip(client, auth, fake_llm)
+
+    def stream(message):
+        with client.stream("POST", f"/trips/{before['id']}/messages/stream", json={"message": message},
+                           headers=auth) as response:
+            return {e["type"]: e for e in map(json.loads, response.iter_lines())}
+
+    asked = stream("reset")
+    assert "Are you sure" in asked["reply"]["next_question"]
+    assert asked["done"]["trip"]["itinerary"] == before["itinerary"]
+    assert stream("Yes, start from scratch")["done"]["trip"]["itinerary"] is None
+
+
+def test_the_reply_shown_while_drafting_also_says_nothing_was_reset(client, auth, fake_llm):
+    before = planned_trip(client, auth, fake_llm)
+    say(client, auth, before["id"], "reset")
+
+    with client.stream("POST", f"/trips/{before['id']}/messages/stream", json={"message": "__show_plans__"},
+                       headers=auth) as response:
+        replies = [e["text"] for e in map(json.loads, response.iter_lines()) if e["type"] == "reply"]
+
+    assert len(replies) == 2  # while drafting, then once the plans exist
+    assert all(text.startswith("I didn't start over.") for text in replies)
