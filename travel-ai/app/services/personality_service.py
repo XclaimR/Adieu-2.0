@@ -52,7 +52,16 @@ _WORDS: dict[str, dict[str, float]] = {
     "luxur": {"comfort": 0.8}, "upscale": {"comfort": 0.8}, "five-star": {"comfort": 0.8}, "5-star": {"comfort": 0.8},
     "backpack": {"comfort": -0.8}, "shoestring": {"comfort": -0.8}, "cheap": {"comfort": -0.6},
 }
-_WHOLE_WORD = {"party"}  # would otherwise match "party of four"
+# Words that need context, as they're read from raw messages: "good food near the airport" isn't a food trip,
+# and "a party of four" isn't nightlife. Other stems match at any word start.
+_PATTERNS = {
+    "food": r"\bfoodie|\b(slow|street|love|love good|lots of|all about) food\b"
+            r"|\bfood (week|trip|holiday|first|lovers?)\b|\bfood is (the point|everything)\b|^(and )?food( and\b|$)",
+    "party": r"(?<!\bour )(?<!\bmy )(?<!\btravel )\bparty\b(?! of\b| size\b)",
+}
+# A diet is a rule for restaurants, never a food trait (owner's decision).
+_DIET = re.compile(r"\b(veg|veggie|vegetarian|vegan|eggitarian|eggetarian|pescatarian|halal|kosher|jain|allerg\w*"
+                   r"|intoleran\w*|gluten|dietary|don't eat|no (meat|pork|beef))\b")
 # Only for these does "no X" mean the other pole ("no nightlife" = chill evenings). Elsewhere a negation says
 # nothing firm ("not cheap" isn't luxury), so the word is ignored.
 _FLIPPABLE = {"nightlife", "party", "partying", "tourist trap"}
@@ -97,10 +106,14 @@ def _words(text: str) -> str:
 def _stems(clause: str) -> list[tuple[str, int]]:
     """(listed stem, position) found in a clause."""
     found = []
-    for stem in _WORDS:
-        match = re.search(rf"\b{re.escape(stem)}" + (r"\b" if stem in _WHOLE_WORD else ""), clause)
+    diet = _DIET.search(clause)
+    for stem, effects in _WORDS.items():
+        if diet and "food" in effects:
+            continue
+        match = re.search(_PATTERNS.get(stem, rf"\b{re.escape(stem)}"), clause)
         if match:
-            found.append((stem, match.start()))
+            # The stem's own position, so "lots of" in "lots of food" is still read as intensity.
+            found.append((stem, clause.index(stem, match.start())))
     return found
 
 
@@ -154,6 +167,8 @@ def _check_note(update: NoteUpdate, clauses: list[str], place: set[str]) -> tupl
     clause = " ".join(covered)
     scope = "moment" if any(_ONE_OFF.search(c) for c in covered) else update.scope
     toward = update.toward if scope == "trip" else None
+    if toward and POLES[toward][0] == "food" and _DIET.search(clause):
+        toward = None
     if toward:
         name, direction = POLES[toward]
         listed = _listed(quote)
