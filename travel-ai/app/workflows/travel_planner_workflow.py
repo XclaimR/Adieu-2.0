@@ -1,4 +1,5 @@
 import logging
+import re
 from collections.abc import Iterator
 
 from sqlalchemy.orm import Session
@@ -21,7 +22,8 @@ from app.services.turn_service import SHOW_PLANS, SHOW_PLANS_TEXT, VIBE_QUESTION
 
 logger = logging.getLogger(__name__)
 
-RESET_PHRASES = ("start over", "reset")
+# The whole message must be the command: a reset deletes the plan, and "I need a mental reset" isn't one.
+_RESET_COMMAND = re.compile(r"\W*(please\W+)?(start over|reset)(\W+please)?\W*", re.I)
 DRAFT_COUNT = 3
 
 Event = dict
@@ -70,7 +72,7 @@ class TravelPlannerWorkflow:
 
     def run_turn(self, trip: TripModel, user: UserModel, message: str) -> Iterator[Event]:
         shown_message = SHOW_PLANS_TEXT if message == SHOW_PLANS else message
-        if any(p in message.lower() for p in RESET_PHRASES):
+        if _RESET_COMMAND.fullmatch(message):
             yield from self._reset(trip, message)
             return
 

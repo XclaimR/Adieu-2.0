@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from app.schemas.trip_profile import BudgetLevel, Party, ProfileUpdates
 from app.schemas.personality import NoteChange
 from app.schemas.turn import OptionsKind, OptionsRequest, TurnAction, TurnDecision
@@ -348,3 +350,51 @@ def test_friends_trip_tells_the_planner_to_skip_romantic_spots(client, auth, fak
 
     draft_prompts = [p for name, p in fake_llm.prompts if name == "DraftPlan"]
     assert draft_prompts and all("group of friends" in p and "avoid romantic" in p for p in draft_prompts)
+
+
+def planned_trip(client, auth, fake_llm):
+    trip = ready_trip(client, auth, fake_llm)
+    draft = say(client, auth, trip["id"], "4 days")["drafts"][0]
+    return client.post(f"/trips/{trip['id']}/drafts/{draft['id']}/choose", headers=auth).json()
+
+
+@pytest.mark.parametrize("message", [
+    "I need a mental reset",
+    "Let's do “Wellness reset” in Japan",
+    "can we start over breakfast on day 2?",
+    "somewhere to reset and recharge, please",
+    "don't reset",
+    "no need to start over",
+    "presets",
+])
+def test_reset_words_inside_a_message_keep_the_trip(client, auth, fake_llm, message):
+    before = planned_trip(client, auth, fake_llm)
+
+    turn = say(client, auth, before["id"], message)
+
+    assert turn["reply"] != "Fresh start!"
+    assert turn["trip"]["itinerary"] == before["itinerary"]
+    assert turn["trip"]["drafts"] == before["drafts"]
+    assert turn["trip"]["profile"]["destination"] == before["profile"]["destination"]
+
+
+def test_tapping_an_idea_called_reset_sets_the_destination(client, auth, fake_llm):
+    trip = new_trip(client, auth)
+    fake_llm.decisions.append(decision(destination="Japan"))
+
+    turn = say(client, auth, trip["id"], "Let's do “Wellness reset” in Japan")
+
+    assert turn["trip"]["profile"]["destination"] == "Japan"
+
+
+@pytest.mark.parametrize("message", [
+    "reset", "Reset.", "Start over!", "please start over", "START OVER, please", "“reset”", "Please, reset 🙏",
+])
+def test_the_whole_message_as_a_command_still_resets(client, auth, fake_llm, message):
+    before = planned_trip(client, auth, fake_llm)
+
+    turn = say(client, auth, before["id"], message)
+
+    assert turn["reply"] == "Fresh start!"
+    assert turn["trip"]["itinerary"] is None and turn["trip"]["drafts"] == []
+    assert turn["trip"]["profile"]["destination"] is None
