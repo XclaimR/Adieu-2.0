@@ -212,3 +212,21 @@ def test_the_model_sees_the_notes_so_it_can_replace_or_drop_them(client, auth, f
     turn_prompts = [p for name, p in fake_llm.prompts if name == "TurnDecision"]
     assert "What they told us so far (topic: their words): cooking: 'one cooking class'" in turn_prompts[-1]
     assert turn["trip"]["personality"]["notes"] == []
+
+
+def test_diet_food_logistics_and_group_size_are_not_traits():
+    for message in ("We don't eat meat, vegetarian food only", "I'm allergic to some food",
+                    "Is there good food near the airport?", "We are a party of four", "Four of us in our party",
+                    "Lots of food allergies", "Vegan street food"):
+        assert card(message).traits == [], message
+    # Not even as a weak guess when the model proposes it: diet is a rule for restaurants (owner's decision).
+    p = card("Vegetarian food only", signals=[("food_focus", "vegetarian food only")])
+    assert PersonalityService.traits(p) == ([], [])
+
+
+def test_food_and_party_still_count_when_they_describe_the_trip():
+    for message, expected in (("A slow food week", "Food is the point"), ("Foodie", "Food is the point"),
+                              ("Food", "Food is the point"), ("Nightlife, food and a bit of adventure", "Food is the point"),
+                              ("Street food and exploring", "Food is the point"), ("We love food", "Food is the point"),
+                              ("A bachelor party", "Nightlife"), ("We want to party", "Nightlife")):
+        assert expected in card(message).traits, message
