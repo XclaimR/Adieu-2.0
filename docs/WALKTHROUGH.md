@@ -75,6 +75,11 @@ Every later request sends it as `Authorization: Bearer …`, checked by `api/dep
 5. The reply is streamed and **saved immediately**, then the slow part runs:
    - Show options → `OptionsService.build` → Places search in the destination → `RankingService` (LLM ranks by the trip's notes) → slide-in panel (`components/OptionsPanel.tsx`, `PickCard.tsx`).
    - Offer drafts → `DraftService.generate` → one Places pool, then one LLM call per flavor (easy / classic / local) → `DraftCard.tsx`, arriving one by one.
+     Until the first draft the reply is only "Let me put some plans together"; then a second `reply` event replaces it
+     with the model's words and "Here are 3 ways". With no draft (too few places, so no LLM call; Places or LLM down or
+     out of quota; all drafts rejected) the reply and the panel say why, from `trip.state.no_plans`.
+   - A pin-sized map area (Google's answer for natural features like Ari Atoll) is widened to about 1° when searched
+     (`places_service._search_area`); the saved area stays as Google gave it.
    - Edit itinerary → `DraftService.edit`: the model gets the changed part with its notes and returns edit
      operations (replace / remove / add / move); code applies them and leaves everything else untouched.
      `LLM_MODEL_PLAN` can name a stronger model for drafts and edits (default: `LLM_MODEL`).

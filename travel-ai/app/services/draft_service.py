@@ -24,12 +24,21 @@ logger = logging.getLogger(__name__)
 DEFAULT_DAYS = 4
 MAX_DAYS = 10
 MAX_STOPS = 4
+MIN_PLACES = 2  # places to visit or eat at: one day's minimum
 
 FLAVORS = [
     ("easy", "Slow and easy: a relaxed pace built around the traveler's main mood, long meals, few must-dos"),
     ("classic", "The highlights: the best-known sights and experiences, efficiently grouped"),
     ("local", "Off the beaten path: hidden gems and local favorites, avoiding the tourist crowds"),
 ]
+
+
+class NotEnoughPlacesError(RuntimeError):
+    pass
+
+
+class NoUsableDraftError(RuntimeError):
+    """Every draft was lost. The cause is the model's last error, or None if all its plans were rejected."""
 
 
 class PlanStop(BaseModel):
@@ -213,20 +222,25 @@ Rules:
                  personality: Personality | None = None) -> Iterator[Draft]:
         """Yields 3 drafts with different flavors, one at a time (each is a separate model call)."""
         pool = self.pool(profile, viewport, exclude_ids, personality)
+        if sum(p.category != PickCategory.STAY for p in pool.places) < MIN_PLACES:
+            raise NotEnoughPlacesError(f"Too few places in {profile.destination}")
         days = min(profile.duration_days or DEFAULT_DAYS, MAX_DAYS)
         allowed = PersonalityService.traits(personality)[0]  # only known traits; guesses stay off the cards
         moments = PersonalityService.moments(personality)
+        made, failure = False, None
         for flavor, brief in FLAVORS:
             try:
                 plan = LLMClient.generate_structured(self._prompt(profile, pool, days, brief, personality), DraftPlan,
                                                      model=settings.LLM_MODEL_PLAN)
-            except Exception:
+            except Exception as e:
                 logger.exception("Draft %s failed", flavor)
+                failure = e
                 continue
             itinerary = pool.to_itinerary(plan, profile.destination, moments)
             if not itinerary.days:
                 logger.warning("Draft %s referenced no valid places", flavor)
                 continue
+            made = True
             first_photo = next((a.photo_name for d in itinerary.days for a in d.activities if a.photo_name), None)
             yield Draft(
                 id=uuid.uuid4().hex[:12],
@@ -238,6 +252,8 @@ Rules:
                 unplanned=[m for m in moments if m not in fulfilled(itinerary)],
                 itinerary=itinerary,
             )
+        if not made:
+            raise NoUsableDraftError(f"No draft for {profile.destination}") from failure
 
     def edit(self, itinerary: Itinerary, changes: list[NoteChange], request: str, profile: TripProfile,
              viewport: dict | None, exclude_ids: set[str], personality: Personality) -> Itinerary:

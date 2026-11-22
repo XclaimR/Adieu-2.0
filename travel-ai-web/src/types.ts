@@ -85,6 +85,9 @@ export type Draft = {
   itinerary: Itinerary;
 };
 
+/** Why the last try made no drafts. */
+export type NoPlans = { reason: string; retry_now: boolean };
+
 export type Scale = { value: number; confidence: number; source: string | null };
 
 /** Six scales with confidence; `traits` are the known ones in plain words, `unknown` the scale labels still open. */
@@ -110,6 +113,7 @@ export type Trip = {
   destination_name: string | null;
   panel: OptionSet | null;
   drafts: Draft[];
+  no_plans: NoPlans | null;
   liked_place_ids: string[];
   skipped_place_ids: string[];
   next_question: string | null;

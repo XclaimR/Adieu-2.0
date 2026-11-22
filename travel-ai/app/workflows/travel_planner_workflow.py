@@ -1,18 +1,22 @@
 import logging
+import re
 from collections.abc import Iterator
 
+import httpx
+from openai import RateLimitError
 from sqlalchemy.orm import Session
 
-from app.database.models.trip import TripModel
+from app.database.models.trip import MessageModel, TripModel
 from app.database.models.user import UserModel
 from app.repositories.trip_repository import TripRepository
 from app.schemas.api import TurnResponse
+from app.schemas.draft import NoPlans
 from app.schemas.itinerary import Itinerary
 from app.schemas.personality import NoteChange, Personality
 from app.schemas.place import OptionSet, Pick, PickCategory, SwapTarget
 from app.schemas.trip_profile import TripProfile
 from app.schemas.turn import OptionsKind, OptionsRequest, TurnAction
-from app.services.draft_service import DEFAULT_DAYS, DraftService
+from app.services.draft_service import DEFAULT_DAYS, DraftService, NotEnoughPlacesError, NoUsableDraftError
 from app.services.options_service import OptionsService
 from app.services.personality_service import PersonalityService, check_changes, describe_note
 from app.services.places_service import PlacesService, PlacesUnavailableError, tier_rank
@@ -23,6 +27,9 @@ logger = logging.getLogger(__name__)
 
 RESET_PHRASES = ("start over", "reset")
 DRAFT_COUNT = 3
+PLANS_READY = f"Here are {DRAFT_COUNT} ways your trip could look — pick the one that feels right."
+# Google says "SearchTextRequest per day", Gemini "GenerateRequestsPerDayPerProjectPerModel".
+_DAILY_LIMIT = re.compile(r"per ?day", re.I)
 
 Event = dict
 
@@ -33,6 +40,30 @@ def _same_place(a: str | None, b: str | None) -> bool:
 
 def _progress(text: str) -> Event:
     return {"type": "progress", "text": text}
+
+
+def _reply(text: str, question: str | None = None, options: list[str] | None = None) -> Event:
+    return {"type": "reply", "text": text, "next_question": question, "answer_options": options or []}
+
+
+def _why_no_plans(error: Exception, destination: str) -> NoPlans:
+    cause = error.__cause__ if isinstance(error, NoUsableDraftError) else error
+    if isinstance(cause, (PlacesUnavailableError, RateLimitError)) and _DAILY_LIMIT.search(str(cause)):
+        used_up = "place searches" if isinstance(cause, PlacesUnavailableError) else "the AI planner"
+        return NoPlans(retry_now=False, reason=f"Plans are unavailable for now: I've reached today's limit for "
+                                               f"{used_up}. It resets once a day, so please come back later.")
+    if isinstance(error, NotEnoughPlacesError):
+        return NoPlans(reason=f"I couldn't find enough places in {destination} to build a plan. "
+                              "Try naming a town or a bigger area there.")
+    if isinstance(error, (PlacesUnavailableError, httpx.HTTPError)):
+        return NoPlans(reason="I couldn't reach the places service, so I have no plans to show yet. "
+                              "Please try again in a moment.")
+    if isinstance(error, NoUsableDraftError):
+        if cause:
+            return NoPlans(reason="The AI planner couldn't write your plans just now. Please try again in a moment.")
+        return NoPlans(reason=f"The plans I wrote didn't stick to real places in {destination}, so I threw them out. "
+                              "Please try again.")
+    return NoPlans(reason="Something went wrong while I was making your plans. Please try again.")
 
 
 class TripActionError(ValueError):
@@ -131,15 +162,17 @@ class TravelPlannerWorkflow:
 
         reply = TurnService.strip_questions(decision.reply, plan.next_question) + note
         if plan.action == TurnAction.OFFER_DRAFTS:
-            reply = reply.rstrip() + f" Here are {DRAFT_COUNT} ways your trip could look — pick the one that feels right."
-        yield {"type": "reply", "text": reply, "next_question": plan.next_question,
-               "answer_options": plan.answer_options}
+            # The model talks as if the plans exist ("I've put together a few"), so its words wait for the first draft.
+            reply_with_plans = f"{reply.rstrip()} {PLANS_READY}"
+            reply = f"Let me put some plans together for {new_profile.destination}.{note}"
+        yield _reply(reply, plan.next_question, plan.answer_options)
 
         # Save the exchange before the slow work (drafts take minutes), so anything the user does
         # meanwhile, like choosing the first draft, lands after it in the conversation.
         asked = list(dict.fromkeys(state.get("asked_fields", []) + ([plan.asked_field] if plan.asked_field else [])))
         streak = state.get("questions_streak", 0) + 1 if plan.action == TurnAction.ASK and not progressed else 0
-        trip.state = {**state, "asked_fields": asked, "questions_streak": streak, "answer_options": plan.answer_options}
+        trip.state = {**state, "asked_fields": asked, "questions_streak": streak, "answer_options": plan.answer_options,
+                      "no_plans": None}
         trip.next_question = plan.next_question
         self.trips.add_message(trip.id, "user", shown_message)
         answer = self.trips.add_message(trip.id, "assistant", reply if not plan.next_question else f"{reply}\n\n{plan.next_question}")
@@ -149,7 +182,7 @@ class TravelPlannerWorkflow:
             if plan.action == TurnAction.SHOW_OPTIONS:
                 yield from self._show_options(trip, new_profile, plan.options_request, personality)
             elif plan.action == TurnAction.OFFER_DRAFTS:
-                yield from self._offer_drafts(trip, new_profile, personality)
+                yield from self._offer_drafts(trip, new_profile, personality, answer, reply_with_plans)
             elif plan.action == TurnAction.EDIT_ITINERARY:
                 yield _progress("Updating your plan…")
                 changing = TurnService.to_change(decision)
@@ -230,15 +263,32 @@ class TravelPlannerWorkflow:
         self.db.commit()
         yield {"type": "options", "options": trip.panel}
 
-    def _offer_drafts(self, trip: TripModel, profile: TripProfile, personality: Personality) -> Iterator[Event]:
+    def _offer_drafts(self, trip: TripModel, profile: TripProfile, personality: Personality,
+                      answer: MessageModel, reply_with_plans: str) -> Iterator[Event]:
         yield _progress(f"Gathering places in {profile.destination}…")
         trip.drafts = []
-        for i, draft in enumerate(self.drafter.generate(profile, self._viewport(trip), self._skipped(trip), personality)):
-            trip.drafts = [*trip.drafts, draft.model_dump(mode="json")]
+        try:
+            for i, draft in enumerate(self.drafter.generate(profile, self._viewport(trip), self._skipped(trip), personality)):
+                trip.drafts = [*trip.drafts, draft.model_dump(mode="json")]
+                if i == 0:
+                    answer.content = reply_with_plans
+                self.db.commit()
+                if i == 0:
+                    yield _reply(reply_with_plans)  # replaces the one shown while we worked
+                yield {"type": "draft", "index": i, "draft": trip.drafts[-1]}
+                if i + 1 < DRAFT_COUNT:
+                    yield _progress(f"Drafting plan {i + 2} of {DRAFT_COUNT}…")
+        except Exception as e:
+            if trip.drafts:
+                raise
+            logger.warning("No plans for %s: %r", profile.destination, e, exc_info=True)
+            no_plans = _why_no_plans(e, profile.destination)
+            self.db.refresh(trip)  # an older draft may have been chosen while we worked
+            trip.drafts = []
+            trip.state = {**(trip.state or {}), "no_plans": no_plans.model_dump()}
+            answer.content = f"{answer.content} {no_plans.reason}"
             self.db.commit()
-            yield {"type": "draft", "index": i, "draft": trip.drafts[-1]}
-            if i + 1 < DRAFT_COUNT:
-                yield _progress(f"Drafting plan {i + 2} of {DRAFT_COUNT}…")
+            yield {"type": "note", "text": no_plans.reason}
 
     # ---------- actions ----------
 
