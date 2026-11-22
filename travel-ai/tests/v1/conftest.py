@@ -58,9 +58,22 @@ class FakeLLM:
         self.decisions: list[TurnDecision] = []
         self.prompts: list[tuple[str, str]] = []
         self.edits: list[dict] = []
+        # The critic: failed verdicts as {plan: {rule: verdict}}, the repairs, and what either call raises.
+        self.fails: dict[str, dict[str, dict]] = {}
+        self.fixes: dict[str, list[dict]] = {}
+        self.errors: dict[str, Exception] = {}
 
-    def __call__(self, prompt, schema, history=None, system=None, model=None):
+    def __call__(self, prompt, schema, history=None, system=None, model=None, timeout=None):
         self.prompts.append((schema.__name__, prompt))
+        if schema.__name__ in self.errors:
+            raise self.errors[schema.__name__]
+        if schema.__name__ == "PlanReviews":
+            return schema.model_validate({
+                plan: {rule: self.fails.get(plan, {}).get(rule, {"passed": True})
+                       for rule in field.annotation.model_fields}
+                for plan, field in schema.model_fields.items()})
+        if schema.__name__ == "PlanFixes":
+            return schema.model_validate({plan: self.fixes.get(plan, []) for plan in schema.model_fields})
         if schema.__name__ == "PlanEdits":
             return schema.model_validate({"edits": self.edits})
         if issubclass(schema, TurnDecision):

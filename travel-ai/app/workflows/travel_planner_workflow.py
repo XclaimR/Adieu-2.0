@@ -31,6 +31,7 @@ DRAFT_COUNT = 3
 PLANS_READY = f"Here are {DRAFT_COUNT} ways your trip could look — pick the one that feels right."
 # A source that is out for the day says "per day" or "PerDay": trying again right away can't work.
 _DAILY_LIMIT = re.compile(r"per ?day", re.I)
+UNCHECKED = "I couldn't double-check this, so give it a look."
 
 Event = dict
 
@@ -187,15 +188,18 @@ class TravelPlannerWorkflow:
             elif plan.action == TurnAction.EDIT_ITINERARY:
                 yield _progress("Updating your plan…")
                 changing = TurnService.to_change(decision)
-                updated = self.drafter.edit(itinerary, changing, decision.edit_request or shown_message, new_profile,
-                                            self._viewport(trip), self._skipped(trip), personality)
+                updated, warnings, checked = self.drafter.edit(itinerary, changing, decision.edit_request or shown_message, new_profile,
+                                                               self._viewport(trip), self._skipped(trip), personality)
+                extras = [f"Worth a look: {w.rstrip('.')}." for w in warnings] + ([] if checked else [UNCHECKED])
                 if updated == itinerary:
-                    extra = "I left the plan as it is: I found nothing that needed changing or fitted better."
-                    answer.content = f"{reply} {extra}" + (f"\n\n{plan.next_question}" if plan.next_question else "")
-                    yield {"type": "note", "text": extra}
+                    extras.insert(0, "I left the plan as it is: I found nothing that needed changing or fitted better.")
                 else:
                     trip.itinerary = updated.model_dump(mode="json")
                     self._keep_notes_attached(trip, personality, itinerary, updated)
+                if extras:
+                    extra = " ".join(extras)
+                    answer.content = f"{reply} {extra}" + (f"\n\n{plan.next_question}" if plan.next_question else "")
+                    yield {"type": "note", "text": extra}
         except PlacesUnavailableError as e:
             logger.warning("Places unavailable: %s", e)
             extra = " (I couldn't reach the places service just now.)"
@@ -268,28 +272,37 @@ class TravelPlannerWorkflow:
                       answer: MessageModel, reply_with_plans: str) -> Iterator[Event]:
         yield _progress(f"Gathering places in {profile.destination}…")
         trip.drafts = []
+        viewport, skipped = self._viewport(trip), self._skipped(trip)
+        written = []
         try:
-            for i, draft in enumerate(self.drafter.generate(profile, self._viewport(trip), self._skipped(trip), personality)):
-                trip.drafts = [*trip.drafts, draft.model_dump(mode="json")]
-                if i == 0:
-                    answer.content = reply_with_plans
-                self.db.commit()
-                if i == 0:
-                    yield _reply(reply_with_plans)  # replaces the one shown while we worked
-                yield {"type": "draft", "index": i, "draft": trip.drafts[-1]}
-                if i + 1 < DRAFT_COUNT:
-                    yield _progress(f"Drafting plan {i + 2} of {DRAFT_COUNT}…")
+            for draft in self.drafter.generate(profile, viewport, skipped, personality):
+                written.append(draft)
+                if len(written) < DRAFT_COUNT:
+                    yield _progress(f"Drafting plan {len(written) + 1} of {DRAFT_COUNT}…")
         except Exception as e:
-            if trip.drafts:
-                raise
-            logger.warning("No plans for %s: %r", profile.destination, e, exc_info=True)
-            no_plans = _why_no_plans(e, profile.destination)
-            self.db.refresh(trip)  # an older draft may have been chosen while we worked
-            trip.drafts = []
-            trip.state = {**(trip.state or {}), "no_plans": no_plans.model_dump()}
-            answer.content = f"{answer.content} {no_plans.reason}"
-            self.db.commit()
-            yield {"type": "note", "text": no_plans.reason}
+            if not written:
+                logger.warning("No plans for %s: %r", profile.destination, e, exc_info=True)
+                no_plans = _why_no_plans(e, profile.destination)
+                self.db.refresh(trip)  # an older draft may have been chosen while we worked
+                trip.drafts = []
+                trip.state = {**(trip.state or {}), "no_plans": no_plans.model_dump()}
+                answer.content = f"{answer.content} {no_plans.reason}"
+                self.db.commit()
+                yield {"type": "note", "text": no_plans.reason}
+                return
+            logger.exception("Drafting stopped early; showing the plans already written")
+
+        yield _progress("Checking your plans…")
+        drafts, checked = self.drafter.review(written, profile, viewport, skipped, personality)
+        # Saved before the first is shown: choosing one closes the stream.
+        trip.drafts = [d.model_dump(mode="json") for d in drafts]
+        answer.content = reply_with_plans if checked else f"{reply_with_plans} {UNCHECKED}"
+        self.db.commit()
+        yield _reply(reply_with_plans)  # replaces the one shown while we worked
+        if not checked:
+            yield {"type": "note", "text": UNCHECKED}
+        for i, shown in enumerate(list(trip.drafts)):
+            yield {"type": "draft", "index": i, "draft": shown}
 
     # ---------- actions ----------
 

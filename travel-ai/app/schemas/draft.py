@@ -21,4 +21,6 @@ class Draft(BaseModel):
     trait: str | None = None
     # Moments the traveler asked for that this version doesn't fit in yet.
     unplanned: list[str] = []
+    # What the review found and couldn't fix, shown on the card.
+    warnings: list[str] = []
     itinerary: Itinerary

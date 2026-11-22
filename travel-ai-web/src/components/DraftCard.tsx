@@ -25,6 +25,16 @@ export default function DraftCard({ draft, onChoose }: { draft: Draft; onChoose:
         </ol>
         {draft.itinerary.stay && <p className="small">🛏 {draft.itinerary.stay.name}</p>}
         {draft.unplanned.length > 0 && <p className="small muted">Not fitted in yet: {draft.unplanned.join(", ")}</p>}
+        {draft.warnings.length > 0 && (
+          <div className="small muted">
+            Check before choosing:
+            <ul>
+              {draft.warnings.map((w) => (
+                <li key={w}>{w}</li>
+              ))}
+            </ul>
+          </div>
+        )}
         <button className="primary" onClick={onChoose}>
           Choose this plan
         </button>

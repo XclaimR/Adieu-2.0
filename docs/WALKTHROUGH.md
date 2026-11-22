@@ -74,15 +74,27 @@ Every later request sends it as `Authorization: Bearer …`, checked by `api/dep
 4. `TurnService.plan` — rules decide what happens next: ask a question, show options, offer drafts, or edit the itinerary.
 5. The reply is streamed and **saved immediately**, then the slow part runs:
    - Show options → `OptionsService.build` → Places search in the destination → `RankingService` (LLM ranks by the trip's notes) → slide-in panel (`components/OptionsPanel.tsx`, `PickCard.tsx`).
-   - Offer drafts → `DraftService.generate` → one Places pool, then one LLM call per flavor (easy / classic / local) → `DraftCard.tsx`, arriving one by one.
-     Until the first draft the reply is only "Let me put some plans together"; then a second `reply` event replaces it
+   - Offer drafts → `DraftService.generate` → one Places pool, then one LLM call per flavor (easy / classic / local) → `DraftService.review` → `DraftCard.tsx`, all three together once reviewed.
+     Until the reviewed drafts arrive the reply is only "Let me put some plans together"; then a second `reply` event replaces it
      with the model's words and "Here are 3 ways". With no draft (too few places, so no LLM call; place data or the LLM
      unavailable; all drafts rejected) the reply and the panel say why, from `trip.state.no_plans`.
    - A pin-sized map area (natural features like Ari Atoll can come as one) is widened to about 1° when searched
      (`places_service._search_area`); the saved area stays as it was resolved.
    - Edit itinerary → `DraftService.edit`: the model gets the changed part with its notes and returns edit
      operations (replace / remove / add / move); code applies them and leaves everything else untouched.
-     `LLM_MODEL_PLAN` can name a stronger model for drafts and edits (default: `LLM_MODEL`).
+     `LLM_MODEL_PLAN` can name a stronger model for drafts, edits and their review (default: `LLM_MODEL`).
+   - Review, before the traveler sees a plan or an edit (`DraftService._check_and_fix`):
+     1. `ItineraryCritiqueService.critique` is one LLM call for all the plans. It must give a verdict per rule and
+        per plan: destination, travel style, activity balance, purpose, logic, budget (only if stated), and one
+        rule per stated note. A failure that points at nothing real is ignored.
+     2. `ItineraryCritiqueService.counted` is plain code: day count, empty or one-stop days, a missing stay, and
+        stops over 100 km apart on one day. The model never sees these results, so it can't parrot them.
+     3. One repair call for all flagged plans. It returns the same edit operations, and code lets them touch only
+        what was flagged. After an edit that is only what the edit changed, and a repair can't remove a stop. A
+        repair that leaves more countable errors is thrown away.
+     4. What is still wrong shows on the card ("Check before choosing") or after the edit ("Worth a look").
+        If the critic fails or times out (45 s per attempt), the plans still show, and the reply says they weren't
+        double-checked. Cost: a drafting turn is 5 LLM calls, 6 with a repair; an edit is 3, or 4.
 6. A final `done` event carries the refreshed trip.
 
 Events the browser handles: `progress` (step list), `reply`, `note`, `options`, `draft`, `done`, `error` (shown with a **Try again** button if the message wasn't saved).
