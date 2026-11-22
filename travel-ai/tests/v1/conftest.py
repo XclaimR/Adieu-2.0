@@ -35,6 +35,9 @@ FAKE_PLACES = {
     "do": [("Castle", "Tourist Attraction"), ("Museum", "Museum"), ("Viewpoint", "Scenic Point")],
     "gem": [("Tiny Bar", "Bar"), ("Secret Garden", "Garden"), ("Tile Shop", "Store")],
 }
+CITIES = ("lisbon", "panama city")
+# What Google returned for these on 2026-11-22: another name for the country.
+COUNTRY_NAMES = {"turkey": "Türkiye", "panama city": "Panama"}
 
 
 @pytest.fixture
@@ -58,6 +61,7 @@ class FakeLLM:
         self.decisions: list[TurnDecision] = []
         self.prompts: list[tuple[str, str]] = []
         self.edits: list[dict] = []
+        self.ideas = [("Slow food week", "Lisbon, Portugal"), ("Nowhere", "Atlantis"), ("Temples and ramen", "Japan")]
 
     def __call__(self, prompt, schema, history=None, system=None, model=None):
         self.prompts.append((schema.__name__, prompt))
@@ -79,10 +83,7 @@ class FakeLLM:
                                                  PlanStop(place="Tiny Bar", ref=6, time_of_day="afternoon", note="gem")]),
             ])
         if schema is StarterIdeas:
-            return StarterIdeas(ideas=[
-                StarterIdea(title="Slow food week", destination="Lisbon, Portugal", pitch="You love food"),
-                StarterIdea(title="Nowhere", destination="Atlantis", pitch="Not real"),
-            ])
+            return StarterIdeas(ideas=[StarterIdea(title=t, destination=d, pitch="It fits") for t, d in self.ideas])
         raise AssertionError(f"unexpected schema {schema}")
 
 
@@ -98,10 +99,23 @@ class FakePlaces:
         if "atlantis" in query:
             return []
         if field_mask == places_service._RESOLVE_FIELD_MASK:
-            name = query.split(",")[0].title()
+            as_country = query.endswith(" country")
+            place = query.removesuffix(" country")
+            wanted = body.get("includedType")
+            kind = "locality" if place.startswith(CITIES) else "country"
+            if as_country and place == "panama city":
+                kind = "country"  # like the real API: "Panama City country" finds Panama
+            if place == "jordan" and not as_country:
+                # Like the real API: shops, and nothing at all when filtered to a type.
+                return [] if wanted else [{"id": "shop", "viewport": VIEWPORT, "types": ["store"]}]
+            if wanted and wanted != kind and "korea" not in place:
+                return []
+            name = place.split(",")[0].title()
+            if kind == "country":
+                name = COUNTRY_NAMES.get(place, name)
             area = {"id": f"area-{name}", "displayName": {"text": name}, "formattedAddress": name,
                     "viewport": VIEWPORT, "photos": [{"name": f"places/area-{name}/photos/p"}],
-                    "types": ["country", "political"]}
+                    "types": [kind, "political"]}
             if "korea" in query:
                 # Like the real API: a nearby restaurant ranks above the country.
                 restaurant = {**area, "id": "streets-of-korea", "displayName": {"text": "Streets Of Korea"},

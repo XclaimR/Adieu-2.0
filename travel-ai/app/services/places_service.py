@@ -217,7 +217,7 @@ class PlacesService:
 
     def resolve_destination(self, name: str) -> dict | None:
         """Turn a destination name into a real geographic place with a map area, or None if there isn't one."""
-        key = f"resolve-geo:{name.strip().lower()}"
+        key = f"resolve-geo2:{name.strip().lower()}"
         cached = self._cached(key)
         if cached is not None:
             return cached.get("area")
@@ -230,19 +230,49 @@ class PlacesService:
                 {"textQuery": name, "maxResultCount": 1, "includedType": place_type, "strictTypeFiltering": True},
                 _RESOLVE_FIELD_MASK,
             ))
+            if not raw and place_type == "country":
+                # "Jordan" alone finds shops. Same name only, so a typed city can't turn into a country.
+                found = self._find_country(name)
+                if found and found["displayName"]["text"].lower() == name.strip().lower():
+                    raw = found
 
-        area = None
-        if raw:
-            photos = raw.get("photos") or []
-            area = {
-                "place_id": raw["id"],
-                "name": (raw.get("displayName") or {}).get("text", name),
-                "formatted_address": raw.get("formattedAddress"),
-                "viewport": raw["viewport"],
-                "photo_name": photos[0]["name"] if photos else None,
-            }
+        area = self._to_area(raw, name) if raw else None
         self._store(key, {"area": area})
         return area
+
+    def resolve_country(self, name: str) -> dict | None:
+        """The country of this name, or None if it names anything else (a city, region or island)."""
+        key = f"resolve-country:{name.strip().lower()}"
+        cached = self._cached(key)
+        if cached is not None:
+            return cached.get("area")
+
+        raw = self._find_country(name)
+        area = self._to_area(raw, name) if raw else None
+        # "Panama City country" finds Panama; "Vatican City" really is one.
+        if area and "city" in name.lower() and "city" not in area["name"].lower():
+            area = None
+        self._store(key, {"area": area})
+        return area
+
+    def _find_country(self, name: str) -> dict | None:
+        # The word "country" beats Google's bias to where the server is ("Georgia" the state, "Jordan" the shop).
+        raw = self._first_geographic(self._post(
+            {"textQuery": f"{name} country", "maxResultCount": 1, "includedType": "country", "strictTypeFiltering": True},
+            _RESOLVE_FIELD_MASK,
+        ))
+        return raw if raw and "country" in raw["types"] else None
+
+    @staticmethod
+    def _to_area(raw: dict, name: str) -> dict:
+        photos = raw.get("photos") or []
+        return {
+            "place_id": raw["id"],
+            "name": (raw.get("displayName") or {}).get("text", name),
+            "formatted_address": raw.get("formattedAddress"),
+            "viewport": raw["viewport"],
+            "photo_name": photos[0]["name"] if photos else None,
+        }
 
     @staticmethod
     def _first_geographic(results: list[dict]) -> dict | None:
@@ -266,14 +296,6 @@ class PlacesService:
 
     def nearby(self, query: str, category: PickCategory, lat: float, lng: float) -> list[PlaceCandidate]:
         return [_to_candidate(raw, category) for raw in self.text_search(query, near=(lat, lng))]
-
-    def verify_destination(self, destination: str) -> PlaceCandidate | None:
-        """Return the best match for a destination name, or None if Places doesn't know it."""
-        area = self.resolve_destination(destination)
-        if not area:
-            return None
-        return PlaceCandidate(place_id=area["place_id"], name=area["name"], category=PickCategory.DO,
-                              address=area["formatted_address"], photo_name=area["photo_name"])
 
     def photo_url(self, photo_name: str, max_width: int = 800) -> str:
         """Resolve a Places photo name to a short-lived public image URL without exposing our API key."""

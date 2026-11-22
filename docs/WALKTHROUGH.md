@@ -51,7 +51,7 @@ Every later request sends it as `Authorization: Bearer …`, checked by `api/dep
 ### Home
 `screens/Home.tsx`
 - Trip list: `GET /trips` → `TripRepository.list_for_user` (title = chosen plan's name, length, destination photo).
-- Ideas for you: `GET /starter-ideas` → `api/me.starter_ideas` (24h cache) → `StarterIdeaService.generate` (LLM suggests trips from your taste, then Places verifies each destination and adds a photo).
+- Ideas for you: `GET /starter-ideas` → `api/me.starter_ideas` (24h cache) → `StarterIdeaService.generate` (LLM suggests countries from your taste, then Places drops anything that isn't a country and adds a photo; none are shown while Places is down).
 - "Plan it" / "Surprise me" / idea card: `POST /trips` creates an empty trip, then the Trip screen sends what you typed as the first message.
 
 ### A chat turn (the core loop)

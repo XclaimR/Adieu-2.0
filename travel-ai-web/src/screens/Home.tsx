@@ -43,7 +43,7 @@ export default function Home({ user, openTrip }: Props) {
           }}
         >
           <input
-            placeholder="“A slow week in Lisbon with my partner”"
+            placeholder="“A slow week in Portugal with my partner”"
             value={text}
             onChange={(e) => setText(e.target.value)}
           />

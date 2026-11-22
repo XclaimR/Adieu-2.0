@@ -1,4 +1,5 @@
 import hashlib
+import logging
 
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
@@ -10,10 +11,11 @@ from app.repositories.user_repository import UserRepository
 from app.schemas.api import TasteRequest, UserOut
 from app.schemas.starter_idea import StarterIdea
 from app.schemas.taste import Vibe
-from app.services.places_service import PlacesService
+from app.services.places_service import PlacesService, PlacesUnavailableError
 from app.services.starter_idea_service import StarterIdeaService
 from app.services.taste_service import VIBES, TasteService
 
+logger = logging.getLogger(__name__)
 router = APIRouter(tags=["me"])
 
 
@@ -39,11 +41,15 @@ def starter_ideas(user: UserModel = Depends(current_user), db: Session = Depends
     """Home-screen ideas. Cached per user and taste for a day: each set costs an LLM call and Places lookups."""
     taste = UserRepository.taste(user)
     places = PlacesService(db)
-    key = f"ideas:{user.id}:{hashlib.sha256(taste.model_dump_json().encode()).hexdigest()[:16]}"
+    key = f"country-ideas:{user.id}:{hashlib.sha256(taste.model_dump_json().encode()).hexdigest()[:16]}"
     cached = places._cached(key, ttl_hours=24)
     if cached is not None:
         return cached["ideas"]
-    ideas = StarterIdeaService(places).generate(taste)
+    try:
+        ideas = StarterIdeaService(places).generate(taste)
+    except PlacesUnavailableError as e:
+        logger.warning("No starter ideas, countries can't be checked: %s", e)
+        return []
     if ideas:
         places._store(key, {"ideas": [i.model_dump(mode="json") for i in ideas]})
     return ideas
