@@ -11,7 +11,7 @@ from app.database.models.place_cache import PlaceCacheModel
 from app.schemas.personality import Personality
 from app.schemas.place import PickCategory, PlaceCandidate
 from app.schemas.trip_profile import BudgetLevel, TripProfile
-from app.services.personality_service import PersonalityService
+from app.services.personality_service import PersonalityService, describe_note
 
 logger = logging.getLogger(__name__)
 
@@ -57,19 +57,19 @@ _PRICE_LEVELS = {
 
 
 _BUDGET_WORDS = {BudgetLevel.BUDGET: "affordable", BudgetLevel.LUXURY: "luxury"}
-_DIET_KEYS = {"diet", "dietary", "food", "dietary_restrictions"}
 
 
-def search_hints(category: PickCategory, profile: TripProfile) -> str:
+def search_hints(category: PickCategory, profile: TripProfile, personality: Personality | None = None) -> str:
     """Words that steer the Places search toward this traveler, so the right places are in the candidate pool."""
     words: list[str] = []
+    notes = [n for n in personality.notes if n.target == "trip"] if personality else []
     if category == PickCategory.EAT:
-        words += [p.value for p in profile.preferences if p.key in _DIET_KEYS]
+        words += [n.text for n in notes if n.category == "diet" and n.kind != "avoid"]
     if category in (PickCategory.EAT, PickCategory.STAY) and profile.budget_level in _BUDGET_WORDS:
         words.append(_BUDGET_WORDS[profile.budget_level])
     if profile.kids and category in (PickCategory.STAY, PickCategory.DO):
         words.append("family-friendly")
-    if any(p.key == "mobility" for p in profile.preferences) and category in (PickCategory.STAY, PickCategory.DO):
+    if any(n.category == "access" for n in notes) and category in (PickCategory.STAY, PickCategory.DO):
         words.append("wheelchair accessible")
     return " ".join(dict.fromkeys(w.strip() for w in words if w.strip()))[:80]
 
@@ -91,10 +91,14 @@ def traveler_fit(profile: TripProfile, personality: Personality | None = None) -
     if known:
         lines.append(f"- This trip's personality: {'; '.join(known)}. Let it shape what you choose.")
     if leans:
-        lines.append(f"- Weak guesses, from their usual taste or a hint (don't over-weight): {'; '.join(leans)}.")
+        lines.append(f"- Weak guesses, from a hint (don't over-weight): {'; '.join(leans)}.")
     notes = personality.notes if personality else []
-    if trip_notes := [f"'{n.text}'" for n in notes if n.scope == "trip"]:
-        lines.append(f"- What they told us about the whole trip, in their words: {'; '.join(trip_notes)}.")
+    trip_notes = [n for n in notes if n.target == "trip" and (not n.once or n.kind == "avoid")]
+    if limits := [describe_note(n) for n in trip_notes if n.kind != "want" and n.source == "stated"]:
+        lines.append("- Hard limits. Never choose a place that breaks one; judge what the place is, not whether "
+                     f"its name looks alike: {'; '.join(limits)}.")
+    if wishes := [describe_note(n) for n in trip_notes if n.kind == "want" or n.source == "inferred"]:
+        lines.append(f"- What they want for the whole trip: {'; '.join(wishes)}.")
     if moments := [f"[m{i}] '{m}'" for i, m in enumerate(PersonalityService.moments(personality))]:
         lines.append(f"- Moments they want to fit in: {'; '.join(moments)}.")
     return "\n".join(lines)
@@ -251,10 +255,11 @@ class PlacesService:
         profile: TripProfile | None = None,
         viewport: dict | None = None,
         query: str | None = None,
+        personality: Personality | None = None,
     ) -> list[PlaceCandidate]:
         """Candidates for a category (or a free-text query) inside the destination."""
         text = f"{query} in {destination}" if query else CATEGORY_QUERIES[category].format(destination=destination)
-        hints = search_hints(category, profile) if profile else ""
+        hints = search_hints(category, profile, personality) if profile else ""
         if hints:
             text = f"{hints} {text}"
         return [_to_candidate(raw, category) for raw in self.text_search(text, viewport=viewport)]

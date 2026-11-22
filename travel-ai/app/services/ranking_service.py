@@ -4,12 +4,10 @@ from pydantic import BaseModel, Field
 
 from app.schemas.personality import Personality
 from app.schemas.place import Pick, PickCategory, PlaceCandidate
-from app.schemas.taste import Taste
 from app.schemas.trip_profile import TripProfile
 from app.services.llm_client import LLMClient
 from app.services.personality_service import PersonalityService
 from app.services.places_service import traveler_fit
-from app.services.taste_service import TasteService
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +53,6 @@ class RankingService:
         category: PickCategory,
         candidates: list[PlaceCandidate],
         profile: TripProfile,
-        taste: Taste,
         focus: str = "",
         personality: Personality | None = None,
     ) -> list[Pick]:
@@ -71,10 +68,7 @@ Category: {category.value}
 {f"The traveler is looking for: {focus}" if focus else ""}
 
 Trip profile:
-{profile.model_dump_json(exclude_none=True)}
-
-What we know about the traveler's taste:
-{TasteService.describe(taste)}
+{profile.model_dump_json(exclude_none=True, exclude={"preferences"})}
 
 Candidates:
 {listing}

@@ -11,7 +11,6 @@ from app.database.models.trip import TripModel
 from app.database.models.user import UserModel
 from app.database.session import get_db, get_session_factory
 from app.repositories.trip_repository import TripRepository
-from app.repositories.user_repository import UserRepository
 from app.schemas.api import (
     ActivityActionRequest,
     CreateTripRequest,
@@ -25,7 +24,6 @@ from app.schemas.api import (
 )
 from app.schemas.trip_profile import TripProfile
 from app.services.llm_client import LLMOutputError
-from app.services.personality_service import PersonalityService
 from app.services.places_service import PlacesService, PlacesUnavailableError
 from app.services.turn_service import VIBE_QUESTIONS
 from app.workflows.travel_planner_workflow import TravelPlannerWorkflow, TripActionError
@@ -52,8 +50,7 @@ def create_trip(request: CreateTripRequest, user: UserModel = Depends(current_us
     """Creates an empty trip. The client sends what the user typed as the first message."""
     repo = TripRepository(db)
     profile = TripProfile()
-    personality = PersonalityService.update(None, profile, UserRepository.taste(user))
-    trip = repo.create(user.id, request.title or "New trip", profile, personality)
+    trip = repo.create(user.id, request.title or "New trip", profile)
     question, chips = VIBE_QUESTIONS["destination"]
     trip.next_question = question
     trip.state = {"answer_options": chips}

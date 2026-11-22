@@ -8,3 +8,7 @@ class DayPlan(BaseModel):
     theme: str | None = None
 
     activities: list[Activity]
+
+    @property
+    def id(self) -> str:
+        return f"d{self.day_number}"

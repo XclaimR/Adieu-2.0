@@ -1,6 +1,7 @@
 import json
 
 from app.schemas.trip_profile import BudgetLevel, Party, ProfileUpdates
+from app.schemas.personality import NoteChange
 from app.schemas.turn import OptionsKind, OptionsRequest, TurnAction, TurnDecision
 from tests.v1.conftest import VIEWPORT
 
@@ -13,14 +14,19 @@ def say(client, auth, trip_id, message):
     return client.post(f"/trips/{trip_id}/messages", json={"message": message}, headers=auth).json()
 
 
-def decision(action=TurnAction.ASK, **profile):
-    return TurnDecision(profile_updates=ProfileUpdates(**profile), action=action, reply="Lovely.")
+def decision(action=TurnAction.ASK, notes=(), **profile):
+    return TurnDecision(profile_updates=ProfileUpdates(**profile), note_changes=list(notes), action=action,
+                        reply="Lovely.")
+
+
+def mood(word, quote):
+    return NoteChange(op="add", text=word, quote=quote, mood=word)
 
 
 def ready_trip(client, auth, fake_llm, **extra):
     """A trip with the minimum vibe known and duration already asked, so the next turn drafts plans."""
     trip = new_trip(client, auth)
-    fake_llm.decisions.append(decision(destination="Lisbon", mood=["relaxed"], party=Party.COUPLE, **extra))
+    fake_llm.decisions.append(decision(destination="Lisbon", notes=[mood("relaxed", "relaxed")], party=Party.COUPLE, **extra))
     say(client, auth, trip["id"], "Lisbon, relaxed, with my partner, on a budget")  # asks duration
     return trip
 
@@ -192,7 +198,7 @@ def test_liking_an_over_budget_stay_suggests_similar_cheaper_ones(client, auth, 
     assert all(p["tier"] == "budget" for p in result["options"]["items"])
 
 
-def test_liking_an_affordable_place_is_just_a_taste_signal(client, auth, fake_llm):
+def test_liking_a_place_is_a_signal_for_this_trip_only(client, auth, fake_llm):
     trip = ready_trip(client, auth, fake_llm)
     fake_llm.decisions.append(TurnDecision(action=TurnAction.SHOW_OPTIONS, reply="Sure.",
                                            options_request=OptionsRequest(kind=OptionsKind.EAT, query="")))
@@ -202,7 +208,9 @@ def test_liking_an_affordable_place_is_just_a_taste_signal(client, auth, fake_ll
 
     assert result["options"] is None
     assert result["trip"]["itinerary"] is None  # liking is not adding
-    assert "Seafood Restaurant" in client.get("/me", headers=auth).json()["taste"]["likes"]
+    assert [(n["text"], n["source"]) for n in result["trip"]["personality"]["notes"]][-1] == \
+        ("likes Seafood Restaurant", "inferred")
+    assert client.get("/me", headers=auth).json()["taste"]["likes"] == []
 
 
 def test_add_puts_places_in_the_itinerary(client, auth, fake_llm):
@@ -239,14 +247,20 @@ def test_chat_edits_the_chosen_itinerary(client, auth, fake_llm):
     trip = ready_trip(client, auth, fake_llm)
     draft = say(client, auth, trip["id"], "not sure")["drafts"][0]
     client.post(f"/trips/{trip['id']}/drafts/{draft['id']}/choose", headers=auth)
-    edit = TurnDecision(action=TurnAction.EDIT_ITINERARY, reply="Done.", edit_request="make day 2 more relaxed")
+    edit = TurnDecision(action=TurnAction.EDIT_ITINERARY, reply="Done.", edit_request="make day 2 more relaxed",
+                        note_changes=[NoteChange(op="add", target="d2", text="more relaxed", quote="more relaxed",
+                                                 then="change")])
+    second = draft["itinerary"]["days"][1]["activities"]
+    fake_llm.edits = [{"op": "remove", "item_id": second[1]["id"]}]
     fake_llm.decisions.append(edit)
 
     turn = say(client, auth, trip["id"], "make day 2 more relaxed")
 
-    edit_prompts = [p for name, p in fake_llm.prompts if name == "DraftPlan"]
+    edit_prompts = [p for name, p in fake_llm.prompts if name == "PlanEdits"]
     assert "make day 2 more relaxed" in edit_prompts[-1]
-    assert turn["trip"]["itinerary"]["days"]
+    days = turn["trip"]["itinerary"]["days"]
+    assert days[0] == draft["itinerary"]["days"][0]  # untouched: same stops, notes and ids
+    assert days[1]["activities"] == second[:1]
     assert turn["next_question"] == "Anything you'd like to change?"
 
 
@@ -328,7 +342,7 @@ def test_trip_list_shows_the_chosen_plan_name_and_length(client, auth, fake_llm)
 
 def test_friends_trip_tells_the_planner_to_skip_romantic_spots(client, auth, fake_llm):
     trip = new_trip(client, auth)
-    fake_llm.decisions.append(decision(destination="Lisbon", mood=["foodie"], party=Party.FRIENDS))
+    fake_llm.decisions.append(decision(destination="Lisbon", notes=[mood("foodie", "food trip")], party=Party.FRIENDS))
     say(client, auth, trip["id"], "Lisbon food trip with friends")  # asks duration
     say(client, auth, trip["id"], "not sure")  # drafts
 

@@ -5,25 +5,25 @@ import uuid
 from collections.abc import Iterator
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, create_model
 
+from app.core.config import settings
 from app.schemas.activity import Activity
 from app.schemas.dayplan import DayPlan
 from app.schemas.draft import Draft
-from app.schemas.itinerary import Itinerary
-from app.schemas.personality import Personality
+from app.schemas.itinerary import STAY_ID, Itinerary
+from app.schemas.personality import Note, NoteChange, Personality
 from app.schemas.place import Pick, PickCategory, PlaceCandidate
-from app.schemas.taste import Taste
 from app.schemas.trip_profile import TripProfile
 from app.services.llm_client import LLMClient
 from app.services.personality_service import PersonalityService
 from app.services.places_service import PlacesService, tier_rank, traveler_fit
-from app.services.taste_service import TasteService
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_DAYS = 4
 MAX_DAYS = 10
+MAX_STOPS = 4
 
 FLAVORS = [
     ("easy", "Slow and easy: a relaxed pace built around the traveler's main mood, long meals, few must-dos"),
@@ -53,6 +53,16 @@ class DraftPlan(BaseModel):
     trait: str | None = Field(default=None, description="the listed personality trait this version serves most, or null")
     # The cap stops runaway generation (each extra day costs ~10 s on a local model).
     days: list[PlanDay] = Field(min_length=1, max_length=10)
+
+
+class PlanEdit(BaseModel):
+    op: Literal["replace", "remove", "add", "move"] = Field(
+        description="move also covers changing only an item's time of day")
+    item_id: str | None = Field(default=None, description="the item changed; null for add")
+    day_id: str | None = Field(default=None, description="for add and move: the day it goes to")
+    place: str | None = Field(default=None, description="for replace and add: the [cN] id of the new place")
+    time_of_day: Literal["morning", "afternoon", "evening"] | None = None
+    note: str | None = Field(default=None, description="what to do at the new place, max 12 words")
 
 
 _SLOTS = ["morning", "afternoon", "evening"]
@@ -160,11 +170,12 @@ class DraftService:
     def __init__(self, places: PlacesService):
         self.places = places
 
-    def pool(self, profile: TripProfile, viewport: dict | None, exclude_ids: set[str], extra: list[PlaceCandidate] = ()) -> PlacePool:
+    def pool(self, profile: TripProfile, viewport: dict | None, exclude_ids: set[str],
+             personality: Personality | None = None) -> PlacePool:
         """Real candidates inside the destination, one search per category (cached)."""
-        places: list[PlaceCandidate] = list(extra)
+        places: list[PlaceCandidate] = []
         for category in (PickCategory.DO, PickCategory.EAT, PickCategory.HIDDEN_GEMS, PickCategory.STAY):
-            found = self.places.candidates(profile.destination, category, profile, viewport)
+            found = self.places.candidates(profile.destination, category, profile, viewport, personality=personality)
             if category == PickCategory.STAY and profile.budget_level:
                 limit = tier_rank(profile.budget_level.value)
                 found = [c for c in found if tier_rank(c.tier) <= limit] or found
@@ -172,7 +183,7 @@ class DraftService:
         return PlacePool(places)
 
     @staticmethod
-    def _prompt(profile: TripProfile, taste: Taste, pool: PlacePool, days: int, brief: str,
+    def _prompt(profile: TripProfile, pool: PlacePool, days: int, brief: str,
                 personality: Personality | None = None) -> str:
         allowed = PersonalityService.traits(personality)[0]  # only known traits; guesses stay off the cards
         return f"""
@@ -180,10 +191,7 @@ Plan a {days}-day trip to {profile.destination}.
 This version's style: {brief}
 
 Trip profile:
-{profile.model_dump_json(exclude_none=True)}
-
-Traveler taste:
-{TasteService.describe(taste)}
+{profile.model_dump_json(exclude_none=True, exclude={"preferences"})}
 
 Places you may use (refer to them ONLY by [n]):
 {pool.listing()}
@@ -201,16 +209,17 @@ Rules:
 - stay_ref must be a 'stay' place from the list, or null.
 """
 
-    def generate(self, profile: TripProfile, taste: Taste, viewport: dict | None, exclude_ids: set[str],
+    def generate(self, profile: TripProfile, viewport: dict | None, exclude_ids: set[str],
                  personality: Personality | None = None) -> Iterator[Draft]:
         """Yields 3 drafts with different flavors, one at a time (each is a separate model call)."""
-        pool = self.pool(profile, viewport, exclude_ids)
+        pool = self.pool(profile, viewport, exclude_ids, personality)
         days = min(profile.duration_days or DEFAULT_DAYS, MAX_DAYS)
         allowed = PersonalityService.traits(personality)[0]  # only known traits; guesses stay off the cards
         moments = PersonalityService.moments(personality)
         for flavor, brief in FLAVORS:
             try:
-                plan = LLMClient.generate_structured(self._prompt(profile, taste, pool, days, brief, personality), DraftPlan)
+                plan = LLMClient.generate_structured(self._prompt(profile, pool, days, brief, personality), DraftPlan,
+                                                     model=settings.LLM_MODEL_PLAN)
             except Exception:
                 logger.exception("Draft %s failed", flavor)
                 continue
@@ -230,45 +239,164 @@ Rules:
                 itinerary=itinerary,
             )
 
-    def edit(self, itinerary: Itinerary, request: str, profile: TripProfile, taste: Taste,
-             viewport: dict | None, exclude_ids: set[str], personality: Personality | None = None) -> Itinerary:
-        """Apply a free-text change ("make day 2 more relaxed") using only real places."""
-        current = [
-            PlaceCandidate(place_id=a.place_id, name=a.name, category=PickCategory(a.category)
-                           if a.category in PickCategory._value2member_map_ else PickCategory.DO,
-                           photo_name=a.photo_name, maps_url=a.maps_url)
-            for d in itinerary.days for a in d.activities if a.place_id
-        ]
-        if itinerary.stay:
-            current.append(PlaceCandidate(**itinerary.stay.model_dump(exclude={"why"})))
-        pool = self.pool(profile, viewport, exclude_ids, extra=current)
-        ref = {p.place_id: i for i, p in enumerate(pool.places)}
+    def edit(self, itinerary: Itinerary, changes: list[NoteChange], request: str, profile: TripProfile,
+             viewport: dict | None, exclude_ids: set[str], personality: Personality) -> Itinerary:
+        """Change only what the changes point at. The model returns operations; code copies everything else."""
+        plan = itinerary.model_copy(deep=True)
+        before = len(plan.days)
+        wanted = min(profile.duration_days or before, MAX_DAYS)
+        plan.days = [d for d in plan.days if d.day_number <= wanted]
+        new_days = [DayPlan(day_number=n, activities=[]) for n in range(before + 1, wanted + 1)]
+        plan.days += new_days
 
-        outline = "\n".join(
-            f"Day {d.day_number} ({d.theme}): " + ", ".join(
-                f"[{ref[a.place_id]}] {a.name} ({a.time_of_day})" for a in d.activities if a.place_id in ref)
-            for d in itinerary.days
+        targets = {c.target for c in changes}
+        whole = not changes or "trip" in targets
+        day_of = {a.id: d for d in plan.days for a in d.activities}
+        scope_days = {d.id for d in plan.days if whole or d.id in targets or d in new_days
+                      or any(a.id in targets for a in d.activities)}
+        editable = {a.id for d in plan.days for a in d.activities
+                    if whole or a.id in targets or d.id in targets}
+        if whole or STAY_ID in targets:
+            editable.add(STAY_ID)
+        # One item may move to any day; only whole days take new stops.
+        add_to = {d.id for d in plan.days if whole or d.id in targets or d in new_days}
+        move_to = {d.id for d in plan.days} if targets & set(day_of) else add_to
+
+        places = self._edit_candidates(plan, changes, editable, add_to, profile, viewport, exclude_ids, personality)
+        if not editable and not add_to:
+            return plan
+        edit = create_model(
+            "PlanEdit", __base__=PlanEdit,
+            item_id=(Literal[tuple(sorted(editable))] | None if editable else str | None, None),
+            # Left open when nothing may move: models still fill it in, and _apply_edits checks it anyway.
+            day_id=(Literal[tuple(sorted(move_to))] | None if move_to else str | None, None),
+            place=(Literal[tuple(places)] | None if places else str | None, None),
         )
-        days = len(itinerary.days)
-        if profile.duration_days and profile.duration_days != days:
-            days = min(profile.duration_days, MAX_DAYS)
+        schema = create_model("PlanEdits", edits=(list[edit], ...))
 
-        prompt = self._prompt(profile, taste, pool, days, "keep what works, change only what the traveler asked",
-                              personality) + f"""
-Current plan:
-{outline}
-Current stay: {f"[{ref[itinerary.stay.place_id]}]" if itinerary.stay else "none"}
+        asked = "\n".join(f"- at [{c.target}]: {c.text}" for c in changes) or f"- {request}"
+        listing = "\n".join(
+            f"[{key}] {p.name} · {p.category.value} · {p.type_label or ''} · "
+            f"{p.price_level or (p.tier and f'est. {p.tier} price') or 'price unknown'} · {p.summary or ''}"
+            for key, p in places.items())
+        prompt = f"""
+You edit part of a {len(plan.days)}-day trip to {profile.destination}.
 
-The traveler wants this change: {request}
-Return the full updated plan with the same title unless the change calls for a new one.
+Trip profile:
+{profile.model_dump_json(exclude_none=True, exclude={"preferences"})}
+
+The part you work on, with what the traveler said under what it is about:
+{PersonalityService.plan_view(plan, personality, scope_days)}
+
+The traveler's message: {request}
+Make these changes:
+{asked}
+{f"Fill the new days {', '.join(d.id for d in new_days)} with 2-3 stops each." if new_days else ""}
+
+Places you may use:
+{listing}
+
+Rules:
+- Return the fewest edits that do what was asked. For a new trip-wide rule, change only the items that break it.
+- A note on the narrower thing wins over a wider one: item over day, day over trip.
+- Never choose a place that breaks a stated must or avoid; judge what the place is, not whether its name looks alike.
+- An inferred note is a guess: it never removes something they asked for.
+- "cheaper" means a lower price level than the current place, whatever the trip's budget.
+- replace keeps the slot and its notes. move changes an item's day or time of day. Don't use stays as activities.
+- If no listed place fits, return no edit for it.
 """
-        plan = LLMClient.generate_structured(prompt, DraftPlan)
-        updated = pool.to_itinerary(plan, itinerary.destination, PersonalityService.moments(personality))
-        if not updated.days:
-            return itinerary
-        if updated.stay is None:
-            updated.stay = itinerary.stay
-        return updated
+        result = LLMClient.generate_structured(prompt, schema, model=settings.LLM_MODEL_PLAN)
+        self._apply_edits(plan, result.edits, places, editable, add_to, move_to)
+        plan.days = [d for d in plan.days if d.activities or d not in new_days]
+        return plan
+
+    def _edit_candidates(self, plan: Itinerary, changes: list[NoteChange], editable: set[str], add_to: set[str],
+                         profile: TripProfile, viewport: dict | None, exclude_ids: set[str],
+                         personality: Personality) -> dict[str, PlaceCandidate]:
+        """Places for just the part being changed, as {c0: place, ...}."""
+        items = [a for d in plan.days for a in d.activities if a.id in editable]
+        wanted = {PickCategory(a.category) for a in items if a.category in PickCategory._value2member_map_}
+        if STAY_ID in editable:
+            wanted.add(PickCategory.STAY)
+        if add_to:
+            wanted |= {PickCategory.DO, PickCategory.EAT, PickCategory.HIDDEN_GEMS}
+        # "Similar but cheaper" must not inherit the trip's "luxury" search hint.
+        neutral = profile.model_copy(update={"budget_level": None})
+        found: list[PlaceCandidate] = []
+        for change in changes:
+            if not change.search:
+                continue
+            category = next((PickCategory(a.category) for a in items
+                             if a.id == change.target and a.category in PickCategory._value2member_map_), None)
+            category = (PickCategory.STAY if change.target == STAY_ID or change.category == "stay" else
+                        PickCategory.EAT if change.category in ("eat", "diet") else category or PickCategory.DO)
+            found += self.places.candidates(profile.destination, category, neutral, viewport, change.search, personality)
+        for category in [c for c in PickCategory if c in wanted]:
+            found += self.places.candidates(profile.destination, category, neutral, viewport, personality=personality)
+        used = {a.place_id for d in plan.days for a in d.activities} | exclude_ids
+        if plan.stay:
+            used.add(plan.stay.place_id)
+        fresh = list({p.place_id: p for p in found if p.place_id not in used}.values())
+        return {f"c{i}": p for i, p in enumerate(fresh)}
+
+    @staticmethod
+    def _apply_edits(plan: Itinerary, edits: list[PlanEdit], places: dict[str, PlaceCandidate],
+                     editable: set[str], add_to: set[str], move_to: set[str]) -> None:
+        days = {d.id: d for d in plan.days}
+        used: set[str] = set()
+        touched: dict[str, DayPlan] = {}
+        for e in edits:
+            place = places.get(e.place) if e.op in ("replace", "add") else None
+            if place and place.place_id in used:
+                continue
+            if e.op == "replace" and e.item_id == STAY_ID and STAY_ID in editable:
+                if place and place.category == PickCategory.STAY:
+                    plan.stay = Pick(**place.model_dump(), why=e.note)
+                    used.add(place.place_id)
+                continue
+            if e.op == "add":
+                day = days.get(e.day_id) if e.day_id in add_to else None
+                if day and place and place.category != PickCategory.STAY and len(day.activities) < MAX_STOPS:
+                    day.activities.append(Activity(
+                        name=place.name, category=place.category.value, time_of_day=e.time_of_day, description=e.note,
+                        place_id=place.place_id, photo_name=place.photo_name, maps_url=place.maps_url))
+                    used.add(place.place_id)
+                    touched[day.id] = day
+                continue
+            if e.item_id not in editable:
+                continue
+            day, item = next(((d, a) for d in plan.days for a in d.activities if a.id == e.item_id), (None, None))
+            if item is None:
+                continue
+            if e.op == "replace" and place and place.category != PickCategory.STAY:
+                item.name, item.category, item.description = place.name, place.category.value, e.note
+                item.place_id, item.photo_name, item.maps_url = place.place_id, place.photo_name, place.maps_url
+                item.time_of_day = e.time_of_day or item.time_of_day
+                used.add(place.place_id)
+            elif e.op == "remove":
+                day.activities.remove(item)
+            elif e.op == "move":
+                to = days.get(e.day_id) if e.day_id in move_to else None
+                if to and to is not day:
+                    if len(to.activities) >= MAX_STOPS:
+                        continue
+                    day.activities.remove(item)
+                    to.activities.append(item)
+                    touched[to.id] = to
+                item.time_of_day = e.time_of_day or item.time_of_day
+            else:
+                continue
+            touched[day.id] = day
+        # Sort only; re-timing would change stops nobody asked about.
+        for day in touched.values():
+            day.activities.sort(key=lambda a: _SLOTS.index(a.time_of_day) if a.time_of_day in _SLOTS else len(_SLOTS))
+
+    @staticmethod
+    def map_moments(itinerary: Itinerary, notes: list[Note]) -> list[Note]:
+        """Once a plan is chosen, each thing to fit in points at the stop that fulfils it."""
+        stop = {a.for_note: a.id for d in itinerary.days for a in d.activities if a.for_note}
+        return [n.model_copy(update={"target": stop[n.text]}) if n.once and n.target == "trip" and n.text in stop
+                else n for n in notes]
 
     @staticmethod
     def place_in_itinerary(itinerary: Itinerary, pick: Pick) -> Itinerary:

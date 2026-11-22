@@ -1,16 +1,18 @@
 import { useState } from "react";
 import { photoUrl } from "../api";
-import type { Itinerary } from "../types";
+import type { Itinerary, Note } from "../types";
+import NoteList from "./NoteList";
 
 type Props = {
   itinerary: Itinerary;
+  notes: Note[];
   busy: boolean;
   onSwap: (day: number, index: number) => void;
   onRemove: (day: number, index: number) => void;
 };
 
 /** The chosen plan as a day-by-day timeline. Tap an activity to swap or remove it. */
-export default function ItineraryView({ itinerary, busy, onSwap, onRemove }: Props) {
+export default function ItineraryView({ itinerary, notes, busy, onSwap, onRemove }: Props) {
   const [selected, setSelected] = useState<string | null>(null);
   const stayPhoto = photoUrl(itinerary.stay?.photo_name ?? null);
 
@@ -27,6 +29,7 @@ export default function ItineraryView({ itinerary, busy, onSwap, onRemove }: Pro
           <div>
             <span className="muted small">Where you'll stay</span>
             <strong>{itinerary.stay.name}</strong>
+            <NoteList notes={notes} target="s1" />
             {itinerary.stay.maps_url && (
               <a className="small" href={itinerary.stay.maps_url} target="_blank" rel="noreferrer">
                 Map ↗
@@ -42,6 +45,7 @@ export default function ItineraryView({ itinerary, busy, onSwap, onRemove }: Pro
             Day {day.day_number}
             {day.theme && <span className="muted"> · {day.theme}</span>}
           </h3>
+          <NoteList notes={notes} target={`d${day.day_number}`} />
           <ol>
             {day.activities.map((a, i) => {
               const key = `${day.day_number}-${i}`;
@@ -55,6 +59,7 @@ export default function ItineraryView({ itinerary, busy, onSwap, onRemove }: Pro
                       <strong>{a.name}</strong>
                       {a.description && <span className="small muted">{a.description}</span>}
                       {a.for_note && <span className="trait">For: {a.for_note}</span>}
+                      <NoteList notes={notes.filter((n) => n.text !== a.for_note)} target={a.id} />
                     </span>
                   </button>
                   {selected === key && (

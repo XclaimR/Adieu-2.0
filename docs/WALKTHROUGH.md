@@ -57,24 +57,27 @@ Every later request sends it as `Authorization: Bearer …`, checked by `api/dep
 ### A chat turn (the core loop)
 `screens/Trip.tsx:send` → `api.ts:sendStream` → `POST /trips/{id}/messages/stream` (streams NDJSON events) →
 `TravelPlannerWorkflow.run_turn`:
-1. `TurnService.decide` — LLM reads the message + history and returns a `TurnDecision` (profile updates, reply, intent).
+1. `TurnService.decide` — LLM reads the message + history and returns a `TurnDecision` (core facts, note changes, reply, intent). Its schema only allows note targets that exist on this trip.
 2. `TripProfileService.merge` + `grounding.ground_updates` — keeps only facts the user actually said (e.g. `extract_duration` turns "a slow week" into 7 days).
 3. New destination? `PlacesService.resolve_destination` checks it's a real place (not a business) and stores its map area.
-   Then `PersonalityService.update` refreshes the trip's **personality** (`trips.personality`):
-   - **Notes**: the traveler's intentions in their own words, each about the whole trip ("a slow week") or one
-     moment ("one big night out for my birthday"). The turn model proposes them (`TurnDecision.notes`); code keeps
-     only real quotes, decides what is a one-off, and replaces a note when the model reuses its topic or drops it.
-   - **Six scales** with confidence, for the card and (later) choosing questions: a word list over the traveler's
-     own message, checked profile facts (budget, kids), and weak leanings from lasting taste. A pole only the model
-     read stays a weak guess. Intensity ("really", "a bit") and hedges ("maybe") come from their words.
-   `traveler_fit` (places_service) gives ranking and drafts the known traits, the notes and numbered moments; each
-   draft stop can say which moment it fulfils (`Activity.for_note`), and a draft lists what it didn't fit
-   (`Draft.unplanned`). Live check: `python -m tests.evals.run_personality_evals` (8 sentences, one call each).
+   Then `PersonalityService.update` refreshes the trip's **personality** (`trips.personality`). It is about this
+   trip only: lasting taste is not read or written during a trip (it still feeds the Home ideas).
+   - **Notes** are everything the traveler said beyond the core facts. Each is stored once and points at what it
+     is about: `trip`, a day (`d2`), the stay (`s1`) or an activity's id. It has a kind (must / avoid / want), a
+     category, and is stated or inferred. The model does the understanding (`TurnDecision.note_changes`: add,
+     remove, or do = one-time); `check_changes` checks only structure: real quote, real ids. Nothing is overwritten.
+   - Targets are slots, so a note survives swapping the place. A removed stop's notes move to its day.
+   - **Mood** and the **six scales** are derived from the notes (plus budget and kids from the profile).
+   `traveler_fit` (places_service) gives ranking and drafts the stated limits, the wishes and the numbered moments
+   ("one big night out"); choosing a draft points each moment's note at the stop that fulfils it.
+   Live check: `python -m tests.evals.run_personality_evals` (17 messages, one call each).
 4. `TurnService.plan` — rules decide what happens next: ask a question, show options, offer drafts, or edit the itinerary.
 5. The reply is streamed and **saved immediately**, then the slow part runs:
-   - Show options → `OptionsService.build` → Places search in the destination → `RankingService` (LLM ranks by your taste) → slide-in panel (`components/OptionsPanel.tsx`, `PickCard.tsx`).
+   - Show options → `OptionsService.build` → Places search in the destination → `RankingService` (LLM ranks by the trip's notes) → slide-in panel (`components/OptionsPanel.tsx`, `PickCard.tsx`).
    - Offer drafts → `DraftService.generate` → one Places pool, then one LLM call per flavor (easy / classic / local) → `DraftCard.tsx`, arriving one by one.
-   - Edit itinerary → `DraftService.edit`.
+   - Edit itinerary → `DraftService.edit`: the model gets the changed part with its notes and returns edit
+     operations (replace / remove / add / move); code applies them and leaves everything else untouched.
+     `LLM_MODEL_PLAN` can name a stronger model for drafts and edits (default: `LLM_MODEL`).
 6. A final `done` event carries the refreshed trip.
 
 Events the browser handles: `progress` (step list), `reply`, `note`, `options`, `draft`, `done`, `error` (shown with a **Try again** button if the message wasn't saved).
@@ -83,7 +86,7 @@ Events the browser handles: `progress` (step list), `reply`, `note`, `options`, 
 | UI | Endpoint | Workflow method |
 |---|---|---|
 | "Choose this plan" (`DraftCard`) | `POST /trips/{id}/drafts/{draft_id}/choose` | `choose_draft` |
-| ♡ / ＋ / skip on a place (`PickCard`) | `POST /trips/{id}/picks/{place_id}` | `pick_action` (likes feed your taste; liking a pricey stay suggests cheaper ones) |
+| ♡ / ＋ / skip on a place (`PickCard`) | `POST /trips/{id}/picks/{place_id}` | `pick_action` (a like becomes an inferred note on this trip; liking a pricey stay suggests cheaper ones) |
 | Swap / Remove on an activity (`ItineraryView`) | `POST /trips/{id}/itinerary/days/{d}/activities/{i}` | `activity_action` |
 | Picking a replacement in the panel | `…/activities/{i}/replace` | `replace_activity` |
 

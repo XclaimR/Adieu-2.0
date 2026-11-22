@@ -6,17 +6,15 @@ from sqlalchemy.orm import Session
 from app.database.models.trip import TripModel
 from app.database.models.user import UserModel
 from app.repositories.trip_repository import TripRepository
-from app.repositories.user_repository import UserRepository
 from app.schemas.api import TurnResponse
 from app.schemas.itinerary import Itinerary
-from app.schemas.personality import Personality
+from app.schemas.personality import NoteChange, Personality
 from app.schemas.place import OptionSet, Pick, PickCategory, SwapTarget
-from app.schemas.taste import Taste, TasteUpdates
 from app.schemas.trip_profile import TripProfile
 from app.schemas.turn import OptionsKind, OptionsRequest, TurnAction
 from app.services.draft_service import DEFAULT_DAYS, DraftService
 from app.services.options_service import OptionsService
-from app.services.personality_service import PersonalityService
+from app.services.personality_service import PersonalityService, check_changes, describe_note
 from app.services.places_service import PlacesService, PlacesUnavailableError, tier_rank
 from app.services.trip_profile_service import TripProfileService
 from app.services.turn_service import SHOW_PLANS, SHOW_PLANS_TEXT, VIBE_QUESTIONS, TurnService
@@ -47,7 +45,6 @@ class TravelPlannerWorkflow:
     def __init__(self, db: Session):
         self.db = db
         self.trips = TripRepository(db)
-        self.users = UserRepository(db)
         self.places = PlacesService(db)
         self.options = OptionsService(self.places)
         self.drafter = DraftService(self.places)
@@ -79,13 +76,17 @@ class TravelPlannerWorkflow:
 
         yield _progress("Thinking…")
         profile = self.trips.profile(trip)
-        taste = self.users.taste(user)
+        before = self.trips.personality(trip)
         state = dict(trip.state or {})
         itinerary = self.trips.itinerary(trip)
 
         decision = TurnService.decide(
-            shown_message, self.trips.history(trip.id), profile, taste, self._context(trip, itinerary)
+            shown_message, self.trips.history(trip.id), profile, self._context(trip, itinerary, before),
+            itinerary,
         )
+        decision.note_changes = check_changes(decision.note_changes, shown_message, before, itinerary)
+        if any(c.target != "trip" for c in decision.note_changes):
+            decision.profile_updates.budget_level = None  # "a cheaper hotel" is not a cheaper trip
 
         # "Surprise me" means the user wants ideas, not a destination the model picked on its own.
         surprise = TurnService.wants_surprise(message)
@@ -93,6 +94,9 @@ class TravelPlannerWorkflow:
             decision.profile_updates.destination = None
 
         new_profile = TripProfileService.merge(profile, decision.profile_updates, message=shown_message)
+        new_profile.preferences = []  # `before` already holds them as notes
+        personality = PersonalityService.update(before, new_profile, decision.note_changes)
+        new_profile.mood = PersonalityService.moods(profile.mood, before, personality)
         note = ""
         if new_profile.destination and not _same_place(profile.destination, new_profile.destination):
             yield _progress(f"Looking up {new_profile.destination}…")
@@ -106,14 +110,11 @@ class TravelPlannerWorkflow:
                 trip.title = area["name"]
                 trip.drafts, trip.itinerary, trip.panel = [], None, None
                 itinerary = None
+                personality = PersonalityService.detach(personality)
 
-        self.users.set_taste(user, TripProfileService.merge_taste(taste, decision.taste_updates))
-        taste = self.users.taste(user)
-        personality = PersonalityService.update(self.trips.personality(trip), new_profile, taste,
-                                                decision.notes, shown_message, decision.drop_note_topics)
-        trip.personality = personality.model_dump(mode="json", include={"scales", "notes"})
+        self.trips.save_personality(trip, personality)
 
-        progressed = new_profile != profile
+        progressed = new_profile != profile or personality.notes != before.notes
         plan = TurnService.plan(
             decision, new_profile,
             message=message,
@@ -146,14 +147,21 @@ class TravelPlannerWorkflow:
 
         try:
             if plan.action == TurnAction.SHOW_OPTIONS:
-                yield from self._show_options(trip, new_profile, taste, plan.options_request, personality)
+                yield from self._show_options(trip, new_profile, plan.options_request, personality)
             elif plan.action == TurnAction.OFFER_DRAFTS:
-                yield from self._offer_drafts(trip, new_profile, taste, personality)
+                yield from self._offer_drafts(trip, new_profile, personality)
             elif plan.action == TurnAction.EDIT_ITINERARY:
                 yield _progress("Updating your plan…")
-                updated = self.drafter.edit(itinerary, decision.edit_request, new_profile, taste,
+                changing = TurnService.to_change(decision)
+                updated = self.drafter.edit(itinerary, changing, decision.edit_request or shown_message, new_profile,
                                             self._viewport(trip), self._skipped(trip), personality)
-                trip.itinerary = updated.model_dump(mode="json")
+                if updated == itinerary:
+                    extra = "I left the plan as it is: I found nothing that needed changing or fitted better."
+                    answer.content = f"{reply} {extra}" + (f"\n\n{plan.next_question}" if plan.next_question else "")
+                    yield {"type": "note", "text": extra}
+                else:
+                    trip.itinerary = updated.model_dump(mode="json")
+                    self._keep_notes_attached(trip, personality, itinerary, updated)
         except PlacesUnavailableError as e:
             logger.warning("Places unavailable: %s", e)
             extra = " (I couldn't reach the places service just now.)"
@@ -169,7 +177,6 @@ class TravelPlannerWorkflow:
     def _reset(self, trip: TripModel, message: str) -> Iterator[Event]:
         question, chips = VIBE_QUESTIONS["destination"]
         trip.profile = TripProfile().model_dump(mode="json")
-        # The next turn reseeds the personality from lasting taste.
         trip.destination_area = trip.panel = trip.itinerary = trip.personality = None
         trip.drafts = []
         trip.title = "New trip"
@@ -181,20 +188,23 @@ class TravelPlannerWorkflow:
         yield {"type": "reply", "text": "Fresh start!", "next_question": question, "answer_options": chips}
         yield {"type": "done", "trip": self.trips.to_out(trip).model_dump(mode="json")}
 
-    def _context(self, trip: TripModel, itinerary: Itinerary | None) -> str:
+    def _context(self, trip: TripModel, itinerary: Itinerary | None, personality: Personality) -> str:
         liked = [p.name for p in self.trips.feedback(trip.id, "liked")]
         lines = [f"Places they liked: {', '.join(liked) or 'none yet'}"]
         if trip.drafts and not itinerary:
             lines.append("Draft plans were offered: " + ", ".join(d["title"] for d in trip.drafts))
-        if itinerary:
-            lines.append("Their chosen itinerary: " + "; ".join(
-                f"Day {d.day_number}: " + ", ".join(a.name for a in d.activities) for d in itinerary.days))
-        personality = self.trips.personality(trip)
-        if personality and personality.notes:
-            # Lets the model reuse a topic to replace a note, or name it in drop_note_topics.
-            lines.append("What they told us so far (topic: their words): " + "; ".join(
-                f"{n.topic}: '{n.text}'" for n in personality.notes))
+        lines.append("The trip, with what they told us under what it is about (ids in [] and after 'note'):\n"
+                     + PersonalityService.plan_view(itinerary, personality))
         return "\n".join(lines)
+
+    def _keep_notes_attached(self, trip: TripModel, personality: Personality, old: Itinerary, new: Itinerary) -> None:
+        """A removed stop's notes move up to its day; a removed day's to the trip."""
+        here = set(new.target_ids())
+        day_of = {a.id: d.id for d in old.days for a in d.activities if d.id in here}
+        moved = [n if n.target in {"trip", *here} else
+                 n.model_copy(update={"target": day_of.get(n.target, "trip")}) for n in personality.notes]
+        if moved != personality.notes:
+            self.trips.save_personality(trip, personality.model_copy(update={"notes": moved}))
 
     def _resolve(self, destination: str) -> dict | None:
         try:
@@ -210,20 +220,20 @@ class TravelPlannerWorkflow:
     def _skipped(self, trip: TripModel) -> set[str]:
         return {p.place_id for p in self.trips.feedback(trip.id, "skipped")}
 
-    def _show_options(self, trip: TripModel, profile: TripProfile, taste: Taste, request: OptionsRequest,
+    def _show_options(self, trip: TripModel, profile: TripProfile, request: OptionsRequest,
                       personality: Personality) -> Iterator[Event]:
         label = "destination ideas" if request.kind == OptionsKind.DESTINATIONS else (request.query or request.kind.value.replace("_", " "))
         yield _progress(f"Finding {label}…")
-        option_set = self.options.build(request.kind, request.query, profile, taste, self._viewport(trip),
+        option_set = self.options.build(request.kind, request.query, profile, self._viewport(trip),
                                         self._skipped(trip), personality)
         trip.panel = option_set.model_dump(mode="json")
         self.db.commit()
         yield {"type": "options", "options": trip.panel}
 
-    def _offer_drafts(self, trip: TripModel, profile: TripProfile, taste: Taste, personality: Personality) -> Iterator[Event]:
+    def _offer_drafts(self, trip: TripModel, profile: TripProfile, personality: Personality) -> Iterator[Event]:
         yield _progress(f"Gathering places in {profile.destination}…")
         trip.drafts = []
-        for i, draft in enumerate(self.drafter.generate(profile, taste, self._viewport(trip), self._skipped(trip), personality)):
+        for i, draft in enumerate(self.drafter.generate(profile, self._viewport(trip), self._skipped(trip), personality)):
             trip.drafts = [*trip.drafts, draft.model_dump(mode="json")]
             self.db.commit()
             yield {"type": "draft", "index": i, "draft": trip.drafts[-1]}
@@ -237,8 +247,9 @@ class TravelPlannerWorkflow:
         if draft is None:
             raise TripActionError("Draft not found")
         trip.itinerary = draft.itinerary.model_dump(mode="json")
-        # Which version they picked says something about their taste.
-        self.users.set_taste(user, TripProfileService.merge_taste(self.users.taste(user), TasteUpdates(likes=[draft.title])))
+        personality = PersonalityService.detach(self.trips.personality(trip), set(draft.itinerary.target_ids()))
+        personality.notes = DraftService.map_moments(draft.itinerary, personality.notes)
+        self.trips.save_personality(trip, personality)
         question = f"Great choice — “{draft.title}” it is! Anything you'd like to change?"
         trip.next_question = question
         trip.state = {**(trip.state or {}), "answer_options": ["More relaxed", "More food spots", "Add a hidden gem", "Looks perfect"]}
@@ -250,8 +261,6 @@ class TravelPlannerWorkflow:
         if pick is None:
             raise TripActionError("Place not found")
         profile = self.trips.profile(trip)
-        taste = self.users.taste(user)
-
         if action == "unlike":
             self.trips.set_feedback(trip.id, pick, "none")
         elif action == "skip":
@@ -263,20 +272,27 @@ class TravelPlannerWorkflow:
         elif action in ("like", "too_pricey"):
             if action == "like":
                 self.trips.set_feedback(trip.id, pick, "liked")
-                likes = [x for x in (pick.type_label,) if x]
-                self.users.set_taste(user, TripProfileService.merge_taste(taste, TasteUpdates(likes=likes)))
+                if pick.type_label:
+                    self._remember_like(trip, profile, pick)
             over_budget = (
                 pick.category == PickCategory.STAY and profile.budget_level is not None
                 and tier_rank(pick.tier) > tier_rank(profile.budget_level.value)
             )
             # A liked stay over budget, or one the user called too pricey: find similar ones that fit.
             if action == "too_pricey" or over_budget:
-                option_set = self.options.similar_cheaper(pick, profile, taste, self._skipped(trip),
+                option_set = self.options.similar_cheaper(pick, profile, self._skipped(trip),
                                                           self.trips.personality(trip))
                 trip.panel = option_set.model_dump(mode="json")
                 self.db.commit()
                 return option_set
         return None
+
+    def _remember_like(self, trip: TripModel, profile: TripProfile, pick: Pick) -> None:
+        category = {"hidden_gems": "do"}.get(pick.category.value, pick.category.value)
+        like = NoteChange(op="add", text=f"likes {pick.type_label}", quote=pick.type_label, category=category,
+                          source="inferred")
+        self.trips.save_personality(trip, PersonalityService.update(self.trips.personality(trip), profile, [like]))
+        self.db.commit()
 
     def activity_action(self, trip: TripModel, user: UserModel, day_number: int, index: int, action: str) -> OptionSet | None:
         itinerary = self.trips.itinerary(trip)
@@ -286,16 +302,20 @@ class TravelPlannerWorkflow:
         activity = day.activities[index]
 
         if action == "remove":
+            before = itinerary.model_copy(deep=True)
             day.activities.pop(index)
             trip.itinerary = itinerary.model_dump(mode="json")
+            self._keep_notes_attached(trip, self.trips.personality(trip), before, itinerary)
             self.db.commit()
             return None
 
         used = {a.place_id for d in itinerary.days for a in d.activities if a.place_id}
+        personality = self.trips.personality(trip)
+        about = [describe_note(n) for n in personality.notes if n.target in (activity.id, day.id)]
         option_set = self.options.swap_options(
             SwapTarget(day_number=day_number, index=index), activity.name, activity.category,
-            self.trips.profile(trip), self.users.taste(user), self._viewport(trip), used | self._skipped(trip),
-            self.trips.personality(trip),
+            self.trips.profile(trip), self._viewport(trip), used | self._skipped(trip),
+            personality, about,
         )
         trip.panel = option_set.model_dump(mode="json")
         self.db.commit()

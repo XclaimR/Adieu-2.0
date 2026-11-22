@@ -6,6 +6,7 @@ import IdeaCard from "../components/IdeaCard";
 import DraftCard, { DraftSkeleton } from "../components/DraftCard";
 import OptionsPanel from "../components/OptionsPanel";
 import ItineraryView from "../components/ItineraryView";
+import NoteList from "../components/NoteList";
 
 const DRAFT_COUNT = 3;
 const SHOW_PLANS = "__show_plans__";
@@ -35,7 +36,9 @@ function profileFacts(p: TripProfile): string[] {
 /** The trip's personality in plain words: "Slow pace, food is the point". Unknown scales are named, never guessed. */
 function PersonalityCard({ personality }: { personality: Personality }) {
   const { traits, unknown, notes } = personality;
-  const moments = notes.filter((n) => n.scope === "moment").map((n) => n.text);
+  const tripNotes = notes.filter((n) => n.target === "trip");
+  const isMoment = (n: (typeof notes)[number]) => n.once && n.kind !== "avoid";
+  const moments = tripNotes.filter(isMoment).map((n) => n.text);
   const sentence = traits.map((t, i) => (i ? t.toLowerCase() : t)).join(", ");
   return (
     <div className="personality" title="This trip's personality">
@@ -44,6 +47,7 @@ function PersonalityCard({ personality }: { personality: Personality }) {
       {traits.length > 0 && unknown.length > 0 && (
         <span className="small muted">Not sure yet: {unknown.join(", ").toLowerCase()}</span>
       )}
+      <NoteList notes={tripNotes.filter((n) => !isMoment(n))} target="trip" />
       {moments.length > 0 && <span className="small">To fit in: {moments.join(", ")}</span>}
     </div>
   );
@@ -280,6 +284,7 @@ export default function TripScreen({ tripId, firstMessage }: { tripId: string; f
         <section className="main-plan">
           <ItineraryView
             itinerary={trip.itinerary}
+            notes={trip.personality.notes}
             busy={busy}
             onSwap={(d, i) => activity(d, i, "swap")}
             onRemove={(d, i) => activity(d, i, "remove")}
