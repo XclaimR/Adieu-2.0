@@ -4,6 +4,7 @@ import httpx
 import pytest
 from openai import APITimeoutError
 
+from app.repositories.trip_repository import TripRepository
 from app.schemas.activity import Activity
 from app.schemas.dayplan import DayPlan
 from app.schemas.draft import Draft
@@ -13,8 +14,8 @@ from app.schemas.place import Pick, PickCategory, PlaceCandidate
 from app.schemas.trip_profile import BudgetLevel, TripProfile
 from app.schemas.turn import TurnAction, TurnDecision
 from app.services import llm_client
-from app.services.draft_service import DraftService, PlacePool
-from app.services.itinerary_critique_service import ItineraryCritiqueService
+from app.services.draft_service import DraftService, PlacePool, PlanEdit
+from app.services.itinerary_critique_service import ItineraryCritiqueService, travel_minutes
 from tests.v1.test_api import new_trip, ready_trip, say
 
 
@@ -181,10 +182,78 @@ def test_extra_days_are_dropped_without_a_repair_call(drafter, fake_llm):
     assert len(cut.itinerary.days) == 1 and not calls(fake_llm, "PlanFixes")
 
 
-def test_stops_across_the_country_on_one_day_are_an_error():
-    rome_and_milan = [place("museum", "Museum", lat=41.9, lng=12.5), place("panini", "Pane", lat=45.46, lng=9.19)]
-    [issue] = ItineraryCritiqueService.counted(draft().itinerary, rome_and_milan)
-    assert "km apart" in issue.problem and issue.where == ["i1", "i2"]
+def located(**at):
+    plan = draft().itinerary
+    for item in (a for d in plan.days for a in d.activities):
+        item.lat, item.lng = at.get(item.id, (41.9, 12.5))
+    return plan
+
+
+def test_neighbouring_stops_with_normal_visits_are_doable():
+    plan = located(i2=(41.905, 12.505))
+    assert ItineraryCritiqueService.counted(plan, [], visits={"museum": 180, "panini": 90}) == []
+
+
+def test_travel_grows_with_distance():
+    minutes = [travel_minutes((41.9, 12.5), (41.9 + step, 12.5)) for step in (0, 0.005, 0.05, 0.2, 1, 4)]
+    assert minutes == sorted(minutes) and minutes[0] == 0
+    assert minutes[1] < 15 and 20 < minutes[2] < 60 and minutes[-1] > 300
+
+
+def test_too_much_travel_in_a_day_is_an_error():
+    [issue] = ItineraryCritiqueService.counted(located(i2=(45.46, 9.19)), [])  # Rome and Milan
+    assert "travel" in issue.problem and issue.where == ["i1", "i2"]
+
+
+def test_a_visit_too_long_for_the_next_stop_is_an_error():
+    [issue] = ItineraryCritiqueService.counted(located(), [], visits={"park": 540})
+    assert "Garden" in issue.problem and "afternoon" in issue.problem and issue.where == ["i3", "i4"]
+
+
+def test_a_visit_that_runs_into_the_night_is_an_error():
+    [issue] = ItineraryCritiqueService.counted(located(), [], visits={"panini": 480})
+    assert "past 1 am" in issue.problem
+
+
+def test_visit_and_travel_time_count_together():
+    plan = located(i4=(42.5, 12.5))
+    assert ItineraryCritiqueService.counted(plan, [], visits={"park": 180}) == []  # 2 h away, still by 17:00
+    [issue] = ItineraryCritiqueService.counted(plan, [], visits={"park": 420})
+    assert "Garden" in issue.problem
+
+
+def test_a_stay_too_far_from_the_days_stops_is_an_error():
+    plan = located()
+    plan.stay.lat, plan.stay.lng = 45.46, 9.19
+    issues = ItineraryCritiqueService.counted(plan, [])
+    assert len(issues) == 2 and all("s1" in issue.where for issue in issues)
+
+
+def test_the_models_visit_times_reach_the_check_and_a_tight_day_is_repaired(drafter, fake_llm):
+    fake_llm.minutes = {"i3": 540}
+    fake_llm.fixes = {"plan_0": [{"op": "replace", "item_id": "i3", "place": "c2", "time_of_day": "morning"}]}
+    [fixed], checked = review(drafter)
+    assert "Garden" in calls(fake_llm, "PlanFixes")[0].split("What the reviewer found:")[1]
+    assert checked and fixed.itinerary.days[1].activities[0].name == "Night Owl" and fixed.warnings == []
+
+
+def test_a_tight_day_nobody_could_fix_is_shown(drafter, fake_llm):
+    fake_llm.minutes = {"i3": 540}
+    [kept], _ = review(drafter)
+    assert len(kept.warnings) == 1 and "Garden" in kept.warnings[0]
+
+
+def test_stops_remember_where_they_are(client, auth, fake_llm):
+    trip, days = chosen(client, auth, fake_llm)
+    stops = [a for d in days for a in d["activities"]]
+    assert all((a["lat"], a["lng"]) == (1.5, 1.5) for a in stops)
+
+
+def test_a_replaced_stop_takes_the_new_places_position():
+    plan = located()
+    club = place("club", "Night Owl", lat=45.0, lng=9.0)
+    DraftService._apply_edits(plan, [PlanEdit(op="replace", item_id="i2", place="c0")], {"c0": club}, {"i2"}, set(), set())
+    assert (plan.days[0].activities[1].lat, plan.days[0].activities[1].lng) == (45.0, 9.0)
 
 
 def test_the_stream_shows_plans_only_after_the_review(client, auth, fake_llm):
@@ -293,3 +362,13 @@ def test_drafting_that_breaks_midway_still_shows_what_was_written(client, auth, 
 
     monkeypatch.setattr(DraftService, "generate", breaks)
     assert len(say(client, auth, trip["id"], "2 days")["drafts"]) == 1
+
+
+def test_a_swap_takes_the_new_places_position(client, auth, fake_llm, monkeypatch):
+    trip, days = chosen(client, auth, fake_llm)
+    pick = Pick(**place("new", "Far Away", lat=9.0, lng=8.0).model_dump())
+    monkeypatch.setattr(TripRepository, "find_pick", lambda *args: pick)
+    url = f"/trips/{trip['id']}/itinerary/days/1/activities/0/replace"
+    assert client.post(url, json={"place_id": "new"}, headers=auth).status_code == 200
+    after = client.get(f"/trips/{trip['id']}", headers=auth).json()["itinerary"]["days"][0]["activities"][0]
+    assert (after["lat"], after["lng"]) == (9.0, 8.0)

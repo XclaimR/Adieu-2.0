@@ -62,6 +62,7 @@ class FakeLLM:
         self.fails: dict[str, dict[str, dict]] = {}
         self.fixes: dict[str, list[dict]] = {}
         self.errors: dict[str, Exception] = {}
+        self.minutes: dict[str, int] = {}  # visit minutes by item id; 60 when not set
 
     def __call__(self, prompt, schema, history=None, system=None, model=None, timeout=None):
         self.prompts.append((schema.__name__, prompt))
@@ -69,8 +70,9 @@ class FakeLLM:
             raise self.errors[schema.__name__]
         if schema.__name__ == "PlanReviews":
             return schema.model_validate({
-                plan: {rule: self.fails.get(plan, {}).get(rule, {"passed": True})
-                       for rule in field.annotation.model_fields}
+                plan: {name: {item: self.minutes.get(item, 60) for item in f.annotation.model_fields}
+                       if name == "visit_minutes" else self.fails.get(plan, {}).get(name, {"passed": True})
+                       for name, f in field.annotation.model_fields.items()}
                 for plan, field in schema.model_fields.items()})
         if schema.__name__ == "PlanFixes":
             return schema.model_validate({plan: self.fixes.get(plan, []) for plan in schema.model_fields})

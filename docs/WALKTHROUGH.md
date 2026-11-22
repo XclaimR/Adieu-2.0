@@ -86,9 +86,13 @@ Every later request sends it as `Authorization: Bearer …`, checked by `api/dep
    - Review, before the traveler sees a plan or an edit (`DraftService._check_and_fix`):
      1. `ItineraryCritiqueService.critique` is one LLM call for all the plans. It must give a verdict per rule and
         per plan: destination, travel style, activity balance, purpose, logic, budget (only if stated), and one
-        rule per stated note. A failure that points at nothing real is ignored.
+        rule per stated note. A failure that points at nothing real is ignored. The same call estimates the
+        minutes needed at every stop.
      2. `ItineraryCritiqueService.counted` is plain code: day count, empty or one-stop days, a missing stay, and
-        stops over 100 km apart on one day. The model never sees these results, so it can't parrot them.
+        whether each day is doable. For that it walks the day's clock from the stay, adding the visit minutes and
+        an estimated travel time (straight line plus 30%: walking, transit or road; no routing API), and flags
+        a stop that can't start in its morning / afternoon / evening, a day past 1 am, or over 4 hours of travel.
+        Stops keep their `lat`/`lng` for this. The model never sees these results, so it can't parrot them.
      3. One repair call for all flagged plans. It returns the same edit operations, and code lets them touch only
         what was flagged. After an edit that is only what the edit changed, and a repair can't remove a stop. A
         repair that leaves more countable errors is thrown away.

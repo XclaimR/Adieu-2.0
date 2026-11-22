@@ -159,6 +159,8 @@ class PlacePool:
                     place_id=place.place_id,
                     photo_name=place.photo_name,
                     maps_url=place.maps_url,
+                    lat=place.lat,
+                    lng=place.lng,
                 ))
             if activities:
                 days.append(DayPlan(day_number=len(days) + 1, theme=day.theme, activities=_one_per_slot(activities)))
@@ -390,7 +392,7 @@ Rules:
                 plan.days += [DayPlan(day_number=n, activities=[]) for n in range(len(plan.days) + 1, days + 1)]
             padded.append(plan)
             found = ItineraryCritique(
-                issues=ItineraryCritiqueService.counted(plan, places, days, scope) + critique.issues)
+                issues=ItineraryCritiqueService.counted(plan, places, days, scope, critique.visit_minutes) + critique.issues)
             if not found.is_valid:
                 flagged[i] = found.issues
 
@@ -403,7 +405,8 @@ Rules:
 
         results = []
         for i, (plan, critique) in enumerate(zip(padded, critiques)):
-            fixed = self._repaired(plan, flagged[i], fixes[i], places, days, scope) if i in fixes else plan
+            fixed = (self._repaired(plan, flagged[i], fixes[i], places, days, scope, critique.visit_minutes)
+                     if i in fixes else plan)
             changed = _changed(plan, fixed)
             added = {a.id for d in fixed.days for a in d.activities} - {a.id for d in plan.days for a in d.activities}
             # shortcut: changing what was flagged counts as fixed, review again if the traveler evals show bad repairs.
@@ -413,7 +416,7 @@ Rules:
                 for number, day in enumerate(fixed.days, 1):
                     day.day_number = number
             counted = [x.problem for x in ItineraryCritiqueService.counted(
-                fixed, places, days, scope and scope | changed)]
+                fixed, places, days, scope and scope | changed, critique.visit_minutes)]
             results.append((fixed, list(dict.fromkeys(counted + unfixed))))
         return results, checked
 
@@ -430,7 +433,8 @@ Rules:
             for i, issues in flagged.items())
         listing = "\n".join(
             f"[c{i}] " + " · ".join(b for b in (p.name, p.category.value, p.type_label, p.price_level
-                                               or (p.tier and f"est. {p.tier} price"), p.address) if b)
+                                               or (p.tier and f"est. {p.tier} price"), p.address,
+                                               p.lat is not None and f"at {p.lat:.3f},{p.lng:.3f}") if b)
             for i, p in enumerate(places))
         asked = "" if scope is None else (
             f'- The traveler just asked: "{request}". Keep what they asked for, and never remove a stop.')
@@ -449,6 +453,8 @@ Places you may use:
 Rules:
 - For each plan, return the fewest edits that fix what the reviewer found. Change nothing else.
 - Use only listed places, and none that the same plan already has. Give each new place a note.
+- For a day with too much travel or too little time, use places close by (see "at lat,lng") or quicker ones,
+  remove a stop, or move one to a day or time with room.
 - An empty day needs 2-3 stops added. A stay is replaced at item_id {STAY_ID}, and is never an activity.
 - Never choose a place that breaks a stated must or avoid.
 - If nothing listed fixes an error, return no edit for it.
@@ -458,7 +464,7 @@ Rules:
         return {i: getattr(result, f"plan_{i}") for i in flagged}
 
     def _repaired(self, plan: Itinerary, issues: list[Issue], edits: list[PlanEdit], places: list[PlaceCandidate],
-                  days: int | None, scope: set[str] | None) -> Itinerary:
+                  days: int | None, scope: set[str] | None, visits: dict[str, int]) -> Itinerary:
         """The repair applied to just what was flagged, or the plan as it was if that makes it worse."""
         where = {w for issue in issues for w in issue.where}
         day_ids = {d.id for d in plan.days}
@@ -481,7 +487,7 @@ Rules:
 
         emptied = any(was.activities and not now.activities for was, now in zip(plan.days, fixed.days))
         def errors(p: Itinerary) -> int:
-            return len(ItineraryCritiqueService.counted(p, places, days, scope))
+            return len(ItineraryCritiqueService.counted(p, places, days, scope, visits))
         return plan if emptied or errors(fixed) > errors(plan) else fixed
 
     def _edit_candidates(self, plan: Itinerary, changes: list[NoteChange], editable: set[str], add_to: set[str],
@@ -533,7 +539,8 @@ Rules:
                 if day and place and place.category != PickCategory.STAY and len(day.activities) < MAX_STOPS:
                     day.activities.append(Activity(
                         name=place.name, category=place.category.value, time_of_day=e.time_of_day, description=e.note,
-                        place_id=place.place_id, photo_name=place.photo_name, maps_url=place.maps_url))
+                        place_id=place.place_id, photo_name=place.photo_name, maps_url=place.maps_url,
+                        lat=place.lat, lng=place.lng))
                     used.add(place.place_id)
                     touched[day.id] = day
                 continue
@@ -545,6 +552,7 @@ Rules:
             if e.op == "replace" and place and place.category != PickCategory.STAY:
                 item.name, item.category, item.description = place.name, place.category.value, e.note
                 item.place_id, item.photo_name, item.maps_url = place.place_id, place.photo_name, place.maps_url
+                item.lat, item.lng = place.lat, place.lng
                 item.time_of_day = e.time_of_day or item.time_of_day
                 used.add(place.place_id)
             elif e.op == "remove":
@@ -584,7 +592,7 @@ Rules:
 
         activity = Activity(name=pick.name, category=pick.category.value, time_of_day=None,
                             description=pick.why, place_id=pick.place_id, photo_name=pick.photo_name,
-                            maps_url=pick.maps_url)
+                            maps_url=pick.maps_url, lat=pick.lat, lng=pick.lng)
         if not itinerary.days:
             itinerary.days.append(DayPlan(day_number=1, theme="Your picks", activities=[activity]))
         else:

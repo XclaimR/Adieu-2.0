@@ -10,6 +10,8 @@ class Issue(BaseModel):
 
 class ItineraryCritique(BaseModel):
     issues: list[Issue] = []
+    # By place, so a place swapped into a stop doesn't inherit the old one's time.
+    visit_minutes: dict[str, int] = {}
 
     @property
     def is_valid(self) -> bool:

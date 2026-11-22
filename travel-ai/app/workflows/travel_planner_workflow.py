@@ -395,6 +395,7 @@ class TravelPlannerWorkflow:
         day.activities[index] = old.model_copy(update={
             "name": pick.name, "category": pick.category.value, "description": pick.why,
             "place_id": pick.place_id, "photo_name": pick.photo_name, "maps_url": pick.maps_url,
+            "lat": pick.lat, "lng": pick.lng,
             "for_note": None,  # the replacement wasn't chosen for that moment
         })
         trip.itinerary = itinerary.model_dump(mode="json")
