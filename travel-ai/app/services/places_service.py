@@ -217,7 +217,7 @@ class PlacesService:
 
     def resolve_destination(self, name: str) -> dict | None:
         """Turn a destination name into a real geographic place with a map area, or None if there isn't one."""
-        key = f"resolve-geo2:{name.strip().lower()}"
+        key = f"resolve-geo:{name.strip().lower()}"
         cached = self._cached(key)
         if cached is not None:
             return cached.get("area")
@@ -230,38 +230,33 @@ class PlacesService:
                 {"textQuery": name, "maxResultCount": 1, "includedType": place_type, "strictTypeFiltering": True},
                 _RESOLVE_FIELD_MASK,
             ))
-            if not raw and place_type == "country":
-                # "Jordan" alone finds shops. Same name only, so a typed city can't turn into a country.
-                found = self._find_country(name)
-                if found and found["displayName"]["text"].lower() == name.strip().lower():
-                    raw = found
 
         area = self._to_area(raw, name) if raw else None
         self._store(key, {"area": area})
         return area
 
     def resolve_country(self, name: str) -> dict | None:
-        """The country of this name, or None if it names anything else (a city, region or island)."""
+        """The country of this name, or None if it names anything else. One search per name, then cached."""
         key = f"resolve-country:{name.strip().lower()}"
         cached = self._cached(key)
         if cached is not None:
-            return cached.get("area")
-
-        raw = self._find_country(name)
-        area = self._to_area(raw, name) if raw else None
-        # "Panama City country" finds Panama; "Vatican City" really is one.
-        if area and "city" in name.lower() and "city" not in area["name"].lower():
-            area = None
-        self._store(key, {"area": area})
+            area = cached.get("area")
+        else:
+            # The word "country" beats Google's bias to where the server is ("Georgia" the state, "Jordan" the shop).
+            raw = self._first_geographic(self._post(
+                {"textQuery": f"{name} country", "maxResultCount": 1, "includedType": "country",
+                 "strictTypeFiltering": True},
+                _RESOLVE_FIELD_MASK,
+            ))
+            area = self._to_area(raw, name) if raw and "country" in raw["types"] else None
+            # "Panama City country" finds Panama; "Vatican City" really is one.
+            if area and "city" in name.lower() and "city" not in area["name"].lower():
+                area = None
+            self._store(key, {"area": area})
+        if area:
+            # Picking it sends this name to resolve_destination: no second search, and it stays the country.
+            self._store(f"resolve-geo:{area['name'].lower()}", {"area": area})
         return area
-
-    def _find_country(self, name: str) -> dict | None:
-        # The word "country" beats Google's bias to where the server is ("Georgia" the state, "Jordan" the shop).
-        raw = self._first_geographic(self._post(
-            {"textQuery": f"{name} country", "maxResultCount": 1, "includedType": "country", "strictTypeFiltering": True},
-            _RESOLVE_FIELD_MASK,
-        ))
-        return raw if raw and "country" in raw["types"] else None
 
     @staticmethod
     def _to_area(raw: dict, name: str) -> dict:

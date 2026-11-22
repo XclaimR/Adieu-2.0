@@ -74,12 +74,26 @@ def test_a_typed_city_still_resolves_to_that_city(db_session, fake_places, typed
     assert PlacesService(db_session).resolve_destination(typed)["name"] == found
 
 
-def test_a_typed_place_nobody_knows_does_not_become_a_similar_country(db_session, monkeypatch):
-    def only_finds_a_country(self, body, mask):
-        if not body["textQuery"].endswith(" country"):
-            return []
-        return [{"id": "p", "displayName": {"text": "Panama"}, "viewport": {"low": {}, "high": {}}, "types": ["country"]}]
+def test_a_suggested_country_costs_one_search_and_picking_it_none(db_session, fake_llm, fake_places):
+    places = PlacesService(db_session)
+    places._store("resolve-geo:jordan", {"area": None})  # the bare name finds only shops, and that miss is cached
+    assert suggested(db_session, fake_llm, "Jordan") == ["Jordan"]
+    assert len(fake_places.bodies) == 1
 
-    monkeypatch.setattr(PlacesService, "_post", only_finds_a_country)
+    assert places.resolve_destination("Jordan")["name"] == "Jordan"
+    assert len(fake_places.bodies) == 1
 
-    assert PlacesService(db_session).resolve_destination("Panama Citty") is None
+
+def test_a_country_checked_days_ago_can_still_be_picked(db_session, fake_llm, fake_places):
+    places = PlacesService(db_session)
+    suggested(db_session, fake_llm, "Jordan")
+    places._store("resolve-geo:jordan", {"area": None})
+
+    assert suggested(db_session, fake_llm, "Jordan") == ["Jordan"]
+    assert places.resolve_destination("Jordan")["name"] == "Jordan"
+    assert len(fake_places.bodies) == 1
+
+
+def test_a_dropped_city_still_resolves_when_typed(db_session, fake_llm, fake_places):
+    assert suggested(db_session, fake_llm, "Panama City") == []
+    assert PlacesService(db_session).resolve_destination("Panama City")["name"] == "Panama City"
