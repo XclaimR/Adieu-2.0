@@ -85,7 +85,7 @@ export default function TripScreen({ tripId, firstMessage }: { tripId: string; f
 
   useEffect(() => {
     logRef.current?.scrollTo({ top: logRef.current.scrollHeight, behavior: "smooth" });
-  }, [trip?.messages.length, live?.steps.length, live?.reply]);
+  }, [trip?.messages.length, live?.steps.length, live?.reply, chatOpen]);
 
   useEffect(() => {
     if (!toast) return;
