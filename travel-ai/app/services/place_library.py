@@ -72,8 +72,12 @@ def merge(described: list[dict], mapped: list[dict], hubs: list[dict], destinati
 
     for place in merged:
         point = _point(place)
+        place.setdefault("town", None)
         if not point or not hubs:
             continue
+        towns_near = [(distance_km(point, tuple(h["point"])), h["name"]) for h in hubs if not h["district"]]
+        if not place["town"] and towns_near and min(towns_near)[0] <= SAME_TOWN_KM:
+            place["town"] = min(towns_near)[1]  # which main town it belongs to, for sharing out a country
         if place["guide"] and normalize(place["area"] or "") != normalize(destination):
             continue  # its guide already says where it is
         near = [(distance_km(point, tuple(h["point"])), h) for h in hubs]

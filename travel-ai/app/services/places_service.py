@@ -304,10 +304,17 @@ class PlacesService:
         places = [p for p in library["places"] if p["category"] in kinds]
         anchor = self._anchor(query, places, library["hubs"])
 
+        centre = tuple(area["centre"])
+        local = area["kind"] in ("city", "place")
+
         def score(place: dict) -> float:
             words = _words(f"{place['name']} {place['kind']} {place['text'] or ''}")
             value = place["score"] + 0.6 * min(3, len(words & want)) - 1.5 * bool(words & avoid)
-            if anchor and (point := valid_point(place["lat"], place["lng"])):
+            value += 0.3 * (place["kind"] == "Sight")
+            point = valid_point(place["lat"], place["lng"])
+            if local and point:  # in reach (Sintra from Lisbon), but the town itself first
+                value -= min(1.5, max(0.0, distance_km(centre, point) - 5) / 15)
+            if anchor and point:
                 value -= distance_km(anchor, point) / 2
             elif anchor:
                 value -= 3
@@ -343,7 +350,7 @@ class PlacesService:
         queues: dict[str, list[dict]] = {t: [] for t in towns}
         rest = []
         for place in ranked:
-            queue = queues.get(normalize(place["area"] or ""))
+            queue = queues.get(normalize(place.get("town") or place["area"] or ""))
             (queue if queue is not None else rest).append(place)
         out = []
         while any(queues.values()):
@@ -355,6 +362,8 @@ class PlacesService:
     def _to_candidate(self, place: dict, category: PickCategory, area: dict) -> PlaceCandidate:
         point = valid_point(place["lat"], place["lng"])
         where = place["area"]
+        if place.get("town") and normalize(place["town"]) not in (normalize(where or ""), normalize(area["name"])):
+            where = ", ".join(filter(None, [where, place["town"]]))  # "Central, Kyoto"
         if point and area["kind"] in ("city", "place"):
             km = distance_km(tuple(area["centre"]), point)
             where = ", ".join(filter(None, [where, f"{km:.0f} km from the centre" if km >= 1 else "central"]))
