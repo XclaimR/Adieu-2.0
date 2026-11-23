@@ -26,9 +26,13 @@ export type Pick = {
   summary: string | null;
   photo_name: string | null;
   maps_url: string | null;
+  /** The Wikivoyage guide the description comes from. */
+  source_url: string | null;
   why: string | null;
   trait: string | null;
 };
+
+export type PhotoCredit = { by: string; licence: string; source: string };
 
 export type StarterIdea = { title: string; destination: string; pitch: string; photo_name: string | null };
 
@@ -64,6 +68,7 @@ export type Activity = {
   place_id: string | null;
   photo_name: string | null;
   maps_url: string | null;
+  source_url: string | null;
   for_note: string | null;
 };
 

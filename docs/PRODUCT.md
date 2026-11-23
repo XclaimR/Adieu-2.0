@@ -41,7 +41,8 @@ Pre-filled links to Google Flights, Booking.com, Klook and GetYourGuide for now;
 | Chat, drafts, search | Gemini free tier (with Google Search) | Gemini paid tier |
 | Private material (screenshots, Instagram) | Local model via Ollama | same, or a private hosted model |
 | Opinions and events | Gemini search (reaches Reddit threads and blogs through Google), Ticketmaster | paid search, partner feeds |
-| Places, photos, routes | Google Places / Routes free allowances | paid usage |
+| Places, photos | Open data: Overture Maps, Wikivoyage, Wikidata, Commons, loaded once per destination | same, plus a ratings or prices partner if needed |
+| Routes | (not built yet, Ticket #28) | paid usage |
 | Hosting | Laptop + Cloudflare Tunnel → Oracle Cloud free tier | own cloud account (e.g. AWS) |
 
 Each data source sits behind one service, so switching to a paid provider is a config change.

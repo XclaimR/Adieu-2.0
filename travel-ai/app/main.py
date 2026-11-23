@@ -12,7 +12,7 @@ from app.core.config import settings
 from app.services.llm_client import LLMOutputError
 
 logging.basicConfig(level=logging.INFO)
-# httpx logs full request URLs at INFO, and the Places photo URL carries our API key.
+# httpx logs every request URL at INFO, which drowns the app's own logs.
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
 app = FastAPI(title="Adieu API")

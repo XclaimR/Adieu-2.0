@@ -17,19 +17,21 @@ from app.schemas.place import Pick, PickCategory, PlaceCandidate
 from app.schemas.trip_profile import TripProfile
 from app.services.llm_client import LLMClient
 from app.services.personality_service import PersonalityService
-from app.services.places_service import PlacesService, tier_rank, traveler_fit
+from app.services.places_service import FACTS_RULE, PlacesService, tier_rank, traveler_fit, unclaimed
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_DAYS = 4
 MAX_DAYS = 10
 MAX_STOPS = 4
-MIN_PLACES = 2  # places to visit or eat at: one day's minimum
+MIN_PLACES = 2
+# How many of each kind the drafting model sees: enough to plan from, few enough for a free-tier prompt.
+POOL = {PickCategory.DO: 18, PickCategory.EAT: 14, PickCategory.HIDDEN_GEMS: 8, PickCategory.STAY: 8}  # places to visit or eat at: one day's minimum
 
 FLAVORS = [
     ("easy", "Slow and easy: a relaxed pace built around the traveler's main mood, long meals, few must-dos"),
     ("classic", "The highlights: the best-known sights and experiences, efficiently grouped"),
-    ("local", "Off the beaten path: hidden gems and local favorites, avoiding the tourist crowds"),
+    ("local", "Off the beaten path: lesser-known listed places and neighbourhood food, away from the famous sights"),
 ]
 
 
@@ -78,9 +80,9 @@ _SLOTS = ["morning", "afternoon", "evening"]
 
 
 def _norm(name: str) -> str:
-    """Lowercase letters and digits only, accents dropped: "Jerónimos Monastery" == "jeronimos monastery"."""
-    plain = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode()
-    return re.sub(r"[^a-z0-9]", "", plain.lower())
+    """Letters and digits only, accents dropped, any script: "Jerónimos Monastery" == "jeronimos monastery"."""
+    plain = "".join(ch for ch in unicodedata.normalize("NFKD", name.casefold()) if not unicodedata.combining(ch))
+    return re.sub(r"[\W_]", "", plain)
 
 
 def _same(a: str, b: str) -> bool:
@@ -101,6 +103,15 @@ def _one_per_slot(activities: list[Activity]) -> list[Activity]:
     return sorted(activities, key=lambda a: _SLOTS.index(a.time_of_day) if a.time_of_day in _SLOTS else len(_SLOTS))
 
 
+def describe(ref: str, p: PlaceCandidate) -> str:
+    """A place as the model sees it: only what the data says."""
+    bits = [f"{ref} {p.name}", p.category.value, p.type_label, p.address and f"area: {p.address}"]
+    if p.category == PickCategory.STAY:
+        bits.append(f"est. {p.tier} stay" if p.tier else "price unknown")
+    bits.append(p.summary)
+    return " · ".join(b for b in bits if b)
+
+
 class PlacePool:
     """Numbered real places the model may use. It can only reference places by number."""
 
@@ -113,17 +124,9 @@ class PlacePool:
                 self.places.append(p)
 
     def listing(self) -> str:
-        lines = []
-        for i, p in enumerate(self.places):
-            bits = [f"[{i}] {p.name}", p.category.value]
-            if p.type_label:
-                bits.append(p.type_label)
-            if p.rating:
-                bits.append(f"{p.rating}★")
-            if p.price_level or p.tier:
-                bits.append(p.price_level or f"est. {p.tier} price")
-            lines.append(" · ".join(bits))
-        return "\n".join(lines)
+        """One line per place, grouped by area so nearby places can share a day."""
+        order = sorted(range(len(self.places)), key=lambda i: (self.places[i].address or "").split(",")[0])
+        return "\n".join(describe(f"[{i}]", self.places[i]) for i in order)
 
     def get(self, ref: int | None) -> PlaceCandidate | None:
         return self.places[ref] if ref is not None and 0 <= ref < len(self.places) else None
@@ -151,12 +154,13 @@ class PlacePool:
                     name=place.name,
                     category=place.category.value,
                     time_of_day=stop.time_of_day,
-                    description=stop.note,
+                    description=unclaimed(stop.note, place.summary),
                     for_note=moments[stop.for_moment] if stop.for_moment is not None
                     and 0 <= stop.for_moment < len(moments) else None,
                     place_id=place.place_id,
                     photo_name=place.photo_name,
                     maps_url=place.maps_url,
+                    source_url=place.source_url,
                 ))
             if activities:
                 days.append(DayPlan(day_number=len(days) + 1, theme=day.theme, activities=_one_per_slot(activities)))
@@ -183,8 +187,9 @@ class DraftService:
              personality: Personality | None = None) -> PlacePool:
         """Real candidates inside the destination, one search per category (cached)."""
         places: list[PlaceCandidate] = []
-        for category in (PickCategory.DO, PickCategory.EAT, PickCategory.HIDDEN_GEMS, PickCategory.STAY):
-            found = self.places.candidates(profile.destination, category, profile, viewport, personality=personality)
+        for category, limit in POOL.items():
+            found = self.places.candidates(profile.destination, category, profile, viewport, personality=personality,
+                                           limit=limit)
             if category == PickCategory.STAY and profile.budget_level:
                 limit = tier_rank(profile.budget_level.value)
                 found = [c for c in found if tier_rank(c.tier) <= limit] or found
@@ -209,7 +214,10 @@ Rules:
 - Exactly {days} days, 2-3 stops each, mixing things to do and places to eat.
 - Each day uses morning, afternoon and evening at most once. Lunch is afternoon, dinner is evening.
 - Each stop's place and note must be about the same listed place. Don't plan anything that isn't on the list.
-- Group nearby places on the same day. Don't repeat a place.
+- Group places from the same area on the same day, and keep each day to one or two nearby areas.
+  Don't repeat a place.
+- A note says only what the place's line supports; with no description, say what kind of place it is.
+{FACTS_RULE}
 - Respect diet, mobility, kids and budget preferences.
 {traveler_fit(profile, personality)}
 {f"- trait: copy the one personality trait above that this version serves best (exactly as written), or null. Options: {', '.join(allowed)}." if allowed else "- trait: null."}
@@ -237,6 +245,7 @@ Rules:
                 failure = e
                 continue
             itinerary = pool.to_itinerary(plan, profile.destination, moments)
+            summary = unclaimed(plan.summary, *(a.description for d in itinerary.days for a in d.activities)) or ""
             if not itinerary.days:
                 logger.warning("Draft %s referenced no valid places", flavor)
                 continue
@@ -246,7 +255,7 @@ Rules:
                 id=uuid.uuid4().hex[:12],
                 flavor=flavor,
                 title=plan.title,
-                summary=plan.summary,
+                summary=summary,
                 photo_name=first_photo,
                 trait=PersonalityService.match_trait(plan.trait, allowed),
                 unplanned=[m for m in moments if m not in fulfilled(itinerary)],
@@ -291,10 +300,7 @@ Rules:
         schema = create_model("PlanEdits", edits=(list[edit], ...))
 
         asked = "\n".join(f"- at [{c.target}]: {c.text}" for c in changes) or f"- {request}"
-        listing = "\n".join(
-            f"[{key}] {p.name} · {p.category.value} · {p.type_label or ''} · "
-            f"{p.price_level or (p.tier and f'est. {p.tier} price') or 'price unknown'} · {p.summary or ''}"
-            for key, p in places.items())
+        listing = "\n".join(describe(f"[{key}]", p) for key, p in places.items())
         prompt = f"""
 You edit part of a {len(plan.days)}-day trip to {profile.destination}.
 
@@ -317,7 +323,10 @@ Rules:
 - A note on the narrower thing wins over a wider one: item over day, day over trip.
 - Never choose a place that breaks a stated must or avoid; judge what the place is, not whether its name looks alike.
 - An inferred note is a guess: it never removes something they asked for.
-- "cheaper" means a lower price level than the current place, whatever the trip's budget.
+- "cheaper" means a lower estimated tier than the current place, whatever the trip's budget. Prices are unknown:
+  if no listed stay has a lower estimated tier, return no edit for it.
+- A note says only what the place's line supports.
+{FACTS_RULE}
 - replace keeps the slot and its notes. move changes an item's day or time of day. Don't use stays as activities.
 - If no listed place fits, return no edit for it.
 """
@@ -367,15 +376,16 @@ Rules:
                 continue
             if e.op == "replace" and e.item_id == STAY_ID and STAY_ID in editable:
                 if place and place.category == PickCategory.STAY:
-                    plan.stay = Pick(**place.model_dump(), why=e.note)
+                    plan.stay = Pick(**place.model_dump(), why=unclaimed(e.note, place.summary))
                     used.add(place.place_id)
                 continue
             if e.op == "add":
                 day = days.get(e.day_id) if e.day_id in add_to else None
                 if day and place and place.category != PickCategory.STAY and len(day.activities) < MAX_STOPS:
                     day.activities.append(Activity(
-                        name=place.name, category=place.category.value, time_of_day=e.time_of_day, description=e.note,
-                        place_id=place.place_id, photo_name=place.photo_name, maps_url=place.maps_url))
+                        name=place.name, category=place.category.value, time_of_day=e.time_of_day,
+                        description=unclaimed(e.note, place.summary), place_id=place.place_id,
+                        photo_name=place.photo_name, maps_url=place.maps_url, source_url=place.source_url))
                     used.add(place.place_id)
                     touched[day.id] = day
                 continue
@@ -385,8 +395,10 @@ Rules:
             if item is None:
                 continue
             if e.op == "replace" and place and place.category != PickCategory.STAY:
-                item.name, item.category, item.description = place.name, place.category.value, e.note
+                item.name, item.category = place.name, place.category.value
+                item.description = unclaimed(e.note, place.summary)
                 item.place_id, item.photo_name, item.maps_url = place.place_id, place.photo_name, place.maps_url
+                item.source_url = place.source_url
                 item.time_of_day = e.time_of_day or item.time_of_day
                 used.add(place.place_id)
             elif e.op == "remove":
@@ -426,7 +438,7 @@ Rules:
 
         activity = Activity(name=pick.name, category=pick.category.value, time_of_day=None,
                             description=pick.why, place_id=pick.place_id, photo_name=pick.photo_name,
-                            maps_url=pick.maps_url)
+                            maps_url=pick.maps_url, source_url=pick.source_url)
         if not itinerary.days:
             itinerary.days.append(DayPlan(day_number=1, theme="Your picks", activities=[activity]))
         else:

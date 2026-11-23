@@ -5,7 +5,6 @@ import pytest
 from app.schemas.trip_profile import BudgetLevel, Party, ProfileUpdates
 from app.schemas.personality import NoteChange
 from app.schemas.turn import OptionsKind, OptionsRequest, TurnAction, TurnDecision
-from tests.v1.conftest import VIEWPORT
 
 
 def new_trip(client, auth):
@@ -102,14 +101,17 @@ def test_explicit_requests_are_honoured_before_the_vibe_is_complete(client, auth
     assert turn["trip"]["panel"]["id"] == turn["options"]["id"]
 
 
-def test_every_search_stays_inside_the_destination(client, auth, fake_llm, fake_places):
+def test_a_destination_is_loaded_once_then_turns_ask_nobody_outside(client, auth, fake_llm, fake_places):
     trip = ready_trip(client, auth, fake_llm)
     say(client, auth, trip["id"], "not sure about days")  # duration was asked once -> drafts
+    fake_llm.decisions.append(TurnDecision(action=TurnAction.SHOW_OPTIONS, reply="Sure.",
+                                           options_request=OptionsRequest(kind=OptionsKind.EAT, query="")))
+    say(client, auth, trip["id"], "show me where to eat")
 
-    searches = [b for b in fake_places.bodies if b.get("maxResultCount") == 10]
-    assert searches, "expected candidate searches"
-    for body in searches:
-        assert body["locationRestriction"]["rectangle"] == {"low": VIEWPORT["low"], "high": VIEWPORT["high"]}
+    assert [a["place_id"] for a in fake_places.loads] == ["Q-Lisbon"]
+    assert fake_places.resolved == ["Lisbon"]
+    saved = client.get(f"/trips/{trip['id']}", headers=auth).json()
+    assert saved["destination_name"] == "Lisbon"
 
 
 def test_complete_vibe_offers_three_drafts_using_only_real_places(client, auth, fake_llm):
@@ -196,7 +198,7 @@ def test_liking_an_over_budget_stay_suggests_similar_cheaper_ones(client, auth, 
     result = client.post(f"/trips/{trip['id']}/picks/stay-1", json={"action": "like"}, headers=auth).json()
 
     assert result["trip"]["liked_place_ids"] == ["stay-1"]
-    assert result["options"]["title"] == "Like City Hotel, for less"
+    assert result["options"]["title"] == "Like City Hotel, likely for less (estimated)"
     assert all(p["tier"] == "budget" for p in result["options"]["items"])
 
 
@@ -301,7 +303,6 @@ def test_destination_never_resolves_to_a_business(client, auth, fake_llm, fake_p
     turn = say(client, auth, trip["id"], "I want to bachelor party in Korea")
 
     assert turn["trip"]["destination_name"] == "South Korea"
-    assert any(b.get("includedType") == "country" for b in fake_places.bodies)
 
 
 def test_choosing_a_draft_mid_stream_keeps_the_conversation_in_order(client, auth, fake_llm):
@@ -339,7 +340,6 @@ def test_trip_list_shows_the_chosen_plan_name_and_length(client, auth, fake_llm)
 
     assert summary["title"] == draft["title"]
     assert summary["duration_days"] == 4
-    assert summary["photo_name"]
 
 
 def test_friends_trip_tells_the_planner_to_skip_romantic_spots(client, auth, fake_llm):

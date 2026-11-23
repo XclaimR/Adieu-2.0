@@ -325,14 +325,14 @@ class TravelPlannerWorkflow:
                 self.trips.set_feedback(trip.id, pick, "liked")
                 if pick.type_label:
                     self._remember_like(trip, profile, pick)
-            over_budget = (
-                pick.category == PickCategory.STAY and profile.budget_level is not None
+            over_budget = (  # only an estimated tier can say so: open data has no prices
+                pick.category == PickCategory.STAY and profile.budget_level is not None and pick.tier is not None
                 and tier_rank(pick.tier) > tier_rank(profile.budget_level.value)
             )
             # A liked stay over budget, or one the user called too pricey: find similar ones that fit.
             if action == "too_pricey" or over_budget:
                 option_set = self.options.similar_cheaper(pick, profile, self._skipped(trip),
-                                                          self.trips.personality(trip))
+                                                          self.trips.personality(trip), self._viewport(trip))
                 trip.panel = option_set.model_dump(mode="json")
                 self.db.commit()
                 return option_set
@@ -382,6 +382,7 @@ class TravelPlannerWorkflow:
         day.activities[index] = old.model_copy(update={
             "name": pick.name, "category": pick.category.value, "description": pick.why,
             "place_id": pick.place_id, "photo_name": pick.photo_name, "maps_url": pick.maps_url,
+            "source_url": pick.source_url,
             "for_note": None,  # the replacement wasn't chosen for that moment
         })
         trip.itinerary = itinerary.model_dump(mode="json")

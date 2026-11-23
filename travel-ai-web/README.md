@@ -14,11 +14,14 @@ From `../travel-ai`:
 
 The web container (nginx) serves the built app and forwards `/api/*` to the API container.
 
+Places come from open data and need no key: Wikidata, Wikivoyage and Wikimedia Commons (through their APIs, at
+most one request a second) and Overture Maps (read from its public files with DuckDB). Each destination is loaded
+once (15-30 s) and kept in Postgres; credits are under "Data credits" in the app.
+
 ## Configuration (`travel-ai/.env`)
 
 | Variable | What it does |
 |---|---|
-| `GOOGLE_PLACES_API_KEY` | Real place suggestions and photos. Without it, chat works but no pick cards appear. |
 | `GOOGLE_OAUTH_CLIENT_ID` | Shows the "Sign in with Google" button. Add `http://localhost:8080` as an authorized JavaScript origin. |
 | `ALLOW_DEV_LOGIN` | Email-only sign-in for local development. Off by default; set `ALLOW_DEV_LOGIN=true` in `.env` for local development. |
 | `SESSION_SECRET` | Signs login sessions. |
