@@ -32,6 +32,10 @@ _STALE = re.compile(r"[€$£¥₹₩฿]\s?\d|\d\s?(€|USD|EUR|GBP|INR|JPY|IDR
                     r"JOD|ISK|MVR|Rs\.?)\s?\d|\b\d{1,2}:\d\d\b|\b\d{1,2}\s?(am|pm)\b", re.I)
 _CLOSED = re.compile(r"\b(permanently closed|closed (down|permanently)|no longer (exists|operat\w+)|out of business)\b",
                      re.I)
+# Guides that aren't places to stay around, and listings that are dated events, not places.
+_NOT_A_TOWN = re.compile(r"\b(airport|station|port|terminal|itinerar(y|ies)|phrasebook)\b", re.I)
+_EVENT = re.compile(r"\b(festival|matsuri|carnival|parade|fireworks|marathon|fair|feast)\b|^\(?\s*(\w+\s)?"
+                    r"(january|february|march|april|may|june|july|august|september|october|november|december)\b", re.I)
 _OPEN_LICENCE = re.compile(r"^(cc0|cc[ -]by(-sa)?([ -]\d|$)|public domain|pdm|pd\b)", re.I)
 
 
@@ -101,6 +105,8 @@ def _item(title: str, category: str, kind: str, heading: str, name: str, text: s
     name = safe_text(_plain(name), NAME_LIMIT)
     if len(name) < 2 or not normalize(name) or _CLOSED.search(text):
         return None
+    if category == "do" and (_EVENT.search(name) or _EVENT.match(_plain(text).strip())):
+        return None
     tier = None
     if category == "stay":
         tier = next((t for word, t in _TIER_HEADINGS if word in heading.lower()), None)
@@ -109,7 +115,7 @@ def _item(title: str, category: str, kind: str, heading: str, name: str, text: s
     return {"id": "wv-" + hashlib.sha1(f"{title}:{category}:{name}".encode()).hexdigest()[:16],
             "name": name, "alt": safe_text(_plain(fields.get("alt", "")), NAME_LIMIT), "category": category,
             "kind": kind, "text": _description(text), "lat": point and point[0], "lng": point and point[1],
-            "area": title.rsplit("/", 1)[-1], "guide": title, "tier": tier,
+            "area": title.rsplit("/", 1)[-1], "town": title.split("/")[0], "guide": title, "tier": tier,
             "image": image if image and len(image) < 200 and not re.search(r"[|\[\]{}<>\n]", image) else None}
 
 
@@ -206,11 +212,11 @@ def load(area: dict) -> dict:
         main = pages.get(_real_title(area["article"], moved))
 
     listed = main["hubs"] if main and not small else []
-    titles = [h["link"] for h in listed if h["link"]]
+    titles = [h["link"] for h in listed if h["link"] and not _NOT_A_TOWN.search(h["link"])]
     if kind != "country" or not listed:
         # Without a guide of its own (the Dolomites), the guides that write about it.
         titles += _near(centre, max(reach, NEARBY_KM) if small else min(reach, 200), "" if main else area["name"])
-    more, redirected = _fetch(titles[:MAX_GUIDES])
+    more, redirected = _fetch([t for t in titles if not _NOT_A_TOWN.search(t)][:MAX_GUIDES])
     pages |= more
     moved |= redirected
     for hub in listed:
@@ -221,7 +227,7 @@ def load(area: dict) -> dict:
     if small:
         wanted = main["districts"][:MAX_DISTRICTS] if main else []
     else:  # a big city's places are on its district pages
-        wanted = [t for p in [q for q in by_size if q is not main][:3] for t in p["districts"][:6]]
+        wanted = [t for p in [q for q in by_size if q is not main][:5] for t in p["districts"][:5]]
     if wanted := [t for t in wanted if t not in pages]:
         more, _ = _fetch(wanted)
         pages |= more
@@ -258,7 +264,7 @@ def load(area: dict) -> dict:
         if hub["visit"]:  # Petra and Wadi Rum are destinations in their own right
             fields = {"lat": hub["point"][0], "long": hub["point"][1]}
             if item := _item(main["title"], "do", "Place to explore", "", hub["name"], hub["text"], fields):
-                items.append(item | {"area": hub["name"]})
+                items.append(item | {"area": hub["name"], "town": hub["name"]})
     return {"items": items, "hubs": hubs}
 
 
