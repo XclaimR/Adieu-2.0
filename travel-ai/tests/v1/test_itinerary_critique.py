@@ -372,3 +372,13 @@ def test_a_swap_takes_the_new_places_position(client, auth, fake_llm, monkeypatc
     assert client.post(url, json={"place_id": "new"}, headers=auth).status_code == 200
     after = client.get(f"/trips/{trip['id']}", headers=auth).json()["itinerary"]["days"][0]["activities"][0]
     assert (after["lat"], after["lng"]) == (9.0, 8.0)
+
+
+def test_the_critic_sees_what_a_place_is_next_to_what_it_is_planned_for(drafter, fake_llm):
+    # Traveler walk 2026-11-22: a cafe was planned as a swimming beach.
+    cafe = draft()
+    cafe.itinerary.days[1].activities[0].description = "Swim at the beach"
+    review(drafter, cafe)
+    [prompt] = calls(fake_llm, "PlanReviews")
+    assert "- [i2] Sandwich Shop · meant for: one big night out" in prompt
+    assert "- [i3] planned: Swim at the beach" in prompt
