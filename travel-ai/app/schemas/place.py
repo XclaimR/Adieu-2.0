@@ -17,15 +17,18 @@ class PlaceCandidate(BaseModel):
     name: str
     category: PickCategory
     address: str | None = None
+    # Only on places saved from Google before open data; open data has no ratings or prices.
     rating: float | None = None
     rating_count: int | None = None
     price_level: str | None = None
-    # Estimated budget|mid|luxury for stays (Places has no hotel prices).
+    # Estimated budget|mid|luxury for stays, None when nothing says (no open source has hotel prices).
     tier: str | None = None
     type_label: str | None = None
     summary: str | None = None
     photo_name: str | None = None
     maps_url: str | None = None
+    # The guide its description comes from (CC BY-SA: shown with a link).
+    source_url: str | None = None
     lat: float | None = None
     lng: float | None = None
 

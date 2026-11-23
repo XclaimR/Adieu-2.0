@@ -36,7 +36,7 @@ What we know about the traveler:
                 verified.append(idea)
             else:
                 if match:
-                    verified.append(idea.model_copy(update={"photo_name": match.photo_name}))
+                    verified.append(idea.model_copy(update={"photo_name": None}))
                 else:
                     logger.info("Dropping unverifiable destination %r", idea.destination)
             if len(verified) == MAX_IDEAS:

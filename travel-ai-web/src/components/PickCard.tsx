@@ -1,4 +1,4 @@
-import { photoUrl } from "../api";
+import Photo from "./Photo";
 import type { Pick, PickAction } from "../types";
 
 const TIER_LABEL = { budget: "Budget", mid: "Mid-range", luxury: "Luxury" } as const;
@@ -12,21 +12,35 @@ type Props = {
 };
 
 export default function PickCard({ pick, liked, onAction, onUse }: Props) {
-  const src = photoUrl(pick.photo_name);
-  const facts = [pick.rating && `★ ${pick.rating}`, pick.price_level, pick.type_label].filter(Boolean).join(" · ");
+  // Open data has no ratings or prices; old Google picks still have theirs.
+  const facts = [pick.rating && `★ ${pick.rating}`, pick.price_level, pick.type_label, pick.address]
+    .filter(Boolean)
+    .join(" · ");
   return (
     <article className={`pick ${liked ? "liked" : ""}`}>
-      <div className="photo">{src ? <img src={src} alt="" loading="lazy" /> : <span>📍</span>}</div>
+      <div className="photo">
+        <Photo name={pick.photo_name} fallback="📍" withCredit />
+      </div>
       <div className="pick-body">
         <div className="pick-head">
           <strong>{pick.name}</strong>
           <span className="small muted">{facts}</span>
-          {pick.category === "stay" && pick.tier && !pick.price_level && (
-            <span className="tier" title="Estimated from the type of place">
-              {TIER_LABEL[pick.tier]} (est.)
+          {pick.category === "stay" && !pick.price_level && (
+            <span className="tier" title="Estimated from the type of place and the guide; no prices are known">
+              {pick.tier ? `${TIER_LABEL[pick.tier]} (est.)` : "Price unknown"}
             </span>
           )}
         </div>
+        {pick.summary && (
+          <p className="small summary">
+            {pick.summary}{" "}
+            {pick.source_url && (
+              <a href={pick.source_url} target="_blank" rel="noreferrer" title="Text: Wikivoyage, CC BY-SA 4.0">
+                Wikivoyage ↗
+              </a>
+            )}
+          </p>
+        )}
         {pick.why && <p className="why">{pick.why}</p>}
         {pick.trait && <span className="trait">For you: {pick.trait.toLowerCase()}</span>}
         <div className="pick-actions">
