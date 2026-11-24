@@ -22,6 +22,7 @@ PERSONAS = [
     {
         "name": "bachelor",
         "opening": "Planning a fun, lively bachelor trip to Japan with a group of friends!",
+        "multi_city": True,  # a country: a route with a hotel per city and legs (Ticket #27)
         "facts": {
             "destination": ["Japan"], "party": ["friends"], "kids": [False],
             "mood": ["bachelor", "party", "celebrat", "nightlife", "fun", "lively", "social", "adventur", "food"],
@@ -83,6 +84,7 @@ PERSONAS = [
     {
         "name": "budget_backpacker",
         "opening": "Backpacking through Vietnam on a tight budget.",
+        "multi_city": True,  # a country: a route with a hotel per city and legs (Ticket #27)
         "facts": {
             "destination": ["Vietnam"], "budget_level": ["budget"],
             "mood": ["adventur", "backpack", "budget", "explor", "culture", "food", "street"],

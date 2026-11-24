@@ -36,6 +36,9 @@ export default function DraftCard({ draft, onChoose }: { draft: Draft; onChoose:
         <p className="small muted">{draft.summary}</p>
         {draft.trait && <span className="trait">For you: {draft.trait.toLowerCase()}</span>}
         {draft.itinerary.stay && <p className="small">Staying at {draft.itinerary.stay.name}</p>}
+        {draft.itinerary.route?.length > 1 && (
+          <p className="small">{draft.itinerary.route.map((c) => `${c.name} ${c.nights}n`).join(" → ")}</p>
+        )}
         {draft.warnings.length > 0 && (
           <div className="small check">
             <strong>Check first:</strong>

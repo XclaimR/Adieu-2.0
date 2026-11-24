@@ -69,8 +69,9 @@ class DraftPlan(BaseModel):
     summary: str = Field(description="one sentence on what this version feels like")
     stay_ref: int | None = Field(default=None, description="[n] of a place to stay from the list, or null")
     trait: str | None = Field(default=None, description="the listed personality trait this version serves most, or null")
-    # The cap stops runaway generation (each extra day costs ~10 s on a local model).
-    days: list[PlanDay] = Field(min_length=1, max_length=MAX_DAYS)
+    # No max_length: Gemini refuses a day cap over 10 with nested stops ("too many states"); code keeps the
+    # requested number of days.
+    days: list[PlanDay] = Field(min_length=1)
 
 
 class RouteDraftPlan(DraftPlan):

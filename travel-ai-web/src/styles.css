@@ -315,6 +315,23 @@ input:focus-visible, button:focus-visible, a:focus-visible, summary:focus-visibl
 .day-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
 .day-head h3 { margin: 0; flex: 1; }
 .day-head button { flex-shrink: 0; padding: 4px 12px; font-size: 13px; border: 1px solid var(--line); }
+/* Ticket #27: the multi-city route. A row of cities on wide screens, a vertical line on phones. */
+.route-card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; box-shadow: var(--shadow); }
+.route-card h3 { margin: 0 0 10px; font-size: 16px; }
+.route-card ol { list-style: none; margin: 0; padding: 0; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(150px, 1fr); overflow-x: auto; scrollbar-width: none; }
+.route-card li { position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 20px 12px 0 0; }
+.route-card .dot { position: absolute; top: 0; left: 0; width: 12px; height: 12px; border-radius: 50%; background: var(--accent); }
+.route-card li::after { content: ""; position: absolute; top: 5px; left: 16px; right: 4px; border-top: 2px solid var(--line); }
+.route-card li:last-child::after { display: none; }
+.route-card .leg { order: 10; margin-top: 4px; }
+.route-card li + li .leg { order: -1; margin: 0 0 4px; }
+.route-card .city { all: unset; cursor: pointer; font-family: var(--display); font-weight: 700; font-size: 17px; line-height: 1.2; }
+.route-card .city:hover { color: var(--accent-text); }
+.route-card .city:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+.route-card .nights { color: var(--accent-text); font-weight: 600; font-size: 13px; }
+.route-card .hotel a { color: inherit; }
+.route-card .none { font-style: italic; }
+.route-note { margin: 10px 0 0; }
 .stay-card { display: flex; gap: 12px; align-items: center; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 10px; }
 .stay-card img { width: 84px; height: 64px; object-fit: cover; border-radius: 10px; }
 .stay-card div { display: flex; flex-direction: column; }
@@ -342,6 +359,10 @@ input:focus-visible, button:focus-visible, a:focus-visible, summary:focus-visibl
 
   .trip { flex-direction: column; }
   .trip-head { padding: 14px 16px 12px; }
+  .route-card ol { grid-auto-flow: row; grid-auto-columns: auto; }
+  .route-card li { padding: 0 0 12px 24px; }
+  .route-card li::after { top: 16px; left: 5px; right: auto; bottom: -2px; border-top: 0; border-left: 2px solid var(--line); }
+  .route-card .dot { top: 4px; }
   .board-body { padding: 14px 16px 24px; }
   .draft-list { display: flex; overflow-x: auto; scroll-snap-type: x mandatory; margin-inline: -16px; padding: 0 16px 6px; }
   .draft-list > * { flex: 0 0 86%; scroll-snap-align: center; }

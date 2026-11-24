@@ -93,6 +93,16 @@ only on a clear yes while that is the current question. A no brings back the que
 4. `TurnService.plan` — rules decide what happens next: ask a question, show options, offer drafts, or edit the itinerary.
 5. The reply is streamed and **saved immediately**, then the slow part runs:
    - Show options → `OptionsService.build` → the destination's places (`PlacesService.candidates`) → `RankingService` (LLM ranks by the trip's notes) → slide-in panel (`components/OptionsPanel.tsx`, `PickCard.tsx`).
+   - Multi-city routes (Ticket #27): for a country or region, `DraftService.route` → `RouteService.plan`
+     (`services/route_service.py`) first picks the bases. Code finds the towns with enough listed places, decides how
+     many cities fit the days and the pace (about 3 nights a city; slow 4, packed 2), orders them as the shortest
+     one-way route (no zig-zag) and shares the nights so they add up to the trip. One model call picks which towns suit
+     this traveler and estimates each leg (mode, minutes, rough fare, a pass tip); without it, code uses the
+     best-known towns and a distance-based estimate. Each city gets its own pool of nearby places, the draft is told
+     which days are in which city and that moving days are light, and code drops a stop outside its day's city and
+     gives every city a stay (`Itinerary.route`, stays `s1`, `s2`, ...; `DayPlan.city`). The review flags a stop in
+     another city, a missing stay per city and a busy moving day, and a moving day's clock starts when the train gets
+     in. Edits, repairs, swaps and ＋ keep places in their city. The board shows it as `components/RouteCard.tsx`.
    - Offer drafts → `DraftService.generate` → one pool of places (name, type, area, description), then one LLM call per flavor (easy / classic / local) → `DraftService.review` per plan → `DraftCard.tsx`, each shown once its own review is done.
      Until the first reviewed draft arrives the reply is only "Let me put some plans together"; then a second `reply` event replaces it
      with the model's words and "Here are 3 ways". With no draft (too few places, so no LLM call; place data or the LLM
@@ -125,7 +135,7 @@ only on a clear yes while that is the current question. A no brings back the que
         repairs can chase each other and each round costs 3-50 s.
      5. What is still wrong shows on the card ("Check before choosing") or after the edit ("Worth a look").
         If the critic fails or times out (45 s per attempt), the plan still shows, marked "I couldn't double-check
-        this plan." Cost: a drafting turn is 7 LLM calls, up to 13 with repairs and re-checks (under the free
+        this plan." Cost: a drafting turn is 7 LLM calls (8 with a route), up to 13 with repairs and re-checks (under the free
         tier's 15 a minute); an edit is 3, up to 5.
 6. A final `done` event carries the refreshed trip.
 

@@ -169,6 +169,25 @@ def meal_only_slots(trip: dict) -> list[str]:
     return bad
 
 
+def route_gaps(trip: dict) -> list[str]:
+    """Ticket #27: a country trip has a route; every city has its own stay, every move a leg, nights add up."""
+    gaps = []
+    for d in trip["drafts"]:
+        plan, title = d["itinerary"], d["title"]
+        route = plan.get("route") or []
+        if not route:
+            gaps.append(f"{title!r} has no route")
+            continue
+        stays = [c["stay"]["place_id"] for c in route if c.get("stay")]
+        if len(stays) < len(route) or len(set(stays)) < len(stays):
+            gaps.append(f"{title!r} lacks a separate stay in each city")
+        if any(not c.get("leg") for c in route[1:]):
+            gaps.append(f"{title!r} lacks a leg between cities")
+        if sum(c["nights"] for c in route) != len(plan["days"]):
+            gaps.append(f"{title!r} nights don't add up to its {len(plan['days'])} days")
+    return gaps
+
+
 def check(persona: dict, run: dict) -> list[tuple[str, bool | None, str]]:
     """(rule, passed or None if it couldn't be checked, detail)."""
     trip, has_drafts = run["trip"], bool(run["trip"]["drafts"])
@@ -201,6 +220,10 @@ def check(persona: dict, run: dict) -> list[tuple[str, bool | None, str]]:
     else:
         rules.append(("picks fit the traveler", None, "no drafts to check"))
         rules.append(("no meal-only slots", None, "no drafts to check"))
+    if persona.get("multi_city"):
+        broken = route_gaps(trip) if has_drafts else []
+        rules.append(("a hotel per city and legs between them", not broken if has_drafts else None,
+                      "; ".join(broken) or ("every draft's route is whole" if has_drafts else "no drafts to check")))
     if persona.get("swipes"):
         swiped = run.get("swiped")
         traits = " | ".join(swiped["traits"]) if swiped else ""

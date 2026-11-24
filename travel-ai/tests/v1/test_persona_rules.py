@@ -72,3 +72,17 @@ def test_meal_only_slots_are_flagged_but_an_evening_bar_is_an_outing():
         stop("Osteria", "eat", "evening"), stop("Rooftop", "eat", "evening", "Cocktails at sunset")]}
     trip = {"drafts": [{"title": "Rome", "itinerary": {"days": [day]}}]}
     assert meal_only_slots(trip) == ["'Rome' day 1 afternoon: Trattoria"]
+
+
+def test_route_gaps_need_a_stay_per_city_legs_and_nights_that_add_up():
+    from tests.personas.run import route_gaps
+    city = lambda name, stay, leg, nights: {"name": name, "stay": stay and {"place_id": stay}, "leg": leg,
+                                            "nights": nights}
+    good = {"title": "ok", "itinerary": {"days": [{}] * 4, "route": [
+        city("Tokyo", "a", None, 2), city("Kyoto", "b", {"mode": "train", "minutes": 135}, 2)]}}
+    same_hotel = {"title": "same", "itinerary": {"days": [{}] * 4, "route": [
+        city("Tokyo", "a", None, 2), city("Kyoto", "a", None, 3)]}}
+    assert route_gaps({"drafts": [good]}) == []
+    gaps = route_gaps({"drafts": [same_hotel, {"title": "none", "itinerary": {"days": []}}]})
+    assert any("separate stay" in g for g in gaps) and any("leg" in g for g in gaps)
+    assert any("add up" in g for g in gaps) and any("no route" in g for g in gaps)
