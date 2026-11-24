@@ -108,11 +108,14 @@ only on a clear yes while that is the current question. A no brings back the que
      1. `ItineraryCritiqueService.critique` is one LLM call per plan (one call for three plans mixed them up, live).
         It must give a verdict per rule: destination, travel style, activity balance, purpose, logic, budget (only if stated), and one
         rule per stated note. A failure that points at nothing real is ignored. The same call estimates the
-        minutes needed at every stop.
+        minutes needed at every stop; they are saved on each stop (`Activity.minutes`) and shown as its time chip.
+        A stop nobody estimated (older plans, swaps, a failed critic) takes a default: 75 min to eat, else 90.
      2. `ItineraryCritiqueService.counted` is plain code: day count, empty or one-stop days, a missing stay, and
         whether each day is doable. For that it walks the day's clock from the stay, adding the visit minutes and
         an estimated travel time (straight line plus 30%: walking, transit or road; no routing API), and flags
         a stop that can't start in its morning / afternoon / evening, a day past 1 am, or over 4 hours of travel.
+        It also flags a morning, afternoon or evening with only a meal in it (Ticket #75): a meal shares its slot
+        with a thing to do; an evening bar counts as the outing. Drafts, edits and repairs are told the same rule.
         Stops keep their `lat`/`lng` for this. The model never sees these results, so it can't parrot them.
      3. One repair call. It returns the same edit operations, and code lets them touch only what was flagged. After
         an edit that is only what the edit changed, and a repair can't remove a stop. A repair that leaves more
