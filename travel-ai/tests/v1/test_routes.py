@@ -278,3 +278,27 @@ def test_a_broken_router_answer_keeps_the_estimate(monkeypatch):
     monkeypatch.setattr(route_service.httpx, "get", lambda *a, **k: Answer())
     tokyo, kyoto = ROUTE
     assert route_service.transit(tokyo, kyoto) is None
+
+
+def test_shortening_moves_the_last_lone_day_and_clears_its_stops_for_the_edit_to_refill():
+    it = POOL.to_itinerary(_plan(), "Japan")
+    it.days[2].activities = it.days[2].activities[:1]  # Kyoto has stops on day 3
+    data = it.model_dump()
+    data["days"] = data["days"][:3]  # 4 days down to 3: Kyoto keeps one day
+    short = Itinerary.model_validate(data)
+    assert [(c.name, c.nights) for c in short.route] == [("Tokyo", 2)]
+    assert short.days[2].city == "Tokyo" and short.days[2].activities == []  # no Kyoto stops on a Tokyo day
+
+
+def test_a_day_trip_needs_no_hotel():
+    one = Itinerary(destination="Japan", route=[City(name="Tokyo", lat=35.69, lng=139.69)],
+                    days=[{"day_number": 1, "city": "Tokyo", "activities": []}])
+    problems = [x.problem for x in ItineraryCritiqueService.counted(one, POOL.places, days=1)]
+    assert not any("place to stay" in p for p in problems)
+
+
+def test_a_car_estimate_takes_the_train_s_name_with_its_time(monkeypatch):
+    tokyo, kyoto = ROUTE
+    monkeypatch.setattr(route_service, "transit", lambda a, b: Leg(mode="train", minutes=180))
+    assert checked_leg(Leg(mode="car", minutes=240, cost="~$60"), tokyo, kyoto).mode == "train"
+    assert route_service._kind("flight + airport bus") == "flight"

@@ -380,17 +380,18 @@ Rules:
         new_days = [DayPlan(day_number=n, activities=[]) for n in range(before + 1, wanted + 1)]
         plan.days += new_days
         plan.sync_route()  # added days stay on in the last city; a shorter trip may end sooner
+        empty = [d for d in plan.days if not d.activities]  # new days, and one a shorter route moved to another city
 
         targets = {c.target for c in changes}
         whole = not changes or "trip" in targets
         day_of = {a.id: d for d in plan.days for a in d.activities}
-        scope_days = {d.id for d in plan.days if whole or d.id in targets or d in new_days
+        scope_days = {d.id for d in plan.days if whole or d.id in targets or d in empty
                       or any(a.id in targets for a in d.activities)}
         editable = {a.id for d in plan.days for a in d.activities
                     if whole or a.id in targets or d.id in targets}
         editable |= {sid for sid, _, _ in plan.stay_slots() if whole or sid in targets}
         # One item may move to any day; only whole days take new stops.
-        add_to = {d.id for d in plan.days if whole or d.id in targets or d in new_days}
+        add_to = {d.id for d in plan.days if whole or d.id in targets or d in empty}
         move_to = {d.id for d in plan.days} if targets & set(day_of) else add_to
 
         places = self._edit_candidates(plan, changes, editable, add_to, profile, viewport, exclude_ids, personality)
@@ -419,7 +420,7 @@ The part you work on, with what the traveler said under what it is about:
 The traveler's message: {request}
 Make these changes:
 {asked}
-{f"Fill the new days {', '.join(d.id for d in new_days)} with 2-3 stops each." if new_days else ""}
+{f"Fill the empty days {', '.join(d.id for d in empty)} with 2-3 stops each." if empty else ""}
 
 Places you may use:
 {listing}
@@ -443,7 +444,7 @@ Rules:
 
         # Only what this edit changed is reviewed; the rest of the plan is the traveler's.
         new_ids = {d.id for d in new_days}
-        scope = (_changed(itinerary, plan) & _present(plan)) | new_ids
+        scope = (_changed(itinerary, plan) & _present(plan)) | {d.id for d in empty}
         warnings, checked = [], True
         if scope:
             try:

@@ -188,8 +188,9 @@ class ItineraryCritiqueService:
                 issues += _route_issues(plan, day)
                 if issue := _timing(plan, day, known, visits or {}):
                     issues.append(issue)
+        nights = {c.name: c.nights for c in plan.route}
         for sid, stay, city in plan.stay_slots():
-            if stay or not days or (days < 2 and not city):
+            if stay or not days or (days < 2 and not city) or nights.get(city) == 0:  # a day trip needs no hotel
                 continue
             if any(p.category == PickCategory.STAY and (not city or city_of(plan.route, p) == city) for p in places):
                 issues.append(Issue(problem=f"This plan has no place to stay{f' in {city}' if city else ''}",

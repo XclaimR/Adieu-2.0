@@ -109,8 +109,10 @@ def transit(a: City, b: City) -> Leg | None:
 
 
 def _kind(mode: str) -> str:
-    return "flight" if _FLIGHT.search(mode) else "bus" if re.search(r"bus|coach", mode, re.I) else \
-        "ferry" if re.search(r"ferry|boat", mode, re.I) else "train"
+    for kind, words in (("flight", _FLIGHT.pattern), ("bus", r"bus|coach"), ("ferry", r"ferry|boat"), ("car", r"\bcar\b|driv|taxi")):
+        if re.search(words, mode, re.I):
+            return kind
+    return "train"
 
 
 def checked_leg(estimate: Leg, a: City, b: City) -> Leg:
