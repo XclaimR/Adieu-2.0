@@ -83,6 +83,8 @@ export default function Home({ user, openTrip }: Props) {
     let v = value.trim();
     // A typed place ("Lisbon") still reads as a sentence: "A week in Lisbon".
     if (slot === "where" && v && !/^(in|to|on|at|around|somewhere|anywhere)\b/i.test(v)) v = `in ${v}`;
+    // and "my mum" reads "with my mum".
+    if (slot === "who" && v && !/^(with|on|alone|solo|by)\b/i.test(v)) v = `with ${v}`;
     if (slot && v) setAnswers((a) => ({ ...a, [slot]: v }));
     setSlot(null);
     setOther("");
