@@ -265,9 +265,11 @@ class PlacesService:
             try:
                 library = place_library.build(area, self._release)
             except OpenDataError as e:
-                if row:  # an old library beats none
+                if row:  # an old library beats none; marked partial, the next try is an hour away, not every lookup
                     logger.warning("Keeping the old places for %s: %s", area["name"], e)
-                    return row.data
+                    kept = {**row.data, "partial": ["refresh failed"]}
+                    self._store(key, kept)
+                    return kept
                 raise PlacesUnavailableError(str(e)) from e
             for photo_id, photo in library.pop("photos").items():
                 self._store(f"open:photo:{photo_id}", photo)

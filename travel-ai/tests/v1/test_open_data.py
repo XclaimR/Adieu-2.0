@@ -251,10 +251,14 @@ def test_a_source_down_keeps_the_old_library_and_none_at_all_is_a_plain_error(db
     old = service.library(area)
 
     def down(area, releases):
+        fake_places.loads.append(area)
         raise open_data.OpenDataError("down")
 
     monkeypatch.setattr(place_library, "build", down)
     monkeypatch.setattr(places_service, "LIBRARY_TTL_HOURS", 0)
-    assert service.library(area) == old
+    assert service.library(area)["places"] == old["places"]
+    loads = len(fake_places.loads)
+    service.library(area)  # within the hour: no new attempt during the outage
+    assert len(fake_places.loads) == loads
     with pytest.raises(PlacesUnavailableError):
         service.library(service.resolve_destination("Paris"))
