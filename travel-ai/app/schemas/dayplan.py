@@ -6,6 +6,7 @@ from app.schemas.activity import Activity
 class DayPlan(BaseModel):
     day_number: int
     theme: str | None = None
+    city: str | None = None  # on a multi-city route, the city this day is spent in
 
     activities: list[Activity]
 

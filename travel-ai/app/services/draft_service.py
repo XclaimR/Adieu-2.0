@@ -11,24 +11,28 @@ from app.core.config import settings
 from app.schemas.activity import Activity, default_minutes
 from app.schemas.dayplan import DayPlan
 from app.schemas.draft import Draft
-from app.schemas.itinerary import STAY_ID, Itinerary
+from app.schemas.itinerary import City, Itinerary, city_of
 from app.schemas.itinerary_critique import Issue, ItineraryCritique
 from app.schemas.personality import Note, NoteChange, Personality
 from app.schemas.place import Pick, PickCategory, PlaceCandidate
 from app.schemas.trip_profile import TripProfile
-from app.services.itinerary_critique_service import REVIEW_TIMEOUT, ItineraryCritiqueService, plan_facts
+from app.services.itinerary_critique_service import (MOVING_DAY_STOPS, REVIEW_TIMEOUT, ItineraryCritiqueService,
+                                                      plan_facts)
 from app.services.llm_client import LLMClient
 from app.services.personality_service import PersonalityService
 from app.services.places_service import FACTS_RULE, PlacesService, tier_rank, traveler_fit, unclaimed
+from app.services.route_service import RouteService
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_DAYS = 4
-MAX_DAYS = 10
+MAX_DAYS = 21  # three weeks; a longer trip is planned as its first three weeks
 MAX_STOPS = 5  # after edits: a thing to do in each time of day, and lunch and dinner beside two of them
 MIN_PLACES = 2
 # How many of each kind the drafting model sees: enough to plan from, few enough for a free-tier prompt.
 POOL = {PickCategory.DO: 18, PickCategory.EAT: 14, PickCategory.HIDDEN_GEMS: 8, PickCategory.STAY: 8}  # places to visit or eat at: one day's minimum
+# On a route, per city: (base, per night) of each kind.
+CITY_POOL = {PickCategory.DO: (4, 2), PickCategory.EAT: (2, 2), PickCategory.HIDDEN_GEMS: (2, 0), PickCategory.STAY: (4, 0)}
 
 FLAVORS = [
     ("easy", "Slow and easy: a relaxed pace built around the traveler's main mood, long meals, few must-dos"),
@@ -66,7 +70,12 @@ class DraftPlan(BaseModel):
     stay_ref: int | None = Field(default=None, description="[n] of a place to stay from the list, or null")
     trait: str | None = Field(default=None, description="the listed personality trait this version serves most, or null")
     # The cap stops runaway generation (each extra day costs ~10 s on a local model).
-    days: list[PlanDay] = Field(min_length=1, max_length=10)
+    days: list[PlanDay] = Field(min_length=1, max_length=MAX_DAYS)
+
+
+class RouteDraftPlan(DraftPlan):
+    stay_refs: list[int] = Field(default_factory=list,
+                                 description="the [n] of one 'stay' place for each city, in route order")
 
 
 class PlanEdit(BaseModel):
@@ -93,6 +102,26 @@ def _same(a: str, b: str) -> bool:
     return bool(a and b) and (a == b or (min(len(a), len(b)) >= 6 and (a in b or b in a)))
 
 
+def _hours(minutes: int) -> str:
+    return f"~{minutes // 60}h {minutes % 60:02d}m" if minutes >= 60 else f"~{minutes} min"
+
+
+def _route_rules(route: list[City]) -> str:
+    """The fixed route, for the drafting prompt: which days are in which city, and the moving days."""
+    if not route:
+        return ""
+    lines, start = ["The route is fixed. Plan each day only with places listed under that day's city:"], 1
+    for before, city in zip([None, *route], route):
+        end = start + city.nights - 1
+        lines.append(f"- Day {start}{f'-{end}' if end > start else ''}: {city.name}")
+        if before and city.leg:
+            lines.append(f"  Day {start} is a moving day: {before.name} to {city.name} by {city.leg.mode} "
+                         f"({_hours(city.leg.minutes)}). Plan only 1-{MOVING_DAY_STOPS - 1} stops in {city.name}"
+                         + (", none in the morning." if city.leg.minutes >= 120 else "."))
+        start = end + 1
+    return "\n".join(lines) + "\n"
+
+
 def _in_order(activities: list[Activity]) -> list[Activity]:
     """Morning → evening. A time of day may hold several stops; the timing check says when it's too many."""
     return sorted(activities, key=lambda a: _SLOTS.index(a.time_of_day) if a.time_of_day in _SLOTS else len(_SLOTS))
@@ -110,18 +139,30 @@ def describe(ref: str, p: PlaceCandidate) -> str:
 class PlacePool:
     """Numbered real places the model may use. It can only reference places by number."""
 
-    def __init__(self, places: list[PlaceCandidate]):
+    def __init__(self, places: list[PlaceCandidate], route: list[City] = (), route_tip: str | None = None):
         seen: set[str] = set()
+        self.route, self.route_tip = list(route), route_tip
         self.places: list[PlaceCandidate] = []
         for p in places:
-            if p.place_id not in seen:
+            # On a route every place belongs to one city, so each city's days stay inside it.
+            if p.place_id not in seen and (not self.route or city_of(self.route, p)):
                 seen.add(p.place_id)
                 self.places.append(p)
 
     def listing(self) -> str:
-        """One line per place, grouped by area so nearby places can share a day."""
-        order = sorted(range(len(self.places)), key=lambda i: (self.places[i].address or "").split(",")[0])
-        return "\n".join(describe(f"[{i}]", self.places[i]) for i in order)
+        """One line per place, grouped by city and area so nearby places can share a day."""
+        def key(i: int) -> tuple:
+            p = self.places[i]
+            city = city_of(self.route, p) if self.route else ""
+            return [c.name for c in self.route].index(city) if city else 0, (p.address or "").split(",")[0]
+        order = sorted(range(len(self.places)), key=key)
+        lines, heading = [], None
+        for i in order:
+            if self.route and (city := city_of(self.route, self.places[i])) != heading:
+                heading = city
+                lines.append(f"{city}:")
+            lines.append(describe(f"[{i}]", self.places[i]))
+        return "\n".join(lines)
 
     def get(self, ref: int | None) -> PlaceCandidate | None:
         return self.places[ref] if ref is not None and 0 <= ref < len(self.places) else None
@@ -135,30 +176,12 @@ class PlacePool:
         return next((p for p in self.places if _same(named, _norm(p.name))), None)
 
     def to_itinerary(self, plan: DraftPlan, destination: str, moments: list[str] = ()) -> Itinerary:
+        if self.route:
+            return self._to_route_itinerary(plan, destination, moments)
         days = []
         used: set[str] = set()
         for day in plan.days:
-            activities = []
-            for stop in day.stops:
-                place = self.resolve(stop)
-                # Unknown refs and stays are dropped; repeats of the same place too.
-                if place is None or place.category == PickCategory.STAY or place.place_id in used:
-                    continue
-                used.add(place.place_id)
-                activities.append(Activity(
-                    name=place.name,
-                    category=place.category.value,
-                    time_of_day=stop.time_of_day,
-                    description=unclaimed(stop.note, place.summary),
-                    for_note=moments[stop.for_moment] if stop.for_moment is not None
-                    and 0 <= stop.for_moment < len(moments) else None,
-                    place_id=place.place_id,
-                    photo_name=place.photo_name,
-                    maps_url=place.maps_url,
-                    lat=place.lat,
-                    lng=place.lng,
-                    source_url=place.source_url,
-                ))
+            activities = self._activities(day, used, moments)
             if activities:
                 days.append(DayPlan(day_number=len(days) + 1, theme=day.theme, activities=_in_order(activities)))
 
@@ -170,16 +193,67 @@ class PlacePool:
             days=days,
         )
 
+    def _to_route_itinerary(self, plan: DraftPlan, destination: str, moments: list[str]) -> Itinerary:
+        """Every day of the route, each in its own city: a stop in another city is dropped, a day the model
+        skipped stays empty for the review to fill, and each city gets a stay (the model's, else its first)."""
+        cities = [c.name for c in self.route for _ in range(c.nights)]
+        used: set[str] = set()
+        days = []
+        for number, city in enumerate(cities, 1):
+            day = plan.days[number - 1] if number <= len(plan.days) else None
+            activities = self._activities(day, used, moments, city) if day else []
+            days.append(DayPlan(day_number=number, theme=day and day.theme, city=city,
+                                activities=_in_order(activities)))
+        route = [c.model_copy(deep=True) for c in self.route]
+        refs = getattr(plan, "stay_refs", [])
+        for i, city in enumerate(route):
+            here = [p for p in self.places if p.category == PickCategory.STAY and city_of(self.route, p) == city.name]
+            chosen = self.get(refs[i]) if i < len(refs) else None
+            stay = chosen if chosen in here else next(iter(here), None)
+            city.stay = Pick(**stay.model_dump()) if stay else None
+        return Itinerary(destination=destination, title=plan.title, route=route, route_tip=self.route_tip, days=days)
+
+    def _activities(self, day: PlanDay, used: set[str], moments: list[str], city: str | None = None) -> list[Activity]:
+        activities = []
+        for stop in day.stops:
+            place = self.resolve(stop)
+            # Unknown refs and stays are dropped; repeats of the same place too, and places in another city.
+            if place is None or place.category == PickCategory.STAY or place.place_id in used \
+                    or (city and city_of(self.route, place) != city):
+                continue
+            used.add(place.place_id)
+            activities.append(Activity(
+                name=place.name,
+                category=place.category.value,
+                time_of_day=stop.time_of_day,
+                description=unclaimed(stop.note, place.summary),
+                for_note=moments[stop.for_moment] if stop.for_moment is not None
+                and 0 <= stop.for_moment < len(moments) else None,
+                place_id=place.place_id,
+                photo_name=place.photo_name,
+                maps_url=place.maps_url,
+                lat=place.lat,
+                lng=place.lng,
+                source_url=place.source_url,
+            ))
+        return activities
+
+
+def _present(plan: Itinerary) -> set[str]:
+    """Ids of the stops and the stays the plan has."""
+    return {a.id for d in plan.days for a in d.activities} | {sid for sid, stay, _ in plan.stay_slots() if stay}
+
 
 def fulfilled(itinerary: Itinerary) -> set[str]:
     return {a.for_note for d in itinerary.days for a in d.activities if a.for_note}
 
 
 def _changed(before: Itinerary, after: Itinerary) -> set[str]:
-    """Ids of the stops, days and stay that differ, including what is gone."""
+    """Ids of the stops, days and stays that differ, including what is gone."""
     def parts(plan: Itinerary) -> dict:
         items = {a.id: (d.id, a) for d in plan.days for a in d.activities}
-        return {STAY_ID: plan.stay, **{d.id: d.activities for d in plan.days}, **items}
+        return {**{sid: stay for sid, stay, _ in plan.stay_slots()}, **{d.id: d.activities for d in plan.days},
+                **items}
     was, now = parts(before), parts(after)
     return {key for key in was.keys() | now.keys() if was.get(key) != now.get(key)}
 
@@ -192,18 +266,30 @@ class DraftService:
     def __init__(self, places: PlacesService):
         self.places = places
 
+    def route(self, profile: TripProfile, viewport: dict | None, personality: Personality | None,
+              days: int) -> tuple[list[City], str | None]:
+        """The cities of a country or region trip and a tip that covers the legs; ([], None) for one place."""
+        area = self.places.area_for(profile.destination, viewport)
+        if not area:
+            return [], None
+        return RouteService.plan(area, self.places.library(area), days, profile, personality)
+
     def pool(self, profile: TripProfile, viewport: dict | None, exclude_ids: set[str],
-             personality: Personality | None = None) -> PlacePool:
-        """Real candidates inside the destination, one search per category (cached)."""
+             personality: Personality | None = None, route: list[City] = (),
+             route_tip: str | None = None) -> PlacePool:
+        """Real candidates inside the destination, one search per category (cached). On a route, per city."""
+        searches = [(None, category, limit) for category, limit in POOL.items()] if not route else [
+            (city.name, category, base + per_night * city.nights)
+            for city in route for category, (base, per_night) in CITY_POOL.items()]
         places: list[PlaceCandidate] = []
-        for category, limit in POOL.items():
-            found = self.places.candidates(profile.destination, category, profile, viewport, personality=personality,
-                                           limit=limit)
+        for city, category, limit in searches:
+            found = self.places.candidates(profile.destination, category, profile, viewport,
+                                           query=city and f"near {city}", personality=personality, limit=limit)
             if category == PickCategory.STAY and profile.budget_level:
                 limit = tier_rank(profile.budget_level.value)
                 found = [c for c in found if tier_rank(c.tier) <= limit] or found
             places += [c for c in found if c.place_id not in exclude_ids]
-        return PlacePool(places)
+        return PlacePool(places, route, route_tip)
 
     @staticmethod
     def _prompt(profile: TripProfile, pool: PlacePool, days: int, brief: str,
@@ -212,7 +298,7 @@ class DraftService:
         return f"""
 Plan a {days}-day trip to {profile.destination}.
 This version's style: {brief}
-
+{_route_rules(pool.route)}
 Trip profile:
 {profile.model_dump_json(exclude_none=True, exclude={"preferences"})}
 
@@ -236,22 +322,25 @@ Rules:
 {f"- trait: copy the one personality trait above that this version serves best (exactly as written), or null. Options: {', '.join(allowed)}." if allowed else "- trait: null."}
 - Fit each [mN] moment into one stop on a fitting day and set that stop's for_moment to N. Skip a moment only if
   no listed place fits it.
-- stay_ref must be a 'stay' place from the list, or null.
+{"- stay_refs: one 'stay' place for each city, in route order. stay_ref is null." if pool.route else
+   "- stay_ref must be a 'stay' place from the list, or null."}
 """
 
     def generate(self, profile: TripProfile, viewport: dict | None, exclude_ids: set[str],
                  personality: Personality | None = None) -> Iterator[Draft]:
-        """Yields 3 drafts with different flavors, one at a time (each is a separate model call)."""
-        pool = self.pool(profile, viewport, exclude_ids, personality)
+        """Yields 3 drafts with different flavors, one at a time (each is a separate model call).
+        A country or region trip first gets its route (one more call), the same for all three."""
+        days = min(profile.duration_days or DEFAULT_DAYS, MAX_DAYS)
+        pool = self.pool(profile, viewport, exclude_ids, personality, *self.route(profile, viewport, personality, days))
         if sum(p.category != PickCategory.STAY for p in pool.places) < MIN_PLACES:
             raise NotEnoughPlacesError(f"Too few places in {profile.destination}")
-        days = min(profile.duration_days or DEFAULT_DAYS, MAX_DAYS)
         allowed = PersonalityService.traits(personality)[0]  # only known traits; guesses stay off the cards
         moments = PersonalityService.moments(personality)
         made, failure = False, None
         for flavor, brief in FLAVORS:
             try:
-                plan = LLMClient.generate_structured(self._prompt(profile, pool, days, brief, personality), DraftPlan,
+                plan = LLMClient.generate_structured(self._prompt(profile, pool, days, brief, personality),
+                                                     RouteDraftPlan if pool.route else DraftPlan,
                                                      model=settings.LLM_MODEL_PLAN)
             except Exception as e:
                 logger.exception("Draft %s failed", flavor)
@@ -288,6 +377,7 @@ Rules:
         plan.days = [d for d in plan.days if d.day_number <= wanted]
         new_days = [DayPlan(day_number=n, activities=[]) for n in range(before + 1, wanted + 1)]
         plan.days += new_days
+        plan.sync_route()  # added days stay on in the last city; a shorter trip may end sooner
 
         targets = {c.target for c in changes}
         whole = not changes or "trip" in targets
@@ -296,8 +386,7 @@ Rules:
                       or any(a.id in targets for a in d.activities)}
         editable = {a.id for d in plan.days for a in d.activities
                     if whole or a.id in targets or d.id in targets}
-        if whole or STAY_ID in targets:
-            editable.add(STAY_ID)
+        editable |= {sid for sid, _, _ in plan.stay_slots() if whole or sid in targets}
         # One item may move to any day; only whole days take new stops.
         add_to = {d.id for d in plan.days if whole or d.id in targets or d in new_days}
         move_to = {d.id for d in plan.days} if targets & set(day_of) else add_to
@@ -352,8 +441,7 @@ Rules:
 
         # Only what this edit changed is reviewed; the rest of the plan is the traveler's.
         new_ids = {d.id for d in new_days}
-        present = {a.id for d in plan.days for a in d.activities} | ({STAY_ID} if plan.stay else set())
-        scope = (_changed(itinerary, plan) & present) | new_ids
+        scope = (_changed(itinerary, plan) & _present(plan)) | new_ids
         warnings, checked = [], True
         if scope:
             try:
@@ -363,6 +451,7 @@ Rules:
                 logger.exception("Couldn't review the edit")
                 checked = False
         plan.days = [d for d in plan.days if d.activities or d.id not in new_ids]
+        plan.sync_route()
         return plan, warnings, checked
 
     def review(self, draft: Draft, places: list[PlaceCandidate], profile: TripProfile,
@@ -400,6 +489,7 @@ Rules:
         plan = plan.model_copy(deep=True)
         if days:
             plan.days += [DayPlan(day_number=n, activities=[]) for n in range(len(plan.days) + 1, days + 1)]
+            plan.sync_route()
         visits = dict(critique.visit_minutes)
         issues = ItineraryCritiqueService.counted(plan, places, days, scope, visits) + critique.issues
 
@@ -408,8 +498,7 @@ Rules:
             try:
                 edits = self._repairs(plan, issues, places, profile, personality, scope, request)
                 fixed = self._repaired(plan, issues, edits, places, days, scope, visits)
-                present = {a.id for d in fixed.days for a in d.activities} | ({STAY_ID} if fixed.stay else set())
-                if redo := _changed(plan, fixed) & present:
+                if redo := _changed(plan, fixed) & _present(fixed):
                     # A repair is the model's own guess too: check just what it changed, once. No loop: fixes can
                     # chase each other, and every round is another 3-50 s.
                     again = ItineraryCritiqueService.critique(fixed, profile, personality, places, redo, request)
@@ -425,7 +514,7 @@ Rules:
         changed = _changed(plan, fixed)
         added = {a.id for d in fixed.days for a in d.activities} - {a.id for d in plan.days for a in d.activities}
         unfixed = [x.problem for x in critique.issues if not (changed & set(x.where) if x.where else added)]
-        if days:
+        if days and not fixed.route:  # a route keeps every day, so its nights still add up
             fixed.days = [d for d in fixed.days if d.activities]
             for number, day in enumerate(fixed.days, 1):
                 day.day_number = number
@@ -470,7 +559,8 @@ Rules:
 - Use only listed places, and none that the plan already has. Give each new place a note.
 - For a day with too much travel or too little time, use places close by (see "at lat,lng") or quicker ones,
   remove a stop, or move one to a day or time with room.
-- An empty day needs 2-3 stops added. A stay is replaced at item_id {STAY_ID}, and is never an activity.
+- An empty day needs 2-3 stops added. A stay is replaced at its STAY id (s1, s2, ...), and is never an activity.
+- On a trip with several cities, a day's stops and a city's stay must be in that city.
 - Never choose a place that breaks a stated must or avoid.
 - A meal takes an hour or two, so it never has a morning, afternoon or evening to itself: it shares that time
   of day with a thing to do or see (in the evening a bar, a show or a walk counts).
@@ -495,7 +585,8 @@ Rules:
             add_to = day_ids  # something is missing from the whole plan
         move_to = day_ids if scope is None else add_to
 
-        used = {a.place_id for d in plan.days for a in d.activities} | ({plan.stay.place_id} if plan.stay else set())
+        used = {a.place_id for d in plan.days for a in d.activities} | {
+            stay.place_id for _, stay, _ in plan.stay_slots() if stay}
         free = {f"c{i}": p for i, p in enumerate(places) if p.place_id not in used}
         # These ids aren't enums in the schema, so models sometimes copy the brackets.
         edits = [e.model_copy(update={k: v.strip("[] ") for k in ("item_id", "day_id", "place") if (v := getattr(e, k))})
@@ -514,10 +605,16 @@ Rules:
         """Places for just the part being changed, as {c0: place, ...}."""
         items = [a for d in plan.days for a in d.activities if a.id in editable]
         wanted = {PickCategory(a.category) for a in items if a.category in PickCategory._value2member_map_}
-        if STAY_ID in editable:
+        stays = {sid for sid, _, _ in plan.stay_slots()}
+        if stays & editable:
             wanted.add(PickCategory.STAY)
         if add_to:
             wanted |= {PickCategory.DO, PickCategory.EAT, PickCategory.HIDDEN_GEMS}
+        # On a route, search around each city being changed; a place elsewhere can't go on its days.
+        cities = sorted({d.city for d in plan.days if d.id in add_to or any(a.id in editable for a in d.activities)}
+                        | {city for sid, _, city in plan.stay_slots() if sid in editable} - {None})
+        near = [f" near {city}" for city in cities] or [""]
+        limit = max(8, 30 // len(near))
         # "Similar but cheaper" must not inherit the trip's "luxury" search hint.
         neutral = profile.model_copy(update={"budget_level": None})
         found: list[PlaceCandidate] = []
@@ -526,14 +623,19 @@ Rules:
                 continue
             category = next((PickCategory(a.category) for a in items
                              if a.id == change.target and a.category in PickCategory._value2member_map_), None)
-            category = (PickCategory.STAY if change.target == STAY_ID or change.category == "stay" else
+            category = (PickCategory.STAY if change.target in stays or change.category == "stay" else
                         PickCategory.EAT if change.category in ("eat", "diet") else category or PickCategory.DO)
-            found += self.places.candidates(profile.destination, category, neutral, viewport, change.search, personality)
+            for where in near:
+                found += self.places.candidates(profile.destination, category, neutral, viewport,
+                                                change.search + where, personality, limit=limit)
         for category in [c for c in PickCategory if c in wanted]:
-            found += self.places.candidates(profile.destination, category, neutral, viewport, personality=personality)
+            for where in near:
+                found += self.places.candidates(profile.destination, category, neutral, viewport,
+                                                where.strip() or None, personality=personality, limit=limit)
         used = {a.place_id for d in plan.days for a in d.activities} | exclude_ids
-        if plan.stay:
-            used.add(plan.stay.place_id)
+        used |= {stay.place_id for _, stay, _ in plan.stay_slots() if stay}
+        if plan.route:
+            found = [p for p in found if city_of(plan.route, p) in cities]
         fresh = list({p.place_id: p for p in found if p.place_id not in used}.values())
         return {f"c{i}": p for i, p in enumerate(fresh)}
 
@@ -541,20 +643,27 @@ Rules:
     def _apply_edits(plan: Itinerary, edits: list[PlanEdit], places: dict[str, PlaceCandidate],
                      editable: set[str], add_to: set[str], move_to: set[str]) -> None:
         days = {d.id: d for d in plan.days}
+        stays = {sid: city for sid, _, city in plan.stay_slots()}
         used: set[str] = set()
         touched: dict[str, DayPlan] = {}
+
+        def fits(thing, city: str | None) -> bool:
+            """On a route, a place can only go where its city is."""
+            return not plan.route or city_of(plan.route, thing) == city
+
         for e in edits:
             place = places.get(e.place) if e.op in ("replace", "add") else None
             if place and place.place_id in used:
                 continue
-            if e.op == "replace" and e.item_id == STAY_ID and STAY_ID in editable:
-                if place and place.category == PickCategory.STAY:
-                    plan.stay = Pick(**place.model_dump(), why=unclaimed(e.note, place.summary))
+            if e.op == "replace" and e.item_id in stays and e.item_id in editable:
+                if place and place.category == PickCategory.STAY and fits(place, stays[e.item_id]):
+                    plan.set_stay(e.item_id, Pick(**place.model_dump(), why=unclaimed(e.note, place.summary)))
                     used.add(place.place_id)
                 continue
             if e.op == "add":
                 day = days.get(e.day_id) if e.day_id in add_to else None
-                if day and place and place.category != PickCategory.STAY and len(day.activities) < MAX_STOPS:
+                if day and place and place.category != PickCategory.STAY and len(day.activities) < MAX_STOPS \
+                        and fits(place, day.city):
                     day.activities.append(Activity(
                         name=place.name, category=place.category.value, time_of_day=e.time_of_day,
                         description=unclaimed(e.note, place.summary), place_id=place.place_id,
@@ -568,7 +677,7 @@ Rules:
             day, item = next(((d, a) for d in plan.days for a in d.activities if a.id == e.item_id), (None, None))
             if item is None:
                 continue
-            if e.op == "replace" and place and place.category != PickCategory.STAY:
+            if e.op == "replace" and place and place.category != PickCategory.STAY and fits(place, day.city):
                 item.name, item.category = place.name, place.category.value
                 item.description = unclaimed(e.note, place.summary)
                 item.place_id, item.photo_name, item.maps_url = place.place_id, place.photo_name, place.maps_url
@@ -582,7 +691,7 @@ Rules:
             elif e.op == "move":
                 to = days.get(e.day_id) if e.day_id in move_to else None
                 if to and to is not day:
-                    if len(to.activities) >= MAX_STOPS:
+                    if len(to.activities) >= MAX_STOPS or to.city != day.city:
                         continue
                     day.activities.remove(item)
                     to.activities.append(item)
@@ -604,10 +713,14 @@ Rules:
 
     @staticmethod
     def place_in_itinerary(itinerary: Itinerary, pick: Pick) -> Itinerary:
-        """Add a place the user tapped ＋ on: stays become the stay, others go to the lightest day."""
+        """Add a place the user tapped ＋ on: stays become the stay, others go to the lightest day.
+        On a route, both go to the city the place is in; a place in none of them isn't added."""
         itinerary = itinerary.model_copy(deep=True)
+        city = city_of(itinerary.route, pick)
+        if itinerary.route and city is None:
+            return itinerary
         if pick.category == PickCategory.STAY:
-            itinerary.stay = pick
+            itinerary.set_stay(next(sid for sid, _, c in itinerary.stay_slots() if c == city), pick)
             return itinerary
         if any(a.place_id == pick.place_id for d in itinerary.days for a in d.activities):
             return itinerary
@@ -619,5 +732,6 @@ Rules:
         if not itinerary.days:
             itinerary.days.append(DayPlan(day_number=1, theme="Your picks", activities=[activity]))
         else:
-            min(itinerary.days, key=lambda d: len(d.activities)).activities.append(activity)
+            here = [d for d in itinerary.days if not itinerary.route or d.city == city] or itinerary.days
+            min(here, key=lambda d: len(d.activities)).activities.append(activity)
         return itinerary

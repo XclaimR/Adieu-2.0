@@ -96,11 +96,13 @@ class OptionsService:
         exclude_ids: set[str],
         personality: Personality | None = None,
         about: list[str] = (),
+        near: str | None = None,
     ) -> OptionSet:
-        """Alternatives for one itinerary activity."""
+        """Alternatives for one itinerary activity; `near` is its city on a multi-city route."""
         cat = PickCategory(category) if category in PickCategory._value2member_map_ else PickCategory.DO
         candidates = [
-            c for c in self.places.candidates(profile.destination, cat, profile, viewport, personality=personality)
+            c for c in self.places.candidates(profile.destination, cat, profile, viewport,
+                                              query=near and f"near {near}", personality=personality)
             if c.place_id not in exclude_ids
         ]
         picks = RankingService.rank(cat, candidates, profile, focus="; ".join([f"an alternative to {activity_name}", *about]),

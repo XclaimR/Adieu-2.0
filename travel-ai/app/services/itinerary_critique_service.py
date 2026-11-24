@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field, create_model
 from app.core.config import settings
 from app.schemas.activity import Activity
 from app.schemas.dayplan import DayPlan
-from app.schemas.itinerary import STAY_ID, Itinerary
+from app.schemas.itinerary import Itinerary, city_of
 from app.schemas.itinerary_critique import Issue, ItineraryCritique
 from app.schemas.personality import Personality
 from app.schemas.place import PickCategory, PlaceCandidate
@@ -23,6 +23,7 @@ CLOCK = {"morning": (9 * 60, 12 * 60 + 30), "afternoon": (12 * 60, 17 * 60 + 30)
 DAY_ENDS = 25 * 60  # 1 am
 MAX_TRAVEL = 4 * 60  # minutes in one day
 # A drink place is the evening's outing, not a meal; Wikivoyage's "Bar or cafe" is a café by day.
+MOVING_DAY_STOPS = 3  # a day spent partly on a train or plane
 NIGHT_OUT = re.compile(r"\b(bar|pub|club|brewery|lounge|wine)\b", re.I)
 
 RULES = {
@@ -49,8 +50,7 @@ def plan_facts(plan: Itinerary, places: list[PlaceCandidate], scope: set[str] | 
     """What each place is: a stop itself only stores its name."""
     known = {p.place_id: p for p in places}
     items = [(a.id, a.place_id, a.description, a.for_note) for d in plan.days for a in d.activities]
-    if plan.stay:
-        items.append((STAY_ID, plan.stay.place_id, None, None))
+    items += [(sid, stay.place_id, None, None) for sid, stay, _ in plan.stay_slots() if stay]
     lines = []
     for item_id, place_id, planned, moment in items:
         if scope is not None and item_id not in scope:
@@ -77,9 +77,9 @@ def travel_minutes(here: tuple[float, float], there: tuple[float, float]) -> flo
 
 
 def _touched_days(plan: Itinerary, scope: set[str] | None) -> set[str]:
-    """The days an edit touched: all of them for drafts, or when the stay moved."""
-    return {d.id for d in plan.days
-            if scope is None or STAY_ID in scope or d.id in scope or any(a.id in scope for a in d.activities)}
+    """The days an edit touched: all of them for drafts, or the days whose stay moved."""
+    return {d.id for d in plan.days if scope is None or plan.stay_id(d) in scope or d.id in scope
+            or any(a.id in scope for a in d.activities)}
 
 
 def _timing(plan: Itinerary, day: DayPlan, known: dict[str, PlaceCandidate], visits: dict[str, int]) -> Issue | None:
@@ -89,8 +89,11 @@ def _timing(plan: Itinerary, day: DayPlan, known: dict[str, PlaceCandidate], vis
             thing = known.get(thing.place_id)  # saved before stops kept their position
         return (thing.lat, thing.lng) if thing and thing.lat is not None and thing.lng is not None else None
 
-    here = position(plan.stay) if plan.stay else None
-    clock, travelled, late, from_stay = CLOCK["morning"][0], 0.0, None, 0.0
+    stay = plan.stay_for(day)
+    here = position(stay) if stay else None
+    # A moving day starts when the train or plane gets in.
+    arriving = plan.moving_day(day)
+    clock, travelled, late, from_stay = CLOCK["morning"][0] + (arriving.leg.minutes if arriving else 0), 0.0, None, 0.0
     ids = []
     for i, stop in enumerate(day.activities):
         leg = 0.0
@@ -118,7 +121,7 @@ def _timing(plan: Itinerary, day: DayPlan, known: dict[str, PlaceCandidate], vis
     else:
         return None
     problem, where = found
-    return Issue(problem=problem, where=[*where, STAY_ID] if from_stay > 60 else where,
+    return Issue(problem=problem, where=[*where, plan.stay_id(day)] if from_stay > 60 else where,
                  suggestion="closer or quicker places, fewer stops, or a move to another day or time")
 
 
@@ -142,11 +145,24 @@ def _meal_only(day: DayPlan, known: dict[str, PlaceCandidate], scope: set[str] |
     return issues
 
 
+def _route_issues(plan: Itinerary, day: DayPlan) -> list[Issue]:
+    """On a route: every stop in the day's city, and a moving day kept light."""
+    issues = [Issue(problem=f"{a.name} is outside {day.city}, where day {day.day_number} is spent",
+                    suggestion=f"a place in {day.city} instead", where=[a.id])
+              for a in day.activities if plan.route and (a.lat is not None and city_of(plan.route, a) != day.city)]
+    if (arriving := plan.moving_day(day)) and len(day.activities) > MOVING_DAY_STOPS:
+        issues.append(Issue(problem=f"Day {day.day_number} is a moving day to {arriving.name} with "
+                                    f"{len(day.activities)} stops", where=[day.id],
+                            suggestion=f"keep it to {MOVING_DAY_STOPS} stops or fewer: remove or move one"))
+    return issues
+
+
 def _readable(text: str, plan: Itinerary) -> str:
     """The traveler reads this, so ids become names."""
     names = {a.id: a.name for d in plan.days for a in d.activities}
     names |= {d.id: f"day {d.day_number}" for d in plan.days}
-    names[STAY_ID] = plan.stay.name if plan.stay else "the stay"
+    names |= {sid: stay.name if stay else f"the stay in {city}" if city else "the stay"
+              for sid, stay, city in plan.stay_slots()}
     ids = "|".join(map(re.escape, names))
     return re.sub(rf"\[?\b({ids})\b\]?", lambda m: names[m[1]], text)
 
@@ -169,10 +185,15 @@ class ItineraryCritiqueService:
                 issues.append(Issue(problem=f"Day {day.day_number} has only one stop", where=[day.id]))
             if day.id in touched:
                 issues += _meal_only(day, known, scope)
+                issues += _route_issues(plan, day)
                 if issue := _timing(plan, day, known, visits or {}):
                     issues.append(issue)
-        if days and days > 1 and not plan.stay and any(p.category == PickCategory.STAY for p in places):
-            issues.append(Issue(problem="This plan has no place to stay", where=[STAY_ID]))
+        for sid, stay, city in plan.stay_slots():
+            if stay or not days or (days < 2 and not city):
+                continue
+            if any(p.category == PickCategory.STAY and (not city or city_of(plan.route, p) == city) for p in places):
+                issues.append(Issue(problem=f"This plan has no place to stay{f' in {city}' if city else ''}",
+                                    where=[sid]))
         return issues
 
     @staticmethod
