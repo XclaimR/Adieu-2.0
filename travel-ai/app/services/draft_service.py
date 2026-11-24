@@ -417,7 +417,7 @@ Rules:
                     visits |= again.visit_minutes
                     if again.issues or len(ItineraryCritiqueService.counted(fixed, places, days, scope, visits)) > \
                             len(ItineraryCritiqueService.counted(plan, places, days, scope, visits)):
-                        logger.info("Repair failed its re-check: %s", [x.problem for x in again.issues])
+                        logger.warning("Repair undone, its re-check found: %s", [x.problem for x in again.issues])
                         fixed = plan
             except Exception:
                 logger.exception("The repair or its re-check failed")
