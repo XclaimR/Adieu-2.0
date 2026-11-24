@@ -15,13 +15,13 @@ class TripModel(Base):
     title: Mapped[str] = mapped_column(String, nullable=False, default="New trip")
     # Serialized app.schemas.trip_profile.TripProfile
     profile: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
-    # Resolved destination: {place_id, name, formatted_address, viewport, photo_name}
+    # Resolved destination: {place_id, name, formatted_address, viewport (with "id" since open data), kind, ...}
     destination_area: Mapped[dict | None] = mapped_column(JSON)
     # The last OptionSet shown in the panel (for "Last options").
     panel: Mapped[dict | None] = mapped_column(JSON)
     # Draft itineraries offered to the user: [Draft, ...]
     drafts: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
-    # Conversation bookkeeping: {questions_streak, asked_fields, answer_options, no_plans}
+    # Conversation bookkeeping: {questions_streak, asked_fields, answer_options, no_plans, before_reset}
     state: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     next_question: Mapped[str | None] = mapped_column(Text)
     itinerary: Mapped[dict | None] = mapped_column(JSON)

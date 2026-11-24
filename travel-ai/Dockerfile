@@ -6,7 +6,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt \
+    && python -c "import duckdb; duckdb.connect().execute('INSTALL httpfs')"  # reads Overture's files over HTTPS
 
 COPY alembic.ini pytest.ini ./
 COPY migrations ./migrations

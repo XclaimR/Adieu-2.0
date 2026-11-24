@@ -24,7 +24,6 @@ class Settings:
     # Set to empty to omit the parameter for providers that don't accept it.
     LLM_REASONING_EFFORT = os.getenv("LLM_REASONING_EFFORT", "none")
 
-    GOOGLE_PLACES_API_KEY = os.getenv("GOOGLE_PLACES_API_KEY")
     GOOGLE_OAUTH_CLIENT_ID = os.getenv("GOOGLE_OAUTH_CLIENT_ID")
 
     SESSION_SECRET = os.getenv("SESSION_SECRET", "dev-only-change-me")
@@ -38,8 +37,6 @@ class Settings:
         for o in os.getenv("CORS_ORIGINS", "http://localhost:5173").split(",")
         if o.strip()
     ]
-
-    PLACES_CACHE_TTL_HOURS = int(os.getenv("PLACES_CACHE_TTL_HOURS", "168"))
 
 
 settings = Settings()

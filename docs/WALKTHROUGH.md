@@ -1,6 +1,6 @@
 # Adieu code walkthrough
 
-How a click in the browser reaches the database, Google Places and the LLM — feature by feature.
+How a click in the browser reaches the database, the open place data and the LLM — feature by feature.
 
 ## Folders
 
@@ -14,13 +14,28 @@ How a click in the browser reaches the database, Google Places and the LLM — f
 
 ```
 browser ──► nginx (travel-ai-web, :8080) ──/api/*──► FastAPI (travel-ai, :8000) ──► Postgres (:5433)
-                │ serves the built React app                 ├──► Google Places API (search, photos)
+                │ serves the built React app                 ├──► open place data, once per destination:
+                                                             │    Wikidata, Wikivoyage, Commons (Wikimedia APIs, 1 req/s)
+                                                             │    Overture Maps Parquet files on S3 (DuckDB)
                                                              └──► LLM via OpenAI-compatible API (Ollama qwen3:8b on the host)
 ```
 
 - nginx strips `/api` and forwards to the API container (`travel-ai-web/nginx.conf`).
 - Every LLM call goes through `LLMClient.generate_structured` (`travel-ai/app/services/llm_client.py`): it asks for JSON matching a Pydantic schema, retries once on invalid JSON, and once on timeouts/connection errors.
-- Every Places call goes through `PlacesService` (`app/services/places_service.py`), which caches results in the `place_cache` table (searches 7 days, photo URLs 12 hours, home ideas 24 hours).
+- Every place lookup goes through `PlacesService` (`app/services/places_service.py`). It keeps each destination in
+  the `place_cache` table: its area (`open:area:<id>`, 180 days) and its library of places (`open:places:<id>`,
+  90 days, an hour if a source was down). A normal turn reads only Postgres.
+  - `gazetteer.py`: destination name → area. Countries from `app/data/countries.tsv` (offline); anything else from
+    Wikidata (search, then coordinates, extreme points or size). Never a business. "Georgia, USA" and a saved trip's
+    box narrow ambiguous names.
+  - `wikivoyage.py`: the destination's guide, its district pages and guides in reach → described places (see / do /
+    eat / drink / sleep listings; stay tiers from Budget / Mid-range / Splurge headings) and the main towns.
+    `open_data.safe_text` turns downloaded text into one short plain line; sentences with prices or hours are dropped.
+  - `overture.py`: places by bounding box from Overture's files, the whole area when small, else around the main towns.
+  - `place_library.py`: merges both (a described place takes Overture's position and type), caps 450 / 300 / 170.
+  - Choosing (`PlacesService.candidates`): words from the query, the notes and the mood; "near Alfama" sorts by
+    distance; big areas take turns between their main towns. `FACTS_RULE` and `unclaimed()` keep the model from
+    claiming crowds, prices, ratings or opening times the data doesn't state.
 
 ## Backend layers (`travel-ai/app/`)
 
@@ -29,7 +44,7 @@ browser ──► nginx (travel-ai-web, :8080) ──/api/*──► FastAPI (tr
 | Entry | `main.py` | Creates the app, CORS, mounts routers, turns LLM errors into friendly messages |
 | API routes | `api/auth.py`, `api/me.py`, `api/trips.py`, `api/deps.py` | HTTP endpoints; `deps.current_user` checks the bearer token |
 | Workflow | `workflows/travel_planner_workflow.py` | The brain of a trip: one chat turn, choosing drafts, likes/skips, swaps |
-| Services | `services/*.py` (live ones listed below) | One job each: LLM prompts, Places, ranking, drafts |
+| Services | `services/*.py` (live ones listed below) | One job each: LLM prompts, place data, ranking, drafts |
 | Repositories | `repositories/trip_repository.py`, `user_repository.py` | All database reads/writes |
 | Models | `database/models/trip.py`, `user.py`, `place_cache.py` | SQLAlchemy tables: users, trips, messages, pick_feedback, place_cache |
 | Schemas | `schemas/*.py` | Pydantic shapes for API bodies and LLM outputs |
@@ -51,15 +66,19 @@ Every later request sends it as `Authorization: Bearer …`, checked by `api/dep
 ### Home
 `screens/Home.tsx`
 - Trip list: `GET /trips` → `TripRepository.list_for_user` (title = chosen plan's name, length, destination photo).
-- Ideas for you: `GET /starter-ideas` → `api/me.starter_ideas` (24h cache) → `StarterIdeaService.generate` (LLM suggests trips from your taste, then Places verifies each destination and adds a photo).
+- Ideas for you: `GET /starter-ideas` → `api/me.starter_ideas` (24h cache) → `StarterIdeaService.generate` (LLM suggests countries from your taste; the offline country table drops anything else, and repeats).
 - "Plan it" / "Surprise me" / idea card: `POST /trips` creates an empty trip, then the Trip screen sends what you typed as the first message.
 
 ### A chat turn (the core loop)
 `screens/Trip.tsx:send` → `api.ts:sendStream` → `POST /trips/{id}/messages/stream` (streams NDJSON events) →
 `TravelPlannerWorkflow.run_turn`:
+
+"reset" or "start over" as the whole message never reaches the model: the workflow asks "Are you sure?" and deletes
+only on a clear yes while that is the current question. A no brings back the question from before. Otherwise:
 1. `TurnService.decide` — LLM reads the message + history and returns a `TurnDecision` (core facts, note changes, reply, intent). Its schema only allows note targets that exist on this trip.
 2. `TripProfileService.merge` + `grounding.ground_updates` — keeps only facts the user actually said (e.g. `extract_duration` turns "a slow week" into 7 days).
-3. New destination? `PlacesService.resolve_destination` checks it's a real place (not a business) and stores its map area.
+3. New destination? `PlacesService.resolve_destination` checks it's a real place (not a business) and stores its map
+   area, with the area's id inside the saved box. Its places are loaded the first time plans or options need them (15-30 s).
    Then `PersonalityService.update` refreshes the trip's **personality** (`trips.personality`). It is about this
    trip only: lasting taste is not read or written during a trip (it still feeds the Home ideas).
    - **Notes** are everything the traveler said beyond the core facts. Each is stored once and points at what it
@@ -73,13 +92,13 @@ Every later request sends it as `Authorization: Bearer …`, checked by `api/dep
    Live check: `python -m tests.evals.run_personality_evals` (17 messages, one call each).
 4. `TurnService.plan` — rules decide what happens next: ask a question, show options, offer drafts, or edit the itinerary.
 5. The reply is streamed and **saved immediately**, then the slow part runs:
-   - Show options → `OptionsService.build` → Places search in the destination → `RankingService` (LLM ranks by the trip's notes) → slide-in panel (`components/OptionsPanel.tsx`, `PickCard.tsx`).
-   - Offer drafts → `DraftService.generate` → one Places pool, then one LLM call per flavor (easy / classic / local) → `DraftService.review` → `DraftCard.tsx`, all three together once reviewed.
+   - Show options → `OptionsService.build` → the destination's places (`PlacesService.candidates`) → `RankingService` (LLM ranks by the trip's notes) → slide-in panel (`components/OptionsPanel.tsx`, `PickCard.tsx`).
+   - Offer drafts → `DraftService.generate` → one pool of places (name, type, area, description), then one LLM call per flavor (easy / classic / local) → `DraftService.review` → `DraftCard.tsx`, all three together once reviewed.
      Until the reviewed drafts arrive the reply is only "Let me put some plans together"; then a second `reply` event replaces it
      with the model's words and "Here are 3 ways". With no draft (too few places, so no LLM call; place data or the LLM
      unavailable; all drafts rejected) the reply and the panel say why, from `trip.state.no_plans`.
-   - A pin-sized map area (natural features like Ari Atoll can come as one) is widened to about 1° when searched
-     (`places_service._search_area`); the saved area stays as it was resolved.
+   - Every destination has a real area (atolls and mountain ranges too). Trips saved with Google's area, which could
+     be a 300 m box around a pin, are looked up again by name near that box.
    - Edit itinerary → `DraftService.edit`: the model gets the changed part with its notes and returns edit
      operations (replace / remove / add / move); code applies them and leaves everything else untouched.
      `LLM_MODEL_PLAN` can name a stronger model for drafts, edits and their review (default: `LLM_MODEL`).
@@ -112,7 +131,10 @@ Events the browser handles: `progress` (step list), `reply`, `note`, `options`, 
 | Picking a replacement in the panel | `…/activities/{i}/replace` | `replace_activity` |
 
 ### Photos
-`api.ts:photoUrl` → `GET /photos/{places/…/photos/…}` (no login, so `<img>` works) → `PlacesService.photo_url` (strict name check) → redirect to Google's short-lived image URL. The API key never reaches the browser.
+`components/Photo.tsx` → `GET /photos/commons/<id>` (no login, so `<img>` works) → `PlacesService.photo` → redirect to
+the Wikimedia Commons image. `GET /photo-credits/…` gives the author and licence shown on the photo. Only openly
+licensed photos (no NC/ND) are kept. Photos saved from Google answer 404 and show the placeholder.
+Credits for all sources are under "Data credits" at the bottom of every page.
 
 ## Frontend map (`travel-ai-web/src/`)
 
@@ -126,7 +148,7 @@ Events the browser handles: `progress` (step list), `reply`, `note`, `options`, 
 | `styles.css` | All styling; colors are tokens at the top (`--ink`, `--accent`, `--primary`, …) |
 
 ## Tests (`travel-ai/tests/`)
-- `tests/v1/` — the live code: API flows with a fake LLM and fake Places (`conftest.py`), grounding, ranking, photo-name safety.
+- `tests/v1/` — the live code: API flows with a fake LLM and fake open data (`conftest.py`), grounding, ranking, parsing and merging the open data (`test_open_data.py`).
   Run: `docker compose exec api python -m pytest -q --ignore=tests/evals`
 - `tests/evals/` — real-model conversation checks: `docker compose exec api python -m tests.evals.run_turn_evals`
 - `tests/personas/` — six test travelers (bachelor group to Japan, Lisbon food couple, family beach, solo hiker,

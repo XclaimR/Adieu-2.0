@@ -20,5 +20,6 @@ class Activity(BaseModel):
     # Where it is, for travel times. None on plans saved before this.
     lat: float | None = None
     lng: float | None = None
+    source_url: str | None = None
     # The traveler's words this stop fulfils, e.g. "one big night out for my birthday".
     for_note: str | None = None

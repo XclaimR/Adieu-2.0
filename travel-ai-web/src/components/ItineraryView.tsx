@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { photoUrl } from "../api";
+import Photo, { Credit } from "./Photo";
 import type { Itinerary, Note } from "../types";
 import NoteList from "./NoteList";
 
@@ -14,7 +14,6 @@ type Props = {
 /** The chosen plan as a day-by-day timeline. Tap an activity to swap or remove it. */
 export default function ItineraryView({ itinerary, notes, busy, onSwap, onRemove }: Props) {
   const [selected, setSelected] = useState<string | null>(null);
-  const stayPhoto = photoUrl(itinerary.stay?.photo_name ?? null);
 
   return (
     <div className="timeline">
@@ -25,16 +24,24 @@ export default function ItineraryView({ itinerary, notes, busy, onSwap, onRemove
 
       {itinerary.stay && (
         <section className="stay-card">
-          {stayPhoto && <img src={stayPhoto} alt="" />}
+          {itinerary.stay.photo_name && <Photo name={itinerary.stay.photo_name} fallback="🛏" />}
           <div>
             <span className="muted small">Where you'll stay</span>
             <strong>{itinerary.stay.name}</strong>
             <NoteList notes={notes} target="s1" />
-            {itinerary.stay.maps_url && (
-              <a className="small" href={itinerary.stay.maps_url} target="_blank" rel="noreferrer">
-                Map ↗
-              </a>
-            )}
+            <span className="links small">
+              {itinerary.stay.maps_url && (
+                <a href={itinerary.stay.maps_url} target="_blank" rel="noreferrer">
+                  Map ↗
+                </a>
+              )}
+              {itinerary.stay.source_url && (
+                <a href={itinerary.stay.source_url} target="_blank" rel="noreferrer">
+                  Wikivoyage ↗
+                </a>
+              )}
+              <Credit name={itinerary.stay.photo_name} />
+            </span>
           </div>
         </section>
       )}
@@ -49,11 +56,12 @@ export default function ItineraryView({ itinerary, notes, busy, onSwap, onRemove
           <ol>
             {day.activities.map((a, i) => {
               const key = `${day.day_number}-${i}`;
-              const photo = photoUrl(a.photo_name);
               return (
                 <li key={key} className={selected === key ? "selected" : ""}>
                   <button className="activity" onClick={() => setSelected(selected === key ? null : key)}>
-                    {photo ? <img src={photo} alt="" loading="lazy" /> : <span className="thumb">📍</span>}
+                    <span className="thumb">
+                      <Photo name={a.photo_name} fallback="📍" />
+                    </span>
                     <span className="activity-text">
                       {a.time_of_day && <span className="tod">{a.time_of_day}</span>}
                       <strong>{a.name}</strong>
@@ -82,6 +90,12 @@ export default function ItineraryView({ itinerary, notes, busy, onSwap, onRemove
                           Map ↗
                         </a>
                       )}
+                      {a.source_url && (
+                        <a className="small" href={a.source_url} target="_blank" rel="noreferrer">
+                          Wikivoyage ↗
+                        </a>
+                      )}
+                      <Credit name={a.photo_name} />
                     </div>
                   )}
                 </li>

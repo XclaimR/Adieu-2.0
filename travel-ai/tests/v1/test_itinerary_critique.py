@@ -342,9 +342,9 @@ def test_the_review_makes_no_places_calls_of_its_own(client, auth, fake_llm, fak
     real = DraftService.review
 
     def counting(self, *args):
-        before = len(fake_places.bodies)
+        before = len(fake_places.loads) + len(fake_places.resolved)
         result = real(self, *args)
-        searched.append(len(fake_places.bodies) - before)
+        searched.append(len(fake_places.loads) + len(fake_places.resolved) - before)
         return result
 
     monkeypatch.setattr(DraftService, "review", counting)
