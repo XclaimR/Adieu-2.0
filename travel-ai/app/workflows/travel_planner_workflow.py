@@ -1,5 +1,6 @@
 import logging
 import re
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from collections.abc import Iterator
 
 import httpx
@@ -38,6 +39,7 @@ DRAFT_COUNT = 3
 PLANS_READY = f"Here are {DRAFT_COUNT} ways your trip could look — pick the one that feels right."
 # A source that is out for the day says "per day" or "PerDay": trying again right away can't work.
 _DAILY_LIMIT = re.compile(r"per ?day", re.I)
+UNCHECKED = "I couldn't double-check this, so give it a look."
 
 Event = dict
 
@@ -212,15 +214,18 @@ class TravelPlannerWorkflow:
             elif plan.action == TurnAction.EDIT_ITINERARY:
                 yield _progress("Updating your plan…")
                 changing = TurnService.to_change(decision)
-                updated = self.drafter.edit(itinerary, changing, decision.edit_request or shown_message, new_profile,
-                                            self._viewport(trip), self._skipped(trip), personality)
+                updated, warnings, checked = self.drafter.edit(itinerary, changing, decision.edit_request or shown_message, new_profile,
+                                                               self._viewport(trip), self._skipped(trip), personality)
+                extras = [f"Worth a look: {w.rstrip('.')}." for w in warnings] + ([] if checked else [UNCHECKED])
                 if updated == itinerary:
-                    extra = "I left the plan as it is: I found nothing that needed changing or fitted better."
-                    answer.content = f"{reply} {extra}" + (f"\n\n{plan.next_question}" if plan.next_question else "")
-                    yield {"type": "note", "text": extra}
+                    extras.insert(0, "I left the plan as it is: I found nothing that needed changing or fitted better.")
                 else:
                     trip.itinerary = updated.model_dump(mode="json")
                     self._keep_notes_attached(trip, personality, itinerary, updated)
+                if extras:
+                    extra = " ".join(extras)
+                    answer.content = f"{reply} {extra}" + (f"\n\n{plan.next_question}" if plan.next_question else "")
+                    yield {"type": "note", "text": extra}
         except PlacesUnavailableError as e:
             logger.warning("Places unavailable: %s", e)
             extra = " (I couldn't reach the places service just now.)"
@@ -298,28 +303,60 @@ class TravelPlannerWorkflow:
                       answer: MessageModel, reply_with_plans: str) -> Iterator[Event]:
         yield _progress(f"Gathering places in {profile.destination}…")
         trip.drafts = []
+        viewport, skipped = self._viewport(trip), self._skipped(trip)
+        # Each plan is reviewed in its own thread while the next is written, and shown once its review is done.
+        checks = ThreadPoolExecutor(max_workers=DRAFT_COUNT)
+        reviews: list[Future] = []
+        places = None
         try:
-            for i, draft in enumerate(self.drafter.generate(profile, self._viewport(trip), self._skipped(trip), personality)):
-                trip.drafts = [*trip.drafts, draft.model_dump(mode="json")]
-                if i == 0:
-                    answer.content = reply_with_plans
-                self.db.commit()
-                if i == 0:
-                    yield _reply(reply_with_plans)  # replaces the one shown while we worked
-                yield {"type": "draft", "index": i, "draft": trip.drafts[-1]}
-                if i + 1 < DRAFT_COUNT:
-                    yield _progress(f"Drafting plan {i + 2} of {DRAFT_COUNT}…")
-        except Exception as e:
-            if trip.drafts:
-                raise
-            logger.warning("No plans for %s: %r", profile.destination, e, exc_info=True)
-            no_plans = _why_no_plans(e, profile.destination)
-            self.db.refresh(trip)  # an older draft may have been chosen while we worked
-            trip.drafts = []
-            trip.state = {**(trip.state or {}), "no_plans": no_plans.model_dump()}
-            answer.content = f"{answer.content} {no_plans.reason}"
+            try:
+                for draft in self.drafter.generate(profile, viewport, skipped, personality):
+                    if places is None:
+                        places = self._review_places(profile, viewport, skipped, personality)
+                    reviews.append(checks.submit(self.drafter.review, draft, places, profile, personality))
+                    yield from self._show_reviewed(trip, reviews, answer, reply_with_plans, wait=False)
+                    if len(trip.drafts) + len(reviews) < DRAFT_COUNT:
+                        yield _progress(f"Drafting plan {len(trip.drafts) + len(reviews) + 1} of {DRAFT_COUNT}…")
+            except Exception as e:
+                if not reviews and not trip.drafts:
+                    logger.warning("No plans for %s: %r", profile.destination, e, exc_info=True)
+                    no_plans = _why_no_plans(e, profile.destination)
+                    self.db.refresh(trip)  # an older draft may have been chosen while we worked
+                    trip.drafts = []
+                    trip.state = {**(trip.state or {}), "no_plans": no_plans.model_dump()}
+                    answer.content = f"{answer.content} {no_plans.reason}"
+                    self.db.commit()
+                    yield {"type": "note", "text": no_plans.reason}
+                    return
+                logger.exception("Drafting stopped early; showing the plans already written")
+            if reviews:
+                yield _progress("Checking your plans…")
+            yield from self._show_reviewed(trip, reviews, answer, reply_with_plans, wait=True)
+        finally:
+            checks.shutdown(wait=False, cancel_futures=True)  # a closed stream doesn't wait for the model
+
+    def _review_places(self, profile: TripProfile, viewport: dict | None, skipped: set[str],
+                       personality: Personality) -> list:
+        try:
+            return self.drafter.pool(profile, viewport, skipped, personality).places  # cached by generate
+        except Exception:
+            logger.exception("No places for the review; it judges without them")
+            return []
+
+    def _show_reviewed(self, trip: TripModel, reviews: list[Future], answer: MessageModel, reply: str,
+                       wait: bool) -> Iterator[Event]:
+        """Shows reviewed plans as they finish: all that are done, or with `wait` every one left."""
+        for future in as_completed(list(reviews)) if wait else [f for f in reviews if f.done()]:
+            reviews.remove(future)
+            # Saved before it is shown: choosing a plan closes the stream.
+            trip.drafts = [*trip.drafts, future.result().model_dump(mode="json")]
+            first = len(trip.drafts) == 1
+            if first:
+                answer.content = reply
             self.db.commit()
-            yield {"type": "note", "text": no_plans.reason}
+            if first:
+                yield _reply(reply)  # replaces the one shown while we worked
+            yield {"type": "draft", "index": len(trip.drafts) - 1, "draft": trip.drafts[-1]}
 
     # ---------- actions ----------
 
@@ -412,6 +449,7 @@ class TravelPlannerWorkflow:
         day.activities[index] = old.model_copy(update={
             "name": pick.name, "category": pick.category.value, "description": pick.why,
             "place_id": pick.place_id, "photo_name": pick.photo_name, "maps_url": pick.maps_url,
+            "lat": pick.lat, "lng": pick.lng,
             "source_url": pick.source_url,
             "for_note": None,  # the replacement wasn't chosen for that moment
         })

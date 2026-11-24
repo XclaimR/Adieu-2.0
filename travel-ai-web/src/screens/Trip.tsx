@@ -148,6 +148,8 @@ export default function TripScreen({ tripId, firstMessage }: { tripId: string; f
         if (ev.type === "progress" && ev.text.startsWith("Gathering places")) {
           setDrafting(true);
           setDraftingSince(Date.now());
+          // The server replaces the old plans, and the new ones only arrive once reviewed.
+          setTrip((t) => t && { ...t, drafts: [] });
           openPanel({ view: "drafts" });
         }
       });
@@ -256,7 +258,7 @@ export default function TripScreen({ tripId, firstMessage }: { tripId: string; f
             <DraftSkeleton
               key={i}
               since={draftingSince}
-              label={`Drafting plan ${trip.drafts.length + i + 1} of ${DRAFT_COUNT} from real places…`}
+              label={`Writing and checking plan ${trip.drafts.length + i + 1} of ${DRAFT_COUNT}…`}
             />
           ))}
       </div>

@@ -87,6 +87,7 @@ export type Draft = {
   photo_name: string | null;
   trait: string | null;
   unplanned: string[];
+  warnings: string[];
   itinerary: Itinerary;
 };
 

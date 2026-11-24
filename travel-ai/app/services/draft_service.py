@@ -12,9 +12,11 @@ from app.schemas.activity import Activity
 from app.schemas.dayplan import DayPlan
 from app.schemas.draft import Draft
 from app.schemas.itinerary import STAY_ID, Itinerary
+from app.schemas.itinerary_critique import Issue, ItineraryCritique
 from app.schemas.personality import Note, NoteChange, Personality
 from app.schemas.place import Pick, PickCategory, PlaceCandidate
 from app.schemas.trip_profile import TripProfile
+from app.services.itinerary_critique_service import REVIEW_TIMEOUT, ItineraryCritiqueService, plan_facts
 from app.services.llm_client import LLMClient
 from app.services.personality_service import PersonalityService
 from app.services.places_service import FACTS_RULE, PlacesService, tier_rank, traveler_fit, unclaimed
@@ -160,6 +162,8 @@ class PlacePool:
                     place_id=place.place_id,
                     photo_name=place.photo_name,
                     maps_url=place.maps_url,
+                    lat=place.lat,
+                    lng=place.lng,
                     source_url=place.source_url,
                 ))
             if activities:
@@ -176,6 +180,18 @@ class PlacePool:
 
 def fulfilled(itinerary: Itinerary) -> set[str]:
     return {a.for_note for d in itinerary.days for a in d.activities if a.for_note}
+
+
+def _changed(before: Itinerary, after: Itinerary) -> set[str]:
+    """Ids of the stops, days and stay that differ, including what is gone."""
+    def parts(plan: Itinerary) -> dict:
+        items = {a.id: (d.id, a) for d in plan.days for a in d.activities}
+        return {STAY_ID: plan.stay, **{d.id: d.activities for d in plan.days}, **items}
+    was, now = parts(before), parts(after)
+    return {key for key in was.keys() | now.keys() if was.get(key) != now.get(key)}
+
+
+UNREVIEWED = "I couldn't double-check this plan."
 
 
 class DraftService:
@@ -265,8 +281,10 @@ Rules:
             raise NoUsableDraftError(f"No draft for {profile.destination}") from failure
 
     def edit(self, itinerary: Itinerary, changes: list[NoteChange], request: str, profile: TripProfile,
-             viewport: dict | None, exclude_ids: set[str], personality: Personality) -> Itinerary:
-        """Change only what the changes point at. The model returns operations; code copies everything else."""
+             viewport: dict | None, exclude_ids: set[str],
+             personality: Personality) -> tuple[Itinerary, list[str], bool]:
+        """Change only what the changes point at. The model returns operations; code copies everything else.
+        Returns the plan, what the review couldn't fix, and whether the review worked."""
         plan = itinerary.model_copy(deep=True)
         before = len(plan.days)
         wanted = min(profile.duration_days or before, MAX_DAYS)
@@ -289,7 +307,7 @@ Rules:
 
         places = self._edit_candidates(plan, changes, editable, add_to, profile, viewport, exclude_ids, personality)
         if not editable and not add_to:
-            return plan
+            return plan, [], True
         edit = create_model(
             "PlanEdit", __base__=PlanEdit,
             item_id=(Literal[tuple(sorted(editable))] | None if editable else str | None, None),
@@ -332,8 +350,160 @@ Rules:
 """
         result = LLMClient.generate_structured(prompt, schema, model=settings.LLM_MODEL_PLAN)
         self._apply_edits(plan, result.edits, places, editable, add_to, move_to)
-        plan.days = [d for d in plan.days if d.activities or d not in new_days]
-        return plan
+
+        # Only what this edit changed is reviewed; the rest of the plan is the traveler's.
+        new_ids = {d.id for d in new_days}
+        present = {a.id for d in plan.days for a in d.activities} | ({STAY_ID} if plan.stay else set())
+        scope = (_changed(itinerary, plan) & present) | new_ids
+        warnings, checked = [], True
+        if scope:
+            try:
+                plan, warnings, checked = self._check_and_fix(
+                    plan, list(places.values()), profile, personality, scope=scope, request=request)
+            except Exception:
+                logger.exception("Couldn't review the edit")
+                checked = False
+        plan.days = [d for d in plan.days if d.activities or d.id not in new_ids]
+        return plan, warnings, checked
+
+    def review(self, draft: Draft, places: list[PlaceCandidate], profile: TripProfile,
+               personality: Personality | None = None) -> Draft:
+        """The draft with its errors fixed or listed. Never raises, so a draft is never lost.
+        Safe to run in a thread: it only calls the model."""
+        try:
+            days = min(profile.duration_days or DEFAULT_DAYS, MAX_DAYS)
+            plan = draft.itinerary.model_copy(update={"days": draft.itinerary.days[:days]}, deep=True)
+            plan, warnings, checked = self._check_and_fix(plan, places, profile, personality, days=days)
+        except Exception:
+            logger.exception("Couldn't review a draft")
+            plan, warnings, checked = draft.itinerary, [], False
+        moments = PersonalityService.moments(personality)
+        return draft.model_copy(update={
+            "itinerary": plan,
+            "warnings": warnings + ([] if checked else [UNREVIEWED]),
+            "photo_name": next((a.photo_name for d in plan.days for a in d.activities if a.photo_name), None),
+            "unplanned": [m for m in moments if m not in fulfilled(plan)],
+        })
+
+    def _check_and_fix(self, plan: Itinerary, places: list[PlaceCandidate], profile: TripProfile,
+                       personality: Personality | None, days: int | None = None, scope: set[str] | None = None,
+                       request: str = "") -> tuple[Itinerary, list[str], bool]:
+        """Review, at most one repair, and one re-check of what the repair changed.
+        `days` is set for drafts, `scope` for an edit. Returns the plan, what is still wrong, and if the review worked."""
+        try:
+            critique = ItineraryCritiqueService.critique(plan, profile, personality, places, scope, request)
+            checked = True
+        except Exception:
+            logger.exception("The critic failed")
+            critique, checked = ItineraryCritique(), False
+
+        # Missing days are added only now, so the critic judges the plan and not our count.
+        plan = plan.model_copy(deep=True)
+        if days:
+            plan.days += [DayPlan(day_number=n, activities=[]) for n in range(len(plan.days) + 1, days + 1)]
+        visits = dict(critique.visit_minutes)
+        issues = ItineraryCritiqueService.counted(plan, places, days, scope, visits) + critique.issues
+
+        fixed = plan
+        if checked and issues:  # a model that just failed won't repair either
+            try:
+                edits = self._repairs(plan, issues, places, profile, personality, scope, request)
+                fixed = self._repaired(plan, issues, edits, places, days, scope, visits)
+                present = {a.id for d in fixed.days for a in d.activities} | ({STAY_ID} if fixed.stay else set())
+                if redo := _changed(plan, fixed) & present:
+                    # A repair is the model's own guess too: check just what it changed, once. No loop: fixes can
+                    # chase each other, and every round is another 3-50 s.
+                    again = ItineraryCritiqueService.critique(fixed, profile, personality, places, redo, request)
+                    visits |= again.visit_minutes
+                    if again.issues or len(ItineraryCritiqueService.counted(fixed, places, days, scope, visits)) > \
+                            len(ItineraryCritiqueService.counted(plan, places, days, scope, visits)):
+                        logger.warning("Repair undone, its re-check found: %s", [x.problem for x in again.issues])
+                        fixed = plan
+            except Exception:
+                logger.exception("The repair or its re-check failed")
+                fixed = plan
+
+        changed = _changed(plan, fixed)
+        added = {a.id for d in fixed.days for a in d.activities} - {a.id for d in plan.days for a in d.activities}
+        unfixed = [x.problem for x in critique.issues if not (changed & set(x.where) if x.where else added)]
+        if days:
+            fixed.days = [d for d in fixed.days if d.activities]
+            for number, day in enumerate(fixed.days, 1):
+                day.day_number = number
+        counted = [x.problem for x in ItineraryCritiqueService.counted(
+            fixed, places, days, scope and scope | changed, visits)]
+        return fixed, list(dict.fromkeys(counted + unfixed)), checked
+
+    @staticmethod
+    def _repairs(plan: Itinerary, issues: list[Issue], places: list[PlaceCandidate], profile: TripProfile,
+                 personality: Personality | None, scope: set[str] | None, request: str) -> list[PlanEdit]:
+        found = "\n".join(f"- {x.problem} (at {', '.join(x.where) or 'the whole plan'})"
+                          + (f". Suggested: {x.suggestion}" if x.suggestion else "") for x in issues)
+        listing = "\n".join(
+            f"[c{i}] " + " · ".join(b for b in (p.name, p.category.value, p.type_label, p.price_level
+                                               or (p.tier and f"est. {p.tier} price"), p.address,
+                                               p.lat is not None and f"at {p.lat:.3f},{p.lng:.3f}") if b)
+            for i, p in enumerate(places))
+        asked = "" if scope is None else (
+            f'- The traveler just asked: "{request}". Keep what they asked for, and never remove a stop.')
+        prompt = f"""
+A reviewer found errors in a trip plan for {profile.destination}. Fix them before the traveler sees it.
+
+What we know about the traveler:
+{profile.model_dump_json(exclude_none=True, exclude={"preferences"})}
+{traveler_fit(profile, personality)}
+
+The plan:
+{PersonalityService.plan_view(plan, personality)}
+Facts about these places:
+{plan_facts(plan, places)}
+
+What the reviewer found:
+{found}
+
+Places you may use:
+{listing}
+
+Rules:
+- Return the fewest edits that fix what the reviewer found. Change nothing else.
+- Use only listed places, and none that the plan already has. Give each new place a note.
+- For a day with too much travel or too little time, use places close by (see "at lat,lng") or quicker ones,
+  remove a stop, or move one to a day or time with room.
+- An empty day needs 2-3 stops added. A stay is replaced at item_id {STAY_ID}, and is never an activity.
+- Never choose a place that breaks a stated must or avoid.
+- A new place must suit its slot's time of day and who is going: no night club in the morning, no zoo for a stag party.
+- If nothing listed fixes an error, return no edit for it.
+{asked}
+"""
+        schema = create_model("PlanFixes", edits=(list[PlanEdit], ...))
+        return LLMClient.generate_structured(prompt, schema, model=settings.LLM_MODEL_PLAN, timeout=REVIEW_TIMEOUT).edits
+
+    def _repaired(self, plan: Itinerary, issues: list[Issue], edits: list[PlanEdit], places: list[PlaceCandidate],
+                  days: int | None, scope: set[str] | None, visits: dict[str, int]) -> Itinerary:
+        """The repair applied to just what was flagged, or the plan as it was if that makes it worse."""
+        where = {w for issue in issues for w in issue.where}
+        day_ids = {d.id for d in plan.days}
+        editable = (where - day_ids) | {a.id for d in plan.days if d.id in where for a in d.activities}
+        add_to = where & day_ids
+        if scope is not None:
+            editable &= scope
+            edits = [e for e in edits if e.op != "remove"]  # it could undo what the traveler just asked for
+        elif any(not issue.where for issue in issues):
+            add_to = day_ids  # something is missing from the whole plan
+        move_to = day_ids if scope is None else add_to
+
+        used = {a.place_id for d in plan.days for a in d.activities} | ({plan.stay.place_id} if plan.stay else set())
+        free = {f"c{i}": p for i, p in enumerate(places) if p.place_id not in used}
+        # These ids aren't enums in the schema, so models sometimes copy the brackets.
+        edits = [e.model_copy(update={k: v.strip("[] ") for k in ("item_id", "day_id", "place") if (v := getattr(e, k))})
+                 for e in edits]
+        fixed = plan.model_copy(deep=True)
+        self._apply_edits(fixed, edits, free, editable, add_to, move_to)
+
+        emptied = any(was.activities and not now.activities for was, now in zip(plan.days, fixed.days))
+        def errors(p: Itinerary) -> int:
+            return len(ItineraryCritiqueService.counted(p, places, days, scope, visits))
+        return plan if emptied or errors(fixed) > errors(plan) else fixed
 
     def _edit_candidates(self, plan: Itinerary, changes: list[NoteChange], editable: set[str], add_to: set[str],
                          profile: TripProfile, viewport: dict | None, exclude_ids: set[str],
@@ -385,7 +555,8 @@ Rules:
                     day.activities.append(Activity(
                         name=place.name, category=place.category.value, time_of_day=e.time_of_day,
                         description=unclaimed(e.note, place.summary), place_id=place.place_id,
-                        photo_name=place.photo_name, maps_url=place.maps_url, source_url=place.source_url))
+                        photo_name=place.photo_name, maps_url=place.maps_url, source_url=place.source_url,
+                        lat=place.lat, lng=place.lng))
                     used.add(place.place_id)
                     touched[day.id] = day
                 continue
@@ -398,6 +569,7 @@ Rules:
                 item.name, item.category = place.name, place.category.value
                 item.description = unclaimed(e.note, place.summary)
                 item.place_id, item.photo_name, item.maps_url = place.place_id, place.photo_name, place.maps_url
+                item.lat, item.lng = place.lat, place.lng
                 item.source_url = place.source_url
                 item.time_of_day = e.time_of_day or item.time_of_day
                 used.add(place.place_id)
@@ -438,7 +610,8 @@ Rules:
 
         activity = Activity(name=pick.name, category=pick.category.value, time_of_day=None,
                             description=pick.why, place_id=pick.place_id, photo_name=pick.photo_name,
-                            maps_url=pick.maps_url, source_url=pick.source_url)
+                            maps_url=pick.maps_url, source_url=pick.source_url,
+                            lat=pick.lat, lng=pick.lng)
         if not itinerary.days:
             itinerary.days.append(DayPlan(day_number=1, theme="Your picks", activities=[activity]))
         else:
