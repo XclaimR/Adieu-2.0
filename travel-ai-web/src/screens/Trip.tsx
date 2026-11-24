@@ -499,16 +499,19 @@ function WeekSlots({ days }: { days: number | null }) {
  * `null` means not loaded yet: what is there on first load is not new. */
 function useFresh(keys: string[] | null): Set<string> {
   const seen = useRef<Set<string> | null>(null);
+  const timer = useRef<number>();
   const [fresh, setFresh] = useState<Set<string>>(new Set());
   const signature = keys?.join("|") ?? null;
+  useEffect(() => () => clearTimeout(timer.current), []);
   useEffect(() => {
     if (!keys) return;
     const added = seen.current ? keys.filter((k) => !seen.current!.has(k)) : [];
     seen.current = new Set(keys);
     if (!added.length) return;
     setFresh(new Set(added));
-    const t = setTimeout(() => setFresh(new Set()), 3000);
-    return () => clearTimeout(t);
+    // Not cancelled by a later change with nothing new, or the glow would never go out.
+    clearTimeout(timer.current);
+    timer.current = window.setTimeout(() => setFresh(new Set()), 3000);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [signature]);
   return fresh;
