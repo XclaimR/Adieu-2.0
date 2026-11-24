@@ -1,6 +1,14 @@
 import uuid
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+
+# Minutes at a stop when nobody estimated it: plans saved before durations, or the critic failed.
+DEFAULT_MINUTES = {"eat": 75}
+OTHER_MINUTES = 90
+
+
+def default_minutes(category: str) -> int:
+    return DEFAULT_MINUTES.get(category, OTHER_MINUTES)
 
 
 def new_item_id() -> str:
@@ -23,3 +31,11 @@ class Activity(BaseModel):
     source_url: str | None = None
     # The traveler's words this stop fulfils, e.g. "one big night out for my birthday".
     for_note: str | None = None
+    # How long the stop takes: the critic's estimate, else a default for its category.
+    minutes: int | None = None
+
+    @model_validator(mode="after")
+    def _default_minutes(self):
+        if self.minutes is None:
+            self.minutes = default_minutes(self.category)
+        return self

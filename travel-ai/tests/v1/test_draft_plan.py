@@ -31,10 +31,19 @@ def test_stop_about_an_unlisted_place_is_dropped():
     assert [a.name for a in it.days[0].activities] == ["National Pantheon"]
 
 
-def test_repeated_time_of_day_moves_to_a_free_slot_in_order():
+def test_repeated_time_of_day_moves_to_a_later_slot_and_a_meal_may_share_one():
     it = POOL.to_itinerary(plan(
         PlanStop(place="National Pantheon", ref=0, time_of_day="morning", note="1"),
         PlanStop(place="Lisbon Cathedral", ref=1, time_of_day="morning", note="2"),
         PlanStop(place="Pata Negra - Portuguese Kitchen & Steak House", ref=3, time_of_day="morning", note="3"),
     ), "Lisbon")
-    assert [a.time_of_day for a in it.days[0].activities] == ["morning", "afternoon", "evening"]
+    assert [(a.name[:6], a.time_of_day) for a in it.days[0].activities] == [
+        ("Nation", "morning"), ("Pata N", "morning"), ("Lisbon", "afternoon")]
+
+
+def test_a_repeat_never_moves_earlier():
+    it = POOL.to_itinerary(plan(
+        PlanStop(place="National Pantheon", ref=0, time_of_day="evening", note="1"),
+        PlanStop(place="Lisbon Cathedral", ref=1, time_of_day="evening", note="2"),
+    ), "Lisbon")
+    assert [a.time_of_day for a in it.days[0].activities] == ["evening", "evening"]

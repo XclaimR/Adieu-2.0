@@ -90,7 +90,7 @@ class FakeLLM:
             n = sum(1 for name, _ in self.prompts if name == "DraftPlan")
             return DraftPlan(title=f"Plan {n}", summary="A nice trip", stay_ref=9, days=[
                 PlanDay(theme="Day one", stops=[PlanStop(place="Castle", ref=0, time_of_day="morning", note="go"),
-                                                 PlanStop(place="Veg Corner", ref=3, time_of_day="evening", note="eat"),
+                                                 PlanStop(place="Veg Corner", ref=3, time_of_day="morning", note="eat"),
                                                  PlanStop(place="Invented Place", ref=999, time_of_day="evening", note="invented")]),
                 PlanDay(theme="Day two", stops=[PlanStop(place="Museum", ref=1, time_of_day="morning", note="go"),
                                                  PlanStop(place="Tiny Bar", ref=6, time_of_day="afternoon", note="gem")]),

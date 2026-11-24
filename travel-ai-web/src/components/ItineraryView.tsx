@@ -3,6 +3,14 @@ import Photo, { Credit } from "./Photo";
 import type { Itinerary, Note } from "../types";
 import NoteList from "./NoteList";
 
+const SLOTS = ["morning", "afternoon", "evening"];
+
+/** "45 min", "1.5 h", "2 h": to the nearest half hour, since these are estimates. */
+export function duration(minutes: number) {
+  if (minutes < 60) return `${Math.round(minutes / 15) * 15 || 15} min`;
+  return `${Math.round(minutes / 30) / 2} h`;
+}
+
 type Props = {
   itinerary: Itinerary;
   notes: Note[];
@@ -80,71 +88,89 @@ export default function ItineraryView({ itinerary, notes, busy, onSwap, onRemove
               <h3>
                 Day {day.day_number}
                 {day.theme && <span className="muted"> · {day.theme}</span>}
+                <span className="day-total">
+                  ≈ {duration(day.activities.reduce((sum, a) => sum + a.minutes, 0))} planned, plus travel
+                </span>
               </h3>
               <button className="ghost small" disabled={busy} onClick={() => onAsk(`On day ${day.day_number}, `)}>
                 Change this day
               </button>
             </div>
             <NoteList notes={notes} target={`d${day.day_number}`} />
-            <ol>
-              {day.activities.map((a, i) => {
-                const key = `${day.day_number}-${i}`;
-                const prev = day.activities[i - 1]?.time_of_day;
-                return (
-                  <li key={key} className={selected === key ? "selected" : ""}>
-                    <button
-                      className="activity"
-                      aria-expanded={selected === key}
-                      onClick={() => setSelected(selected === key ? null : key)}
-                    >
-                      <span className="thumb">
-                        <Photo name={a.photo_name} fallback="📍" />
-                      </span>
-                      <span className="activity-text">
-                        {a.time_of_day && a.time_of_day !== prev && <span className="tod">{a.time_of_day}</span>}
-                        <strong>{a.name}</strong>
-                        {a.description && <span className="small muted">{a.description}</span>}
-                        {a.for_note && <span className="trait">For: {a.for_note}</span>}
-                        <NoteList notes={notes.filter((n) => n.text !== a.for_note)} target={a.id} />
-                      </span>
-                    </button>
-                    {selected === key && (
-                      <div className="activity-actions">
-                        <button className="primary" disabled={busy} onClick={() => onSwap(day.day_number, i)}>
-                          Swap
-                        </button>
-                        <button disabled={busy} onClick={() => onAsk(`Move ${a.name} to day `)}>
-                          Move
-                        </button>
-                        <button
-                          className="ghost"
-                          disabled={busy}
-                          onClick={() => {
-                            setSelected(null);
-                            onRemove(day.day_number, i);
-                          }}
-                        >
-                          Remove
-                        </button>
-                        <span className="links small">
-                          {a.maps_url && (
-                            <a href={a.maps_url} target="_blank" rel="noreferrer">
-                              Map ↗
-                            </a>
+            {[...SLOTS, null].map((slot) => {
+              const stops = day.activities
+                .map((a, i) => ({ a, i }))
+                .filter(({ a }) => (slot ? a.time_of_day === slot : !SLOTS.includes(a.time_of_day ?? "")));
+              if (!stops.length) return null;
+              // Only a meal here (e.g. its neighbour was removed): say the rest is free, not a whole slot of lunch.
+              const free = slot && stops.every(({ a }) => a.category === "eat");
+              return (
+                <section key={slot ?? "any"} className="slot" aria-label={slot ?? "Any time"}>
+                  <h4 className="tod">{slot ?? "Any time"}</h4>
+                  <ol>
+                    {stops.map(({ a, i }) => {
+                      const key = `${day.day_number}-${i}`;
+                      return (
+                        <li key={key} className={selected === key ? "selected" : ""}>
+                          <button
+                            className="activity"
+                            aria-expanded={selected === key}
+                            onClick={() => setSelected(selected === key ? null : key)}
+                          >
+                            <span className="thumb">
+                              <Photo name={a.photo_name} fallback="📍" />
+                            </span>
+                            <span className="activity-text">
+                              <strong>{a.name}</strong>
+                              {a.description && <span className="small muted">{a.description}</span>}
+                              {a.for_note && <span className="trait">For: {a.for_note}</span>}
+                              <NoteList notes={notes.filter((n) => n.text !== a.for_note)} target={a.id} />
+                            </span>
+                            <span className="dur-chip" aria-label={`about ${duration(a.minutes)}`}>
+                              {duration(a.minutes)}
+                            </span>
+                          </button>
+                          {selected === key && (
+                            <div className="activity-actions">
+                              <button className="primary" disabled={busy} onClick={() => onSwap(day.day_number, i)}>
+                                Swap
+                              </button>
+                              <button disabled={busy} onClick={() => onAsk(`Move ${a.name} to day `)}>
+                                Move
+                              </button>
+                              <button
+                                className="ghost"
+                                disabled={busy}
+                                onClick={() => {
+                                  setSelected(null);
+                                  onRemove(day.day_number, i);
+                                }}
+                              >
+                                Remove
+                              </button>
+                              <span className="links small">
+                                {a.maps_url && (
+                                  <a href={a.maps_url} target="_blank" rel="noreferrer">
+                                    Map ↗
+                                  </a>
+                                )}
+                                {a.source_url && (
+                                  <a href={a.source_url} target="_blank" rel="noreferrer">
+                                    Wikivoyage ↗
+                                  </a>
+                                )}
+                                <Credit name={a.photo_name} />
+                              </span>
+                            </div>
                           )}
-                          {a.source_url && (
-                            <a href={a.source_url} target="_blank" rel="noreferrer">
-                              Wikivoyage ↗
-                            </a>
-                          )}
-                          <Credit name={a.photo_name} />
-                        </span>
-                      </div>
-                    )}
-                  </li>
-                );
-              })}
-            </ol>
+                        </li>
+                      );
+                    })}
+                  </ol>
+                  {free && <p className="slot-free small muted">Rest of the {slot} is free</p>}
+                </section>
+              );
+            })}
           </section>
         ))}
       </div>

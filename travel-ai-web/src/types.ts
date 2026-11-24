@@ -70,6 +70,8 @@ export type Activity = {
   maps_url: string | null;
   source_url: string | null;
   for_note: string | null;
+  /** How long the stop takes: the critic's estimate, else a default for its category. */
+  minutes: number;
 };
 
 export type Itinerary = {
