@@ -1,0 +1,253 @@
+# Countries and territories: names from GeoNames (CC BY 4.0, geonames.org), land boxes from Overture Maps
+# divisions 2026-11-18.0 (ODbL, (c) OpenStreetMap contributors), articles and ids from Wikivoyage.
+# west > east: the box crosses the 180th meridian.
+code	kind	id	name	article	aliases	west	south	east	north
+AD	country	Q228	Andorra	Andorra		1.41	42.43	1.79	42.66
+AE	country	Q878	United Arab Emirates	United Arab Emirates	UAE;U.A.E.;Emirates	51.5	22.63	56.38	26.07
+AF	country	Q889	Afghanistan	Afghanistan		60.52	29.38	74.89	38.49
+AG	country	Q781	Antigua and Barbuda	Antigua and Barbuda		-62.35	16.93	-61.66	17.73
+AI	dependency	Q25228	Anguilla	Anguilla		-63.43	18.16	-62.93	18.59
+AL	country	Q222	Albania	Albania		19.26	39.64	21.06	42.66
+AM	country	Q399	Armenia	Armenia		43.45	38.84	46.63	41.3
+AO	country	Q916	Angola	Angola		11.67	-18.04	24.09	-4.35
+AQ	country	Q51	Antarctica	Antarctica		-180.0	-85.05	180.0	-60.51
+AR	country	Q414	Argentina	Argentina		-73.56	-55.06	-53.64	-21.78
+AS	dependency	Q16641	American Samoa	American Samoa		-171.09	-14.37	-169.42	-11.05
+AT	country	Q40	Austria	Austria		9.53	46.37	17.16	49.02
+AU	country	Q408	Australia	Australia		112.92	-54.78	159.26	-9.22
+AW	dependency	Q21203	Aruba	Aruba		-70.06	12.41	-69.87	12.62
+AX	dependency	Q5689	Aland Islands	Åland	Åland Islands	19.3	59.77	21.26	60.65
+AZ	country	Q227	Azerbaijan	Azerbaijan		44.76	38.39	50.88	41.91
+BA	country	Q225	Bosnia and Herzegovina	Bosnia and Herzegovina		15.73	42.56	19.62	45.28
+BB	country	Q244	Barbados	Barbados		-59.65	13.04	-59.42	13.34
+BD	country	Q902	Bangladesh	Bangladesh		88.01	20.59	92.68	26.64
+BE	country	Q31	Belgium	Belgium		2.55	49.5	6.41	51.51
+BF	country	Q965	Burkina Faso	Burkina Faso		-5.51	9.41	2.41	15.08
+BG	country	Q219	Bulgaria	Bulgaria		22.36	41.24	28.61	44.22
+BH	country	Q398	Bahrain	Bahrain		50.32	25.57	50.82	26.42
+BI	country	Q967	Burundi	Burundi		29.0	-4.47	30.85	-2.31
+BJ	country	Q962	Benin	Benin		0.78	6.24	3.85	12.41
+BL	dependency	Q25362	Saint Barthelemy	Saint-Barthélemy	Saint Barthélemy	-62.91	17.88	-62.79	17.96
+BM	dependency	Q23635	Bermuda	Bermuda		-64.89	32.25	-64.65	32.39
+BN	country	Q921	Brunei	Brunei		114.08	4.0	115.36	5.05
+BO	country	Q750	Bolivia	Bolivia		-69.65	-22.9	-57.45	-9.67
+BQ	dependency	iso-BQ	Bonaire, Saint Eustatius and Saba 		Bonaire	-68.42	12.02	-68.2	12.31
+BR	country	Q155	Brazil	Brazil		-73.98	-33.75	-28.85	5.27
+BS	country	Q778	Bahamas	Bahamas		-80.45	20.91	-72.71	27.26
+BT	country	Q917	Bhutan	Bhutan		88.75	26.7	92.13	28.25
+BV	dependency	Q23408	Bouvet Island	Bouvet Island		3.29	-54.45	3.43	-54.39
+BW	country	Q963	Botswana	Botswana		20.0	-26.91	29.38	-17.78
+BY	country	Q184	Belarus	Belarus		23.18	51.26	32.76	56.17
+BZ	country	Q242	Belize	Belize		-89.23	15.89	-87.49	18.5
+CA	country	Q16	Canada	Canada		-141.0	41.68	-52.62	83.14
+CC	dependency	Q36004	Cocos Islands	Cocos (Keeling) Islands	Cocos (Keeling) Islands	96.82	-12.21	96.93	-11.82
+CD	country	Q974	Democratic Republic of the Congo	Democratic Republic of the Congo	DR Congo;DRC	12.2	-13.46	31.31	5.39
+CF	country	Q929	Central African Republic	Central African Republic		14.41	2.22	27.47	11.0
+CG	country	Q971	Republic of the Congo	Republic of the Congo	Congo	11.15	-5.04	18.64	3.71
+CH	country	Q39	Switzerland	Switzerland		5.96	45.82	10.49	47.81
+CI	country	Q1008	Ivory Coast	Côte d'Ivoire	Côte d'Ivoire	-8.6	4.36	-2.49	10.74
+CK	dependency	Q26988	Cook Islands	Cook Islands		-165.88	-21.96	-157.32	-8.92
+CL	country	Q298	Chile	Chile		-109.45	-56.52	-66.42	-17.5
+CM	country	Q1009	Cameroon	Cameroon		8.5	1.65	16.19	13.08
+CN	country	Q148	China	China		73.5	18.16	134.77	53.56
+CO	country	Q739	Colombia	Colombia		-81.73	-4.23	-66.85	15.8
+CR	country	Q800	Costa Rica	Costa Rica		-87.09	5.5	-82.55	11.22
+CU	country	Q241	Cuba	Cuba		-84.95	19.83	-74.13	23.28
+CV	country	Q1011	Cabo Verde	Cape Verde	Cape Verde	-25.36	14.8	-22.67	17.21
+CW	dependency	Q25279	Curacao	Curaçao		-69.16	11.98	-68.64	12.39
+CX	dependency	Q31063	Christmas Island	Christmas Island		105.53	-10.57	105.71	-10.41
+CY	country	Q229	Cyprus	Cyprus		32.27	34.56	34.59	35.7
+CZ	country	Q213	Czech Republic	Czech Republic	Czechia	12.09	48.55	18.86	51.06
+DE	country	Q183	Germany	Germany		5.87	47.27	15.04	55.06
+DJ	country	Q977	Djibouti	Djibouti		41.77	10.91	43.44	12.71
+DK	country	Q35	Denmark	Denmark		8.07	54.56	15.19	57.75
+DM	country	Q784	Dominica	Dominica		-61.48	15.21	-61.24	15.64
+DO	country	Q786	Dominican Republic	Dominican Republic		-72.01	17.47	-68.32	19.93
+DZ	country	Q262	Algeria	Algeria		-8.67	18.97	12.0	37.09
+EC	country	Q736	Ecuador	Ecuador		-92.01	-5.02	-75.19	1.68
+EE	country	Q191	Estonia	Estonia		21.77	57.51	28.21	59.82
+EG	country	Q79	Egypt	Egypt		24.65	21.99	36.89	31.67
+ER	country	Q986	Eritrea	Eritrea		36.43	12.35	43.15	18.02
+ES	country	Q29	Spain	Spain		-18.16	27.64	4.33	43.79
+ET	country	Q115	Ethiopia	Ethiopia		33.0	3.4	47.98	14.89
+FI	country	Q33	Finland	Finland		20.55	59.76	31.59	70.09
+FJ	country	Q712	Fiji	Fiji		176.8	-19.3	-178.3	-12.4
+FK	dependency	Q9648	Falkland Islands	Falkland Islands		-61.46	-52.92	-57.72	-51.0
+FM	country	Q702	Micronesia	Federated States of Micronesia	Federated States of Micronesia	137.49	1.03	163.04	10.09
+FO	dependency	Q4628	Faroe Islands	Faroe Islands		-7.69	61.39	-6.26	62.39
+FR	country	Q142	France	France		-5.14	41.33	9.56	51.09
+GA	country	Q1000	Gabon	Gabon		8.7	-3.96	14.53	2.32
+GB	country	Q145	United Kingdom	United Kingdom	UK;U.K.;Great Britain;Britain	-8.65	49.88	1.76	60.86
+GD	country	Q769	Grenada	Grenada		-61.8	11.99	-61.38	12.53
+GE	country	Q230	Georgia	Georgia (country)		40.01	41.06	46.74	43.59
+GF	dependency	Q3769	French Guiana	French Guiana		-54.6	2.11	-51.61	5.78
+GG	dependency	Q25230	Guernsey	Guernsey		-2.68	49.41	-2.16	49.73
+GH	country	Q117	Ghana	Ghana		-3.26	4.74	1.2	11.17
+GI	dependency	Q1410	Gibraltar	Gibraltar		-5.37	36.11	-5.34	36.16
+GL	dependency	Q223	Greenland	Greenland		-73.25	59.75	-11.35	83.66
+GM	country	Q1005	Gambia	Gambia	The Gambia	-16.81	13.06	-13.8	13.83
+GN	country	Q1006	Guinea	Guinea		-15.08	7.19	-7.64	12.68
+GP	dependency	Q17012	Guadeloupe	Guadeloupe		-61.81	15.83	-61.0	16.51
+GQ	country	Q983	Equatorial Guinea	Equatorial Guinea		5.62	-1.47	11.41	3.79
+GR	country	Q41	Greece	Greece		19.37	34.8	29.65	41.75
+GS	dependency	Q35086	South Georgia and the South Sandwich Islands	South Georgia and the South Sandwich Islands	South Georgia And South Sandwich Islands	-38.24	-59.46	-26.27	-53.97
+GT	country	Q774	Guatemala	Guatemala		-92.23	13.74	-88.24	17.82
+GU	dependency	Q16635	Guam	Guam		144.62	13.23	144.96	13.65
+GW	country	Q1007	Guinea-Bissau	Guinea-Bissau		-16.72	10.87	-13.63	12.69
+GY	country	Q734	Guyana	Guyana		-61.38	1.17	-56.47	8.55
+HK	dependency	Q8646	Hong Kong	Hong Kong		113.84	22.16	114.44	22.56
+HM	dependency	Q131198	Heard Island and McDonald Islands	Heard Island and McDonald Islands		72.59	-53.19	73.88	-52.91
+HN	country	Q783	Honduras	Honduras		-89.36	12.98	-83.13	17.42
+HR	country	Q224	Croatia	Croatia		13.49	42.39	19.45	46.56
+HT	country	Q790	Haiti	Haiti		-74.48	18.02	-71.62	20.09
+HU	country	Q28	Hungary	Hungary		16.11	45.74	22.9	48.59
+ID	country	Q252	Indonesia	Indonesia		95.01	-11.01	141.02	6.08
+IE	country	Q27	Ireland	Ireland	Republic of Ireland	-10.66	51.42	-5.99	55.44
+IL	country	Q801	Israel	Israel		34.27	29.49	35.68	33.29
+IM	dependency	Q9676	Isle of Man	Isle of Man		-4.83	54.04	-4.31	54.42
+IN	country	Q668	India	India		68.43	6.76	97.4	35.67
+IO	dependency	Q43448	British Indian Ocean Territory	British Indian Ocean Territory		71.24	-7.44	72.49	-5.24
+IQ	country	Q796	Iraq	Iraq		38.79	29.06	48.62	37.38
+IR	country	Q794	Iran	Iran		44.03	25.06	63.33	39.78
+IS	country	Q189	Iceland	Iceland		-24.53	63.3	-13.49	66.57
+IT	country	Q38	Italy	Italy		6.63	35.49	18.52	47.09
+JE	dependency	Q785	Jersey	Jersey		-2.25	49.16	-2.01	49.29
+JM	country	Q766	Jamaica	Jamaica		-78.37	16.99	-76.18	18.52
+JO	country	Q810	Jordan	Jordan		34.96	29.18	39.3	33.37
+JP	country	Q17	Japan	Japan	Nippon	122.93	24.05	153.99	45.52
+KE	country	Q114	Kenya	Kenya		33.91	-4.74	41.91	5.02
+KG	country	Q813	Kyrgyzstan	Kyrgyzstan		69.26	39.18	80.19	43.27
+KH	country	Q424	Cambodia	Cambodia		102.33	9.91	107.63	14.69
+KI	country	Q710	Kiribati	Kiribati		169.5	-11.5	-150.2	4.7
+KM	country	Q970	Comoros	Comoros		43.23	-12.42	44.54	-11.37
+KN	country	Q763	Saint Kitts and Nevis	Saint Kitts and Nevis		-62.86	17.09	-62.54	17.42
+KP	country	Q423	North Korea	North Korea		124.18	37.68	130.7	43.01
+KR	country	Q884	South Korea	South Korea	Korea;Republic of Korea	124.61	33.11	130.94	38.62
+KW	country	Q817	Kuwait	Kuwait		46.55	28.52	48.65	30.1
+KY	dependency	Q5785	Cayman Islands	Cayman Islands		-81.42	19.26	-79.72	19.75
+KZ	country	Q232	Kazakhstan	Kazakhstan		46.49	40.57	87.32	55.44
+LA	country	Q819	Laos	Laos		100.08	13.91	107.64	22.51
+LB	country	Q822	Lebanon	Lebanon		35.11	33.06	36.63	34.69
+LC	country	Q760	Saint Lucia	Saint Lucia		-61.08	13.71	-60.87	14.11
+LI	country	Q347	Liechtenstein	Liechtenstein		9.47	47.05	9.64	47.27
+LK	country	Q854	Sri Lanka	Sri Lanka		79.52	5.92	81.88	9.84
+LR	country	Q1014	Liberia	Liberia		-11.51	4.36	-7.37	8.55
+LS	country	Q1013	Lesotho	Lesotho		27.01	-30.68	29.46	-28.57
+LT	country	Q37	Lithuania	Lithuania		20.95	53.9	26.84	56.45
+LU	country	Q32	Luxembourg	Luxembourg		5.74	49.45	6.53	50.18
+LV	country	Q211	Latvia	Latvia		20.97	55.67	28.24	58.09
+LY	country	Q1016	Libya	Libya		9.39	19.5	25.15	33.16
+MA	country	Q1028	Morocco	Morocco		-17.1	20.77	-1.0	35.92
+MC	country	Q235	Monaco	Monaco		7.41	43.73	7.44	43.75
+MD	country	Q217	Moldova	Moldova		26.62	45.47	30.16	48.49
+ME	country	Q236	Montenegro	Montenegro		18.43	41.85	20.35	43.56
+MF	country	Q25596	Saint Martin	Saint Martin		-63.15	18.05	-62.97	18.13
+MG	country	Q1019	Madagascar	Madagascar		43.19	-25.61	50.49	-11.95
+MH	country	Q709	Marshall Islands	Marshall Islands		160.95	4.57	172.17	14.66
+MK	country	Q221	North Macedonia	North Macedonia	Macedonia	20.45	40.85	23.03	42.37
+ML	country	Q912	Mali	Mali		-12.24	10.15	4.27	25.0
+MM	country	Q836	Myanmar	Myanmar	Burma	92.17	9.61	101.17	28.55
+MN	country	Q711	Mongolia	Mongolia		87.73	41.58	119.93	52.15
+MO	dependency	Q14773	Macao	Macau	Macau	113.53	22.08	113.63	22.22
+MP	dependency	Q16644	Northern Mariana Islands	Northern Mariana Islands		144.89	14.11	146.06	20.55
+MQ	dependency	Q17054	Martinique	Martinique		-61.23	14.39	-60.81	14.88
+MR	country	Q1025	Mauritania	Mauritania		-17.07	14.72	-4.83	27.31
+MS	dependency	Q13353	Montserrat	Montserrat		-62.24	16.67	-62.14	16.82
+MT	country	Q233	Malta	Malta		14.18	35.81	14.58	36.08
+MU	country	Q1027	Mauritius	Mauritius		56.59	-20.53	63.5	-10.34
+MV	country	Q826	Maldives	Maldives		72.7	-0.7	73.76	7.11
+MW	country	Q1020	Malawi	Malawi		32.67	-17.13	35.92	-9.37
+MX	country	Q96	Mexico	Mexico		-118.37	14.53	-86.71	32.72
+MY	country	Q833	Malaysia	Malaysia		98.94	0.85	119.27	7.36
+MZ	country	Q1029	Mozambique	Mozambique		30.21	-26.87	40.84	-10.47
+NA	country	Q1030	Namibia	Namibia		11.74	-28.97	25.26	-16.96
+NC	dependency	Q33788	New Caledonia	New Caledonia		158.3	-22.76	172.09	-18.03
+NE	country	Q1032	Niger	Niger		0.17	11.69	16.0	23.52
+NF	dependency	Q31057	Norfolk Island	Norfolk Island		167.91	-29.13	167.99	-29.0
+NG	country	Q1033	Nigeria	Nigeria		2.68	4.27	14.68	13.89
+NI	country	Q811	Nicaragua	Nicaragua		-87.69	10.71	-82.75	15.03
+NL	country	Q55	Netherlands	Netherlands	Holland	3.36	50.75	7.23	53.55
+NO	country	Q20	Norway	Norway		4.51	57.96	31.17	71.19
+NP	country	Q837	Nepal	Nepal		80.06	26.35	88.2	30.45
+NR	country	Q697	Nauru	Nauru		166.91	-0.55	166.96	-0.5
+NU	dependency	Q34020	Niue	Niue		-169.95	-19.16	-169.77	-18.95
+NZ	country	Q664	New Zealand	New Zealand		166.4	-47.3	178.6	-34.4
+OM	country	Q842	Oman	Oman		52.0	16.65	59.84	26.5
+PA	country	Q804	Panama	Panama		-83.05	7.2	-77.16	9.64
+PE	country	Q419	Peru	Peru		-81.33	-18.35	-68.65	-0.04
+PF	dependency	Q30971	French Polynesia	French Polynesia		-154.73	-27.65	-134.45	-7.9
+PG	country	Q691	Papua New Guinea	Papua New Guinea		140.84	-11.65	159.49	-0.76
+PH	country	Q928	Philippines	Philippines		116.93	4.59	126.6	21.12
+PK	country	Q843	Pakistan	Pakistan		60.87	24.05	77.12	37.09
+PL	country	Q36	Poland	Poland		14.12	49.0	24.15	54.83
+PM	dependency	Q34617	Saint Pierre and Miquelon	Saint Pierre and Miquelon		-56.41	46.75	-56.13	47.14
+PN	dependency	Q35672	Pitcairn	Pitcairn Islands	Pitcairn Islands	-130.75	-25.08	-124.77	-23.92
+PR	dependency	Q1183	Puerto Rico	Puerto Rico		-67.95	17.88	-65.22	18.51
+PS	country	Q219060	Palestine	Palestinian territories	State of Palestine	34.22	31.22	35.57	32.55
+PT	country	Q45	Portugal	Portugal		-31.27	30.03	-6.19	42.15
+PW	country	Q695	Palau	Palau		131.12	3.0	134.72	8.09
+PY	country	Q733	Paraguay	Paraguay		-62.64	-27.61	-54.26	-19.29
+QA	country	Q846	Qatar	Qatar		50.75	24.47	52.42	26.18
+RE	dependency	Q17070	Reunion	Réunion	Réunion	55.22	-21.39	55.84	-20.87
+RO	country	Q218	Romania	Romania		20.26	43.62	29.77	48.27
+RS	country	Q403	Serbia	Serbia		18.81	42.23	23.01	46.19
+RU	country	Q159	Russia	Russia		19.6	41.2	-169.0	81.9
+RW	country	Q1037	Rwanda	Rwanda		28.86	-2.84	30.9	-1.05
+SA	country	Q851	Saudi Arabia	Saudi Arabia		34.5	16.38	55.67	32.15
+SB	country	Q685	Solomon Islands	Solomon Islands		155.51	-12.31	170.19	-5.08
+SC	country	Q1042	Seychelles	Seychelles		46.2	-10.23	56.29	-3.71
+SD	country	Q1049	Sudan	Sudan		21.81	9.49	38.8	22.01
+SE	country	Q34	Sweden	Sweden		10.97	55.34	24.17	69.06
+SG	country	Q334	Singapore	Singapore		103.61	1.17	104.09	1.47
+SH	dependency	iso-SH	Saint Helena		Saint Helena, Ascension and Tristan da Cunha	-14.42	-40.37	-5.63	-7.89
+SI	country	Q215	Slovenia	Slovenia		13.38	45.42	16.6	46.88
+SJ	dependency	iso-SJ	Svalbard and Jan Mayen		Svalbard	10.46	74.34	33.51	80.83
+SK	country	Q214	Slovakia	Slovakia		16.83	47.73	22.57	49.61
+SL	country	Q1044	Sierra Leone	Sierra Leone		-13.3	6.92	-10.27	10.0
+SM	country	Q238	San Marino	San Marino		12.4	43.89	12.52	43.99
+SN	country	Q1041	Senegal	Senegal		-17.53	12.31	-11.35	16.69
+SO	country	Q1045	Somalia	Somalia		40.99	-1.66	51.42	11.99
+SR	country	Q730	Suriname	Suriname		-58.07	1.83	-53.97	6.01
+SS	country	Q958	South Sudan	South Sudan		23.45	3.49	35.95	12.24
+ST	country	Q1039	Sao Tome and Principe	São Tomé and Príncipe	São Tomé and Príncipe	6.46	-0.01	7.46	1.7
+SV	country	Q792	El Salvador	El Salvador		-90.14	13.16	-87.68	14.45
+SX	dependency	Q25596	Sint Maarten	Saint Martin		-63.14	18.01	-63.01	18.06
+SY	country	Q858	Syria	Syria		35.72	32.31	42.37	37.32
+SZ	country	Q1050	Eswatini	Eswatini	Swaziland	30.79	-27.32	32.13	-25.72
+TC	dependency	Q18221	Turks and Caicos Islands	Turks and Caicos Islands		-72.48	21.18	-71.08	21.96
+TD	country	Q657	Chad	Chad		13.47	7.44	24.0	23.45
+TF	dependency	iso-TF	French Southern Territories		French Southern and Antarctic Lands	39.64	-49.83	77.6	-11.52
+TG	country	Q945	Togo	Togo		-0.14	6.11	1.81	11.14
+TH	country	Q869	Thailand	Thailand		97.34	5.61	105.64	20.46
+TJ	country	Q863	Tajikistan	Tajikistan		67.33	36.67	75.15	41.05
+TK	dependency	Q36823	Tokelau	Tokelau		-172.52	-9.44	-171.18	-8.53
+TL	country	Q574	Timor Leste	Timor-Leste	East Timor;Timor-Leste	124.07	-9.5	127.34	-8.13
+TM	country	Q874	Turkmenistan	Turkmenistan		52.45	35.13	66.71	42.8
+TN	country	Q948	Tunisia	Tunisia		7.52	30.23	11.6	37.54
+TO	country	Q678	Tonga	Tonga		-176.21	-22.35	-173.74	-15.57
+TR	country	Q43	Turkey	Turkey	Türkiye	25.67	35.81	44.82	42.1
+TT	country	Q754	Trinidad and Tobago	Trinidad and Tobago		-61.93	10.04	-60.49	11.36
+TV	country	Q672	Tuvalu	Tuvalu		176.06	-10.79	179.87	-5.64
+TW	country	Q865	Taiwan	Taiwan		114.36	10.38	122.11	26.38
+TZ	country	Q924	Tanzania	Tanzania		29.33	-11.76	40.45	-0.99
+UA	country	Q212	Ukraine	Ukraine		22.14	44.39	40.23	52.38
+UG	country	Q1036	Uganda	Uganda		29.57	-1.48	35.0	4.23
+UM	dependency	iso-UM	United States Minor Outlying Islands			-177.4	-0.38	166.66	28.22
+US	country	Q30	United States	United States	USA;US;U.S.;U.S.A.;America;United States of America	-160.3	18.9	-66.9	71.4
+UY	country	Q77	Uruguay	Uruguay		-58.49	-35.03	-53.08	-30.09
+UZ	country	Q265	Uzbekistan	Uzbekistan		56.0	37.18	73.21	45.59
+VA	country	Q237	Vatican City	Rome/Vatican	Vatican	12.45	41.9	12.46	41.91
+VC	country	Q757	Saint Vincent and the Grenadines	Saint Vincent and the Grenadines		-61.46	12.53	-61.11	13.38
+VE	country	Q717	Venezuela	Venezuela		-73.35	0.65	-59.81	12.36
+VG	dependency	Q25305	British Virgin Islands	British Virgin Islands		-64.85	18.31	-64.27	18.75
+VI	dependency	Q11703	U.S. Virgin Islands	U.S. Virgin Islands	United States Virgin Islands	-65.08	17.67	-64.56	18.41
+VN	country	Q881	Vietnam	Vietnam	Viet Nam	102.14	8.41	109.46	23.39
+VU	country	Q686	Vanuatu	Vanuatu		166.54	-20.25	170.24	-13.07
+WF	dependency	Q35555	Wallis and Futuna	Wallis and Futuna		-178.18	-14.36	-176.14	-13.19
+WS	country	Q683	Samoa	Samoa		-172.8	-14.08	-171.41	-13.44
+XK	country	Q1246	Kosovo	Kosovo		20.01	41.86	21.79	43.27
+YE	country	Q805	Yemen	Yemen		41.82	12.11	54.53	19.0
+YT	dependency	Q17063	Mayotte	Mayotte		45.02	-13.0	45.3	-12.64
+ZA	country	Q258	South Africa	South Africa		16.45	-46.98	38.0	-22.13
+ZM	country	Q953	Zambia	Zambia		22.0	-18.08	33.71	-8.27
+ZW	country	Q954	Zimbabwe	Zimbabwe		25.24	-22.42	33.07	-15.61

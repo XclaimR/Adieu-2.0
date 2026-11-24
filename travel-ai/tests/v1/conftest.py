@@ -2,7 +2,6 @@ import os
 
 os.environ["DATABASE_URL"] = "sqlite://"
 os.environ["ALLOW_DEV_LOGIN"] = "true"
-os.environ["GOOGLE_PLACES_API_KEY"] = "test-key"
 
 import pytest
 from fastapi.testclient import TestClient
@@ -17,20 +16,18 @@ from app.database.session import get_db, get_session_factory
 from app.main import app
 from app.schemas.starter_idea import StarterIdea, StarterIdeas
 from app.schemas.turn import TurnAction, TurnDecision
-from app.services import places_service
+from app.services import gazetteer, place_library
 from app.services.draft_service import DraftPlan, PlanDay, PlanStop
 from app.services.llm_client import LLMClient
-from app.services.places_service import PlacesService
 from app.services.ranking_service import Ranking, RankedItem
 
 settings.ALLOW_DEV_LOGIN = True
-settings.GOOGLE_PLACES_API_KEY = "test-key"
 
 VIEWPORT = {"low": {"latitude": 1.0, "longitude": 1.0}, "high": {"latitude": 2.0, "longitude": 2.0}}
 
-# Per category: (name, type label) — stays cover all three price tiers.
+# Per category: (name, type label) — stays cover all three estimated tiers; gems are things to do.
 FAKE_PLACES = {
-    "stay": [("Sunny Hostel", "Hostel"), ("City Hotel", "Hotel"), ("Grand Palace Resort", "Resort Hotel")],
+    "stay": [("Sunny Hostel", "Hostel"), ("City Hotel", "3-star hotel"), ("Grand Palace Resort", "Resort Hotel")],
     "eat": [("Veg Corner", "Vegetarian Restaurant"), ("Fish House", "Seafood Restaurant"), ("Old Tavern", "Restaurant")],
     "do": [("Castle", "Tourist Attraction"), ("Museum", "Museum"), ("Viewpoint", "Scenic Point")],
     "gem": [("Tiny Bar", "Bar"), ("Secret Garden", "Garden"), ("Tile Shop", "Store")],
@@ -55,12 +52,32 @@ class FakeLLM:
     """Stands in for the model. Tests queue TurnDecisions; other schemas get canned answers."""
 
     def __init__(self):
+        self.ideas_photo = None
+        self.ideas = [("Slow food week", "Lisbon, Portugal"), ("Nowhere", "Atlantis"), ("Temples and ramen", "Japan")]
         self.decisions: list[TurnDecision] = []
         self.prompts: list[tuple[str, str]] = []
         self.edits: list[dict] = []
+        # The critic: failed verdicts as {rule: verdict} (a list: one per review call, then none), the repair's
+        # edits, and what either call raises.
+        self.fails: dict[str, dict] | list[dict] = {}
+        self.fixes: list[dict] = []
+        self.errors: dict[str, Exception] = {}
+        self.minutes: dict[str, int] = {}  # visit minutes by item id on a first review; 60 otherwise
 
-    def __call__(self, prompt, schema, history=None, system=None, model=None):
+    def __call__(self, prompt, schema, history=None, system=None, model=None, timeout=None):
         self.prompts.append((schema.__name__, prompt))
+        if schema.__name__ in self.errors:
+            raise self.errors[schema.__name__]
+        if schema.__name__ == "PlanReview":
+            # A re-check judges what a repair put in the slot, not the old place.
+            minutes = {} if "Only these parts changed" in prompt else self.minutes
+            fails = self.fails if isinstance(self.fails, dict) else self.fails.pop(0) if self.fails else {}
+            return schema.model_validate({
+                name: {item: minutes.get(item, 60) for item in f.annotation.model_fields}
+                if name == "visit_minutes" else fails.get(name, {"passed": True})
+                for name, f in schema.model_fields.items()})
+        if schema.__name__ == "PlanFixes":
+            return schema.model_validate({"edits": self.fixes})
         if schema.__name__ == "PlanEdits":
             return schema.model_validate({"edits": self.edits})
         if issubclass(schema, TurnDecision):
@@ -79,44 +96,39 @@ class FakeLLM:
                                                  PlanStop(place="Tiny Bar", ref=6, time_of_day="afternoon", note="gem")]),
             ])
         if schema is StarterIdeas:
-            return StarterIdeas(ideas=[
-                StarterIdea(title="Slow food week", destination="Lisbon, Portugal", pitch="You love food"),
-                StarterIdea(title="Nowhere", destination="Atlantis", pitch="Not real"),
-            ])
+            return StarterIdeas(ideas=[StarterIdea(title=t, destination=d, pitch="It fits", photo_name=self.ideas_photo)
+                                       for t, d in self.ideas])
         raise AssertionError(f"unexpected schema {schema}")
 
 
 class FakePlaces:
-    """Replaces the HTTP call to Places and records every request body."""
+    """Stands in for the open sources: the name lookup and the one-off load of a destination's places."""
 
     def __init__(self):
-        self.bodies: list[dict] = []
+        self.resolved: list[str] = []
+        self.loads: list[dict] = []
+        self.library: dict | None = None  # set to replace what a load returns
 
-    def __call__(self, service, body, field_mask):
-        self.bodies.append(body)
-        query = body["textQuery"].lower()
-        if "atlantis" in query:
-            return []
-        if field_mask == places_service._RESOLVE_FIELD_MASK:
-            name = query.split(",")[0].title()
-            area = {"id": f"area-{name}", "displayName": {"text": name}, "formattedAddress": name,
-                    "viewport": VIEWPORT, "photos": [{"name": f"places/area-{name}/photos/p"}],
-                    "types": ["country", "political"]}
-            if "korea" in query:
-                # Like the real API: a nearby restaurant ranks above the country.
-                restaurant = {**area, "id": "streets-of-korea", "displayName": {"text": "Streets Of Korea"},
-                              "types": ["restaurant", "food"]}
-                return [restaurant] if body.get("includedType") != "country" else [{**area, "displayName": {"text": "South Korea"}}]
-            return [area]
-        tag = ("stay" if any(w in query for w in ("hotel", "stay", "hostel", "resort")) else
-               "eat" if any(w in query for w in ("restaurant", "caf", "food")) else
-               "gem" if "hidden" in query else "do")
-        return [
-            {"id": f"{tag}-{i}", "displayName": {"text": name}, "rating": 4.5 - i / 10, "userRatingCount": 100,
-             "primaryTypeDisplayName": {"text": label}, "photos": [{"name": f"places/{tag}-{i}/photos/p"}],
-             "location": {"latitude": 1.5, "longitude": 1.5}}
-            for i, (name, label) in enumerate(FAKE_PLACES[tag])
-        ][:body["maxResultCount"]]
+    def find_destination(self, name, near=None):
+        self.resolved.append(name)
+        if "atlantis" in name.lower():
+            return None
+        name = "South Korea" if "korea" in name.lower() else name.split(",")[0].strip().title()
+        return {"place_id": f"Q-{name}", "name": name, "formatted_address": name, "kind": "city",
+                "viewport": {**VIEWPORT, "id": f"Q-{name}"}, "photo_name": None, "code": "XX", "article": None,
+                "centre": [1.5, 1.5]}
+
+    def build(self, area, releases):
+        self.loads.append(area)
+        if self.library is not None:
+            return {"photos": {}, **self.library}
+        places = [
+            {"id": f"{tag}-{i}", "name": name, "category": "do" if tag == "gem" else tag, "kind": label,
+             "text": None, "lat": 1.5, "lng": 1.5, "area": "Old Town", "guide": None, "tier": None,
+             "score": 1.0 - i / 10 - (tag == "gem") / 2}
+            for tag, rows in FAKE_PLACES.items() for i, (name, label) in enumerate(rows)
+        ]
+        return {"places": places, "hubs": [], "photos": {}, "release": "test", "partial": []}
 
 
 @pytest.fixture
@@ -129,7 +141,8 @@ def fake_llm(monkeypatch):
 @pytest.fixture
 def fake_places(monkeypatch):
     fake = FakePlaces()
-    monkeypatch.setattr(PlacesService, "_post", lambda self, body, mask: fake(self, body, mask))
+    monkeypatch.setattr(gazetteer, "find_destination", fake.find_destination)
+    monkeypatch.setattr(place_library, "build", fake.build)
     return fake
 
 

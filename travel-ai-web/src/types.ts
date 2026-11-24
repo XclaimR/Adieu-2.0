@@ -26,9 +26,13 @@ export type Pick = {
   summary: string | null;
   photo_name: string | null;
   maps_url: string | null;
+  /** The Wikivoyage guide the description comes from. */
+  source_url: string | null;
   why: string | null;
   trait: string | null;
 };
+
+export type PhotoCredit = { by: string; licence: string; source: string };
 
 export type StarterIdea = { title: string; destination: string; pitch: string; photo_name: string | null };
 
@@ -64,6 +68,7 @@ export type Activity = {
   place_id: string | null;
   photo_name: string | null;
   maps_url: string | null;
+  source_url: string | null;
   for_note: string | null;
 };
 
@@ -82,8 +87,12 @@ export type Draft = {
   photo_name: string | null;
   trait: string | null;
   unplanned: string[];
+  warnings: string[];
   itinerary: Itinerary;
 };
+
+/** Why the last try made no drafts. */
+export type NoPlans = { reason: string; retry_now: boolean };
 
 export type Scale = { value: number; confidence: number; source: string | null };
 
@@ -110,6 +119,7 @@ export type Trip = {
   destination_name: string | null;
   panel: OptionSet | null;
   drafts: Draft[];
+  no_plans: NoPlans | null;
   liked_place_ids: string[];
   skipped_place_ids: string[];
   next_question: string | null;

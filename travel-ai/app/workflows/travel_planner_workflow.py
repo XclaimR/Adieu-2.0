@@ -1,18 +1,23 @@
 import logging
+import re
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from collections.abc import Iterator
 
+import httpx
+from openai import RateLimitError
 from sqlalchemy.orm import Session
 
-from app.database.models.trip import TripModel
+from app.database.models.trip import MessageModel, TripModel
 from app.database.models.user import UserModel
 from app.repositories.trip_repository import TripRepository
 from app.schemas.api import TurnResponse
+from app.schemas.draft import NoPlans
 from app.schemas.itinerary import Itinerary
 from app.schemas.personality import NoteChange, Personality
 from app.schemas.place import OptionSet, Pick, PickCategory, SwapTarget
 from app.schemas.trip_profile import TripProfile
 from app.schemas.turn import OptionsKind, OptionsRequest, TurnAction
-from app.services.draft_service import DEFAULT_DAYS, DraftService
+from app.services.draft_service import DEFAULT_DAYS, DraftService, NotEnoughPlacesError, NoUsableDraftError
 from app.services.options_service import OptionsService
 from app.services.personality_service import PersonalityService, check_changes, describe_note
 from app.services.places_service import PlacesService, PlacesUnavailableError, tier_rank
@@ -21,8 +26,20 @@ from app.services.turn_service import SHOW_PLANS, SHOW_PLANS_TEXT, VIBE_QUESTION
 
 logger = logging.getLogger(__name__)
 
-RESET_PHRASES = ("start over", "reset")
+# The whole message must be the command: a reset deletes the plan, and "I need a mental reset" isn't one.
+_RESET_COMMAND = re.compile(r"\W*(please\W+)?(start over|reset)(\W+please)?\W*", re.I)
+_RESET_QUESTION = ("Are you sure you want to start from scratch? This clears the destination, plans and notes, "
+                   "and can't be undone.")
+_RESET_ANSWERS = ["Yes, start from scratch", "No, keep my trip"]
+# Both must be the whole answer, and "yes?" is not a yes.
+_CONFIRM_RESET = re.compile(r"[^\w?]*((yes|yeah|yep|yup)(\W+(please|i\W?m sure|start over|start from scratch|reset))?"
+                            r"|sure|i\W?m sure|confirm)[^\w?]*", re.I)
+_DECLINE_RESET = re.compile(r"\W*(no(\W+(thanks|keep my trip))?|nope|nah|cancel|never ?mind|don\W?t)\W*", re.I)
 DRAFT_COUNT = 3
+PLANS_READY = f"Here are {DRAFT_COUNT} ways your trip could look — pick the one that feels right."
+# A source that is out for the day says "per day" or "PerDay": trying again right away can't work.
+_DAILY_LIMIT = re.compile(r"per ?day", re.I)
+UNCHECKED = "I couldn't double-check this, so give it a look."
 
 Event = dict
 
@@ -33,6 +50,30 @@ def _same_place(a: str | None, b: str | None) -> bool:
 
 def _progress(text: str) -> Event:
     return {"type": "progress", "text": text}
+
+
+def _reply(text: str, question: str | None = None, options: list[str] | None = None) -> Event:
+    return {"type": "reply", "text": text, "next_question": question, "answer_options": options or []}
+
+
+def _why_no_plans(error: Exception, destination: str) -> NoPlans:
+    cause = error.__cause__ if isinstance(error, NoUsableDraftError) else error
+    no_place_data = isinstance(cause, (PlacesUnavailableError, httpx.HTTPError))
+    out_for_today = isinstance(cause, (PlacesUnavailableError, RateLimitError)) and bool(_DAILY_LIMIT.search(str(cause)))
+    if no_place_data or out_for_today:
+        what = "Place data" if no_place_data else "The AI planner"
+        when = "Please come back later." if out_for_today else "Please try again in a moment."
+        return NoPlans(retry_now=not out_for_today,
+                       reason=f"{what} is unavailable for now, so I can't make plans. {when}")
+    if isinstance(error, NotEnoughPlacesError):
+        return NoPlans(reason=f"I couldn't find enough places in {destination} to build a plan. "
+                              "Try naming a town or a bigger area there.")
+    if isinstance(error, NoUsableDraftError):
+        if cause:
+            return NoPlans(reason="The AI planner couldn't write your plans just now. Please try again in a moment.")
+        return NoPlans(reason=f"The plans I wrote didn't stick to real places in {destination}, so I threw them out. "
+                              "Please try again.")
+    return NoPlans(reason="Something went wrong while I was making your plans. Please try again.")
 
 
 class TripActionError(ValueError):
@@ -70,18 +111,36 @@ class TravelPlannerWorkflow:
 
     def run_turn(self, trip: TripModel, user: UserModel, message: str) -> Iterator[Event]:
         shown_message = SHOW_PLANS_TEXT if message == SHOW_PLANS else message
-        if any(p in message.lower() for p in RESET_PHRASES):
+        state = dict(trip.state or {})
+        before_reset = state.pop("before_reset", None)
+        # A yes counts only while that question is the current one: choosing a plan, for one, replaces it.
+        confirming = before_reset is not None and trip.next_question == _RESET_QUESTION
+        if confirming and _CONFIRM_RESET.fullmatch(message):
             yield from self._reset(trip, message)
             return
+        if confirming and _DECLINE_RESET.fullmatch(message):
+            trip.state = state
+            yield from self._answer(trip, message, "Okay, I kept your trip as it is.", *before_reset)
+            return
+        if _RESET_COMMAND.fullmatch(message):
+            if not confirming:  # asked twice, a "no" still returns to the question before the first
+                before_reset = [trip.next_question, state.get("answer_options", [])]
+            trip.state = {**state, "before_reset": before_reset}
+            yield from self._answer(trip, message, "I haven't deleted anything yet.", _RESET_QUESTION, _RESET_ANSWERS)
+            return
+        not_reset = "I didn't start over. " if confirming else ""
 
         yield _progress("Thinking…")
         profile = self.trips.profile(trip)
         before = self.trips.personality(trip)
-        state = dict(trip.state or {})
         itinerary = self.trips.itinerary(trip)
 
+        history = self.trips.history(trip.id)
+        if not_reset:
+            # Or the model reads "ok" as a yes to the question above and talks, or edits, as if it had reset.
+            history.append({"role": "assistant", "content": not_reset.strip()})
         decision = TurnService.decide(
-            shown_message, self.trips.history(trip.id), profile, self._context(trip, itinerary, before),
+            shown_message, history, profile, self._context(trip, itinerary, before),
             itinerary,
         )
         decision.note_changes = check_changes(decision.note_changes, shown_message, before, itinerary)
@@ -129,17 +188,19 @@ class TravelPlannerWorkflow:
             new_profile.duration_days = DEFAULT_DAYS
         trip.profile = new_profile.model_dump(mode="json")
 
-        reply = TurnService.strip_questions(decision.reply, plan.next_question) + note
+        reply = not_reset + TurnService.strip_questions(decision.reply, plan.next_question) + note
         if plan.action == TurnAction.OFFER_DRAFTS:
-            reply = reply.rstrip() + f" Here are {DRAFT_COUNT} ways your trip could look — pick the one that feels right."
-        yield {"type": "reply", "text": reply, "next_question": plan.next_question,
-               "answer_options": plan.answer_options}
+            # The model talks as if the plans exist ("I've put together a few"), so its words wait for the first draft.
+            reply_with_plans = f"{reply.rstrip()} {PLANS_READY}"
+            reply = f"{not_reset}Let me put some plans together for {new_profile.destination}.{note}"
+        yield _reply(reply, plan.next_question, plan.answer_options)
 
         # Save the exchange before the slow work (drafts take minutes), so anything the user does
         # meanwhile, like choosing the first draft, lands after it in the conversation.
         asked = list(dict.fromkeys(state.get("asked_fields", []) + ([plan.asked_field] if plan.asked_field else [])))
         streak = state.get("questions_streak", 0) + 1 if plan.action == TurnAction.ASK and not progressed else 0
-        trip.state = {**state, "asked_fields": asked, "questions_streak": streak, "answer_options": plan.answer_options}
+        trip.state = {**state, "asked_fields": asked, "questions_streak": streak, "answer_options": plan.answer_options,
+                      "no_plans": None}
         trip.next_question = plan.next_question
         self.trips.add_message(trip.id, "user", shown_message)
         answer = self.trips.add_message(trip.id, "assistant", reply if not plan.next_question else f"{reply}\n\n{plan.next_question}")
@@ -149,19 +210,22 @@ class TravelPlannerWorkflow:
             if plan.action == TurnAction.SHOW_OPTIONS:
                 yield from self._show_options(trip, new_profile, plan.options_request, personality)
             elif plan.action == TurnAction.OFFER_DRAFTS:
-                yield from self._offer_drafts(trip, new_profile, personality)
+                yield from self._offer_drafts(trip, new_profile, personality, answer, reply_with_plans)
             elif plan.action == TurnAction.EDIT_ITINERARY:
                 yield _progress("Updating your plan…")
                 changing = TurnService.to_change(decision)
-                updated = self.drafter.edit(itinerary, changing, decision.edit_request or shown_message, new_profile,
-                                            self._viewport(trip), self._skipped(trip), personality)
+                updated, warnings, checked = self.drafter.edit(itinerary, changing, decision.edit_request or shown_message, new_profile,
+                                                               self._viewport(trip), self._skipped(trip), personality)
+                extras = [f"Worth a look: {w.rstrip('.')}." for w in warnings] + ([] if checked else [UNCHECKED])
                 if updated == itinerary:
-                    extra = "I left the plan as it is: I found nothing that needed changing or fitted better."
-                    answer.content = f"{reply} {extra}" + (f"\n\n{plan.next_question}" if plan.next_question else "")
-                    yield {"type": "note", "text": extra}
+                    extras.insert(0, "I left the plan as it is: I found nothing that needed changing or fitted better.")
                 else:
                     trip.itinerary = updated.model_dump(mode="json")
                     self._keep_notes_attached(trip, personality, itinerary, updated)
+                if extras:
+                    extra = " ".join(extras)
+                    answer.content = f"{reply} {extra}" + (f"\n\n{plan.next_question}" if plan.next_question else "")
+                    yield {"type": "note", "text": extra}
         except PlacesUnavailableError as e:
             logger.warning("Places unavailable: %s", e)
             extra = " (I couldn't reach the places service just now.)"
@@ -180,12 +244,17 @@ class TravelPlannerWorkflow:
         trip.destination_area = trip.panel = trip.itinerary = trip.personality = None
         trip.drafts = []
         trip.title = "New trip"
-        trip.state = {"answer_options": chips}
+        trip.state = {}
+        yield from self._answer(trip, message, "Fresh start!", question, chips)
+
+    def _answer(self, trip: TripModel, message: str, text: str, question: str | None, chips: list[str]) -> Iterator[Event]:
+        """A whole turn with a fixed reply, no model."""
+        trip.state = {**(trip.state or {}), "answer_options": chips}
         trip.next_question = question
         self.trips.add_message(trip.id, "user", message)
-        self.trips.add_message(trip.id, "assistant", f"Fresh start!\n\n{question}")
+        self.trips.add_message(trip.id, "assistant", f"{text}\n\n{question}" if question else text)
         self.db.commit()
-        yield {"type": "reply", "text": "Fresh start!", "next_question": question, "answer_options": chips}
+        yield _reply(text, question, chips)
         yield {"type": "done", "trip": self.trips.to_out(trip).model_dump(mode="json")}
 
     def _context(self, trip: TripModel, itinerary: Itinerary | None, personality: Personality) -> str:
@@ -230,15 +299,64 @@ class TravelPlannerWorkflow:
         self.db.commit()
         yield {"type": "options", "options": trip.panel}
 
-    def _offer_drafts(self, trip: TripModel, profile: TripProfile, personality: Personality) -> Iterator[Event]:
+    def _offer_drafts(self, trip: TripModel, profile: TripProfile, personality: Personality,
+                      answer: MessageModel, reply_with_plans: str) -> Iterator[Event]:
         yield _progress(f"Gathering places in {profile.destination}…")
         trip.drafts = []
-        for i, draft in enumerate(self.drafter.generate(profile, self._viewport(trip), self._skipped(trip), personality)):
-            trip.drafts = [*trip.drafts, draft.model_dump(mode="json")]
+        viewport, skipped = self._viewport(trip), self._skipped(trip)
+        # Each plan is reviewed in its own thread while the next is written, and shown once its review is done.
+        checks = ThreadPoolExecutor(max_workers=DRAFT_COUNT)
+        reviews: list[Future] = []
+        places = None
+        try:
+            try:
+                for draft in self.drafter.generate(profile, viewport, skipped, personality):
+                    if places is None:
+                        places = self._review_places(profile, viewport, skipped, personality)
+                    reviews.append(checks.submit(self.drafter.review, draft, places, profile, personality))
+                    yield from self._show_reviewed(trip, reviews, answer, reply_with_plans, wait=False)
+                    if len(trip.drafts) + len(reviews) < DRAFT_COUNT:
+                        yield _progress(f"Drafting plan {len(trip.drafts) + len(reviews) + 1} of {DRAFT_COUNT}…")
+            except Exception as e:
+                if not reviews and not trip.drafts:
+                    logger.warning("No plans for %s: %r", profile.destination, e, exc_info=True)
+                    no_plans = _why_no_plans(e, profile.destination)
+                    self.db.refresh(trip)  # an older draft may have been chosen while we worked
+                    trip.drafts = []
+                    trip.state = {**(trip.state or {}), "no_plans": no_plans.model_dump()}
+                    answer.content = f"{answer.content} {no_plans.reason}"
+                    self.db.commit()
+                    yield {"type": "note", "text": no_plans.reason}
+                    return
+                logger.exception("Drafting stopped early; showing the plans already written")
+            if reviews:
+                yield _progress("Checking your plans…")
+            yield from self._show_reviewed(trip, reviews, answer, reply_with_plans, wait=True)
+        finally:
+            checks.shutdown(wait=False, cancel_futures=True)  # a closed stream doesn't wait for the model
+
+    def _review_places(self, profile: TripProfile, viewport: dict | None, skipped: set[str],
+                       personality: Personality) -> list:
+        try:
+            return self.drafter.pool(profile, viewport, skipped, personality).places  # cached by generate
+        except Exception:
+            logger.exception("No places for the review; it judges without them")
+            return []
+
+    def _show_reviewed(self, trip: TripModel, reviews: list[Future], answer: MessageModel, reply: str,
+                       wait: bool) -> Iterator[Event]:
+        """Shows reviewed plans as they finish: all that are done, or with `wait` every one left."""
+        for future in as_completed(list(reviews)) if wait else [f for f in reviews if f.done()]:
+            reviews.remove(future)
+            # Saved before it is shown: choosing a plan closes the stream.
+            trip.drafts = [*trip.drafts, future.result().model_dump(mode="json")]
+            first = len(trip.drafts) == 1
+            if first:
+                answer.content = reply
             self.db.commit()
-            yield {"type": "draft", "index": i, "draft": trip.drafts[-1]}
-            if i + 1 < DRAFT_COUNT:
-                yield _progress(f"Drafting plan {i + 2} of {DRAFT_COUNT}…")
+            if first:
+                yield _reply(reply)  # replaces the one shown while we worked
+            yield {"type": "draft", "index": len(trip.drafts) - 1, "draft": trip.drafts[-1]}
 
     # ---------- actions ----------
 
@@ -274,14 +392,14 @@ class TravelPlannerWorkflow:
                 self.trips.set_feedback(trip.id, pick, "liked")
                 if pick.type_label:
                     self._remember_like(trip, profile, pick)
-            over_budget = (
-                pick.category == PickCategory.STAY and profile.budget_level is not None
+            over_budget = (  # only an estimated tier can say so: open data has no prices
+                pick.category == PickCategory.STAY and profile.budget_level is not None and pick.tier is not None
                 and tier_rank(pick.tier) > tier_rank(profile.budget_level.value)
             )
             # A liked stay over budget, or one the user called too pricey: find similar ones that fit.
             if action == "too_pricey" or over_budget:
                 option_set = self.options.similar_cheaper(pick, profile, self._skipped(trip),
-                                                          self.trips.personality(trip))
+                                                          self.trips.personality(trip), self._viewport(trip))
                 trip.panel = option_set.model_dump(mode="json")
                 self.db.commit()
                 return option_set
@@ -331,6 +449,8 @@ class TravelPlannerWorkflow:
         day.activities[index] = old.model_copy(update={
             "name": pick.name, "category": pick.category.value, "description": pick.why,
             "place_id": pick.place_id, "photo_name": pick.photo_name, "maps_url": pick.maps_url,
+            "lat": pick.lat, "lng": pick.lng,
+            "source_url": pick.source_url,
             "for_note": None,  # the replacement wasn't chosen for that moment
         })
         trip.itinerary = itinerary.model_dump(mode="json")

@@ -98,6 +98,7 @@ class LLMClient:
         history: list[dict] | None = None,
         system: str | None = None,
         model: str | None = None,
+        timeout: float | None = None,
     ) -> T:
         """Ask the model for JSON matching `schema`; retry once with the error if it doesn't."""
         messages: list[dict] = []
@@ -120,6 +121,7 @@ class LLMClient:
                 model=model or settings.LLM_MODEL,
                 messages=messages,
                 response_format=response_format,
+                **({"timeout": timeout} if timeout else {}),
                 **({"reasoning_effort": settings.LLM_REASONING_EFFORT} if settings.LLM_REASONING_EFFORT else {}),
             )
             content = _clean(response.choices[0].message.content)

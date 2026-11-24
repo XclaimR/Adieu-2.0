@@ -174,13 +174,24 @@ def replace_activity(
     return TripRepository(db).to_out(trip)
 
 
-@router.get("/photos/{photo_name:path}")
-def photo(photo_name: str, db: Session = Depends(get_db)):
-    """Redirects to a Places photo so the API key never reaches the browser. Unauthenticated so <img> tags work."""
+def _photo(photo_name: str, db: Session) -> dict:
     try:
-        url = PlacesService(db).photo_url(photo_name)
+        return PlacesService(db).photo(photo_name)
     except ValueError:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid photo name")
     except PlacesUnavailableError:
+        # Also every photo saved from Google: the browser shows the placeholder.
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Photo unavailable")
-    return RedirectResponse(url, status_code=status.HTTP_302_FOUND)
+
+
+@router.get("/photos/{photo_name:path}")
+def photo(photo_name: str, db: Session = Depends(get_db)):
+    """Redirects to an openly licensed Wikimedia Commons photo. Unauthenticated so <img> tags work."""
+    return RedirectResponse(_photo(photo_name, db)["url"], status_code=status.HTTP_302_FOUND)
+
+
+@router.get("/photo-credits/{photo_name:path}")
+def photo_credit(photo_name: str, db: Session = Depends(get_db)):
+    """Who took the photo and its licence, shown on the photo."""
+    found = _photo(photo_name, db)
+    return {"by": found["by"], "licence": found["licence"], "source": found["source"]}

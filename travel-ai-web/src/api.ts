@@ -1,4 +1,4 @@
-import type { PickAction, StarterIdea, Trip, TripSummary, TripUpdate, TurnEvent, User, Vibe } from "./types";
+import type { PhotoCredit, PickAction, StarterIdea, Trip, TripSummary, TripUpdate, TurnEvent, User, Vibe } from "./types";
 
 const BASE = "/api";
 const TOKEN_KEY = "adieu.token";
@@ -71,6 +71,7 @@ export const api = {
     request<TripUpdate>("POST", `/trips/${id}/picks/${encodeURIComponent(placeId)}`, { action }),
   activityAction: (id: string, day: number, index: number, action: "remove" | "swap") =>
     request<TripUpdate>("POST", `/trips/${id}/itinerary/days/${day}/activities/${index}`, { action }),
+  photoCredit: (name: string) => request<PhotoCredit>("GET", `/photo-credits/${name}`),
   replaceActivity: (id: string, day: number, index: number, placeId: string) =>
     request<Trip>("POST", `/trips/${id}/itinerary/days/${day}/activities/${index}/replace`, { place_id: placeId }),
 };

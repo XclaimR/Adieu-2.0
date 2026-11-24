@@ -2,7 +2,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
-from app.schemas.draft import Draft
+from app.schemas.draft import Draft, NoPlans
 from app.schemas.itinerary import Itinerary
 from app.schemas.personality import Personality
 from app.schemas.place import OptionSet
@@ -64,6 +64,7 @@ class TripOut(BaseModel):
     destination_name: str | None
     panel: OptionSet | None
     drafts: list[Draft]
+    no_plans: NoPlans | None
     liked_place_ids: list[str]
     skipped_place_ids: list[str]
     next_question: str | None

@@ -132,6 +132,7 @@ class TripRepository:
             destination_name=(trip.destination_area or {}).get("name"),
             panel=self.panel(trip),
             drafts=self.drafts(trip),
+            no_plans=(trip.state or {}).get("no_plans"),
             liked_place_ids=[p.place_id for p in self.feedback(trip.id, "liked")],
             skipped_place_ids=[p.place_id for p in self.feedback(trip.id, "skipped")],
             next_question=trip.next_question,

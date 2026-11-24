@@ -24,7 +24,7 @@ def _new_id() -> str:
 
 
 class OptionsService:
-    """Builds the option sets shown in the side panel. Every place comes from Places, inside the destination."""
+    """Builds the option sets shown in the side panel. Every place comes from the destination's open data."""
 
     def __init__(self, places: PlacesService):
         self.places = places
@@ -64,8 +64,9 @@ class OptionsService:
         return fitting if len(fitting) >= MIN_AFTER_FILTER else candidates
 
     def similar_cheaper(self, pick: Pick, profile: TripProfile, exclude_ids: set[str],
-                        personality: Personality | None = None) -> OptionSet:
-        """Stays like `pick` (same kind of place, same area) but in a lower price tier."""
+                        personality: Personality | None = None, viewport: dict | None = None) -> OptionSet:
+        """Stays like `pick` (same kind of place, same area) in a lower estimated tier. Open data has no prices,
+        so the tiers are guesses from the type and the guide, and the title says so."""
         target = profile.budget_level.value if profile.budget_level else "budget"
         if tier_rank(target) >= tier_rank(pick.tier):
             target = {2: "mid", 1: "budget"}.get(tier_rank(pick.tier), "budget")
@@ -73,18 +74,17 @@ class OptionsService:
         kind_of_place = (pick.type_label or "hotel").lower()
         query = f"{_TIER_WORDS[target]} {kind_of_place} near {pick.name}"
         if pick.lat is not None and pick.lng is not None:
-            candidates = self.places.nearby(query, PickCategory.STAY, pick.lat, pick.lng)
+            found = self.places.nearby(query, PickCategory.STAY, pick.lat, pick.lng, profile.destination, viewport)
         else:
-            candidates = self.places.candidates(profile.destination, PickCategory.STAY, None, None, query)
+            found = self.places.candidates(profile.destination, PickCategory.STAY, None, viewport, query)
+        found = [c for c in found if c.place_id not in exclude_ids | {pick.place_id}]
 
-        candidates = [
-            c for c in candidates
-            if c.place_id not in exclude_ids | {pick.place_id} and tier_rank(c.tier) <= tier_rank(target)
-        ] or [c for c in candidates if c.place_id != pick.place_id]
-
-        focus = f"places similar to {pick.name} ({pick.type_label or 'stay'}) but at a {target} price"
-        picks = RankingService.rank(PickCategory.STAY, candidates, profile, focus=focus, personality=personality)
-        return OptionSet(id=_new_id(), kind="stay", title=f"Like {pick.name}, for less", items=picks)
+        cheaper = [c for c in found if c.tier and tier_rank(c.tier) <= tier_rank(target)]
+        title = f"Like {pick.name}, likely for less (estimated)" if cheaper else f"Near {pick.name} (prices unknown)"
+        focus = (f"places similar to {pick.name} ({pick.type_label or 'stay'}) at an estimated {target} tier"
+                 if cheaper else f"places similar to {pick.name}; prices are unknown, so don't claim any are cheaper")
+        picks = RankingService.rank(PickCategory.STAY, cheaper or found, profile, focus=focus, personality=personality)
+        return OptionSet(id=_new_id(), kind="stay", title=title, items=picks)
 
     def swap_options(
         self,

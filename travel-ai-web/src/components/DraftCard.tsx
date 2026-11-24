@@ -1,13 +1,14 @@
 import { useEffect, useState } from "react";
-import { photoUrl } from "../api";
+import Photo from "./Photo";
 import type { Draft } from "../types";
 
 export default function DraftCard({ draft, onChoose }: { draft: Draft; onChoose: () => void }) {
-  const src = photoUrl(draft.photo_name);
   const days = draft.itinerary.days;
   return (
     <article className="draft">
-      <div className="photo">{src ? <img src={src} alt="" loading="lazy" /> : <span>🗺️</span>}</div>
+      <div className="photo">
+        <Photo name={draft.photo_name} fallback="🗺️" withCredit />
+      </div>
       <div className="draft-body">
         <strong className="draft-title">{draft.title}</strong>
         <p className="small muted">{draft.summary}</p>
@@ -25,6 +26,16 @@ export default function DraftCard({ draft, onChoose }: { draft: Draft; onChoose:
         </ol>
         {draft.itinerary.stay && <p className="small">🛏 {draft.itinerary.stay.name}</p>}
         {draft.unplanned.length > 0 && <p className="small muted">Not fitted in yet: {draft.unplanned.join(", ")}</p>}
+        {draft.warnings.length > 0 && (
+          <div className="small muted">
+            Check before choosing:
+            <ul>
+              {draft.warnings.map((w) => (
+                <li key={w}>{w}</li>
+              ))}
+            </ul>
+          </div>
+        )}
         <button className="primary" onClick={onChoose}>
           Choose this plan
         </button>

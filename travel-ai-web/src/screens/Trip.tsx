@@ -85,7 +85,7 @@ export default function TripScreen({ tripId, firstMessage }: { tripId: string; f
 
   useEffect(() => {
     logRef.current?.scrollTo({ top: logRef.current.scrollHeight, behavior: "smooth" });
-  }, [trip?.messages.length, live?.steps.length, live?.reply]);
+  }, [trip?.messages.length, live?.steps.length, live?.reply, chatOpen]);
 
   useEffect(() => {
     if (!toast) return;
@@ -148,6 +148,8 @@ export default function TripScreen({ tripId, firstMessage }: { tripId: string; f
         if (ev.type === "progress" && ev.text.startsWith("Gathering places")) {
           setDrafting(true);
           setDraftingSince(Date.now());
+          // The server replaces the old plans, and the new ones only arrive once reviewed.
+          setTrip((t) => t && { ...t, drafts: [] });
           openPanel({ view: "drafts" });
         }
       });
@@ -219,9 +221,10 @@ export default function TripScreen({ tripId, firstMessage }: { tripId: string; f
   const question = live?.reply ? live.reply.next_question : busy ? null : trip.next_question;
   const chips = live ? [] : trip.answer_options;
   // What "Last options" reopens: this session's panel, else what the server remembers.
-  let lastPanel: PanelView | null = panel;
+  const plansToShow = drafting || trip.drafts.length > 0 || !!trip.no_plans;
+  let lastPanel: PanelView | null = panel?.view === "drafts" && !plansToShow ? null : panel;
   if (!lastPanel && trip.panel) lastPanel = { view: "options", set: trip.panel };
-  if (!lastPanel && trip.drafts.length > 0 && !trip.itinerary) lastPanel = { view: "drafts" };
+  if (!lastPanel && (trip.drafts.length > 0 || trip.no_plans) && !trip.itinerary) lastPanel = { view: "drafts" };
   const canShowPlans = !!trip.profile.destination && !trip.itinerary && !busy;
 
   let panelTitle = "Options";
@@ -230,6 +233,23 @@ export default function TripScreen({ tripId, firstMessage }: { tripId: string; f
     panelTitle = "Pick a starting plan";
     panelBody = (
       <div className="draft-list">
+        {!drafting && trip.drafts.length === 0 && (
+          <div className="no-plans" role="status">
+            <strong className="draft-title">No plans yet</strong>
+            {/* No reason saved means the connection or server dropped before it could say. */}
+            <p>{trip.no_plans?.reason ?? "I couldn't finish your plans. Please try again."}</p>
+            <button
+              className={trip.no_plans?.retry_now === false ? undefined : "primary"}
+              disabled={busy}
+              onClick={() => {
+                setPanelOpen(false);
+                send(SHOW_PLANS);
+              }}
+            >
+              {trip.no_plans?.retry_now === false ? "Check again later" : "Try again"}
+            </button>
+          </div>
+        )}
         {trip.drafts.map((d) => (
           <DraftCard key={d.id} draft={d} onChoose={() => chooseDraft(d.id)} />
         ))}
@@ -238,7 +258,7 @@ export default function TripScreen({ tripId, firstMessage }: { tripId: string; f
             <DraftSkeleton
               key={i}
               since={draftingSince}
-              label={`Drafting plan ${trip.drafts.length + i + 1} of ${DRAFT_COUNT} from real places…`}
+              label={`Writing and checking plan ${trip.drafts.length + i + 1} of ${DRAFT_COUNT}…`}
             />
           ))}
       </div>
@@ -259,6 +279,7 @@ export default function TripScreen({ tripId, firstMessage }: { tripId: string; f
               }}
             />
           ))}
+          {set.ideas.length === 0 && <p className="muted">No ideas this time. Try asking in a different way.</p>}
         </div>
       ) : (
         <div className="option-list">

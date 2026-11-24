@@ -1,11 +1,12 @@
-import { photoUrl } from "../api";
+import Photo from "./Photo";
 import type { StarterIdea } from "../types";
 
 export default function IdeaCard({ idea, onChoose }: { idea: StarterIdea; onChoose: () => void }) {
-  const src = photoUrl(idea.photo_name);
   return (
     <button className="idea" onClick={onChoose}>
-      <div className="photo">{src ? <img src={src} alt="" loading="lazy" /> : <span>🧭</span>}</div>
+      <div className="photo">
+        <Photo name={idea.photo_name} fallback="🧭" />
+      </div>
       <div className="idea-body">
         <strong>{idea.title}</strong>
         <span className="small muted">{idea.destination}</span>

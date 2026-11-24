@@ -36,10 +36,10 @@ def set_taste(request: TasteRequest, user: UserModel = Depends(current_user), db
 
 @router.get("/starter-ideas", response_model=list[StarterIdea])
 def starter_ideas(user: UserModel = Depends(current_user), db: Session = Depends(get_db)):
-    """Home-screen ideas. Cached per user and taste for a day: each set costs an LLM call and Places lookups."""
+    """Home-screen ideas. Cached per user and taste for a day: each set costs an LLM call and destination lookups."""
     taste = UserRepository.taste(user)
     places = PlacesService(db)
-    key = f"ideas:{user.id}:{hashlib.sha256(taste.model_dump_json().encode()).hexdigest()[:16]}"
+    key = f"open:country-ideas:{user.id}:{hashlib.sha256(taste.model_dump_json().encode()).hexdigest()[:16]}"
     cached = places._cached(key, ttl_hours=24)
     if cached is not None:
         return cached["ideas"]
