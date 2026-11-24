@@ -12,7 +12,6 @@ import Credits from "../components/Credits";
 const DRAFT_COUNT = 3;
 const SHOW_PLANS = "__show_plans__";
 
-type PanelView = { view: "options"; set: OptionSet } | { view: "drafts" };
 
 type Live = {
   userText: string;
@@ -53,6 +52,13 @@ function PersonalityCard({ personality }: { personality: Personality }) {
   const tripNotes = notes.filter((n) => n.target === "trip");
   const isMoment = (n: (typeof notes)[number]) => n.once && n.kind !== "avoid";
   const moments = tripNotes.filter(isMoment).map((n) => n.text);
+  const words = SCALES.map(([key, , left, right, middle]) => {
+    const s = scales[key];
+    const known = !!s && s.confidence >= KNOWN;
+    const value = s?.value ?? 0;
+    return { key, known, value, word: !known ? "Not sure" : value < -LEAN ? left : value > LEAN ? right : middle };
+  });
+  const fresh = useFresh(words.filter((w) => w.known).map((w) => `${w.key}:${w.word}`));
   return (
     <details className="personality">
       <summary>
@@ -61,13 +67,10 @@ function PersonalityCard({ personality }: { personality: Personality }) {
           {tripNotes.length > 0 && <span className="small">Notes ({tripNotes.length})</span>}
         </span>
         <span className="fingerprint">
-          {SCALES.map(([key, label, left, right, middle]) => {
-            const s = scales[key];
-            const known = !!s && s.confidence >= KNOWN;
-            const value = s?.value ?? 0;
-            const word = !known ? "Not sure" : value < -LEAN ? left : value > LEAN ? right : middle;
+          {SCALES.map(([key, label], i) => {
+            const { known, value, word } = words[i];
             return (
-              <span key={key} className={`scale ${known ? "known" : ""}`}>
+              <span key={key} className={`scale ${known ? "known" : ""} ${fresh.has(`${key}:${word}`) ? "fresh" : ""}`}>
                 <span className="scale-text">
                   <span>{label}</span>
                   <span className="scale-word">{word}</span>
@@ -89,7 +92,7 @@ function PersonalityCard({ personality }: { personality: Personality }) {
 export default function TripScreen({ tripId, firstMessage }: { tripId: string; firstMessage?: string }) {
   const [trip, setTrip] = useState<Trip | null>(null);
   const [live, setLive] = useState<Live | null>(null);
-  const [panel, setPanel] = useState<PanelView | null>(null);
+  const [panel, setPanel] = useState<OptionSet | null>(null);
   const [panelOpen, setPanelOpen] = useState(false);
   const [drafting, setDrafting] = useState(false);
   const [draftingSince, setDraftingSince] = useState(0);
@@ -102,6 +105,8 @@ export default function TripScreen({ tripId, firstMessage }: { tripId: string; f
   const streamAbort = useRef<AbortController | null>(null);
   const [chatOpen, setChatOpen] = useState(false);
   const logRef = useRef<HTMLDivElement>(null);
+  const plansRef = useRef<HTMLElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   const sentFirst = useRef(false);
 
   useEffect(() => {
@@ -126,9 +131,17 @@ export default function TripScreen({ tripId, firstMessage }: { tripId: string; f
     return () => clearTimeout(t);
   }, [toast]);
 
-  const openPanel = (view: PanelView) => {
-    setPanel(view);
+  const openPanel = (set: OptionSet) => {
+    setPanel(set);
     setPanelOpen(true);
+  };
+  // Plans live on the board; bring them into view once React has drawn them.
+  const showPlans = () => setTimeout(() => plansRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+  // Moves and day changes go through chat: write the start of the message and let the traveler finish it.
+  const ask = (text: string) => {
+    setInput(text);
+    setChatOpen(true);
+    setTimeout(() => inputRef.current?.focus(), 50);
   };
 
   const send = async (text: string) => {
@@ -163,12 +176,12 @@ export default function TripScreen({ tripId, firstMessage }: { tripId: string; f
             setLive((l) => l && l.reply && { ...l, reply: { ...l.reply, text: `${l.reply.text} ${ev.text}` } });
             break;
           case "options":
-            openPanel({ view: "options", set: ev.options });
+            openPanel(ev.options);
             break;
           case "draft":
             setDrafting(ev.index + 1 < DRAFT_COUNT);
             setTrip((t) => t && { ...t, drafts: ev.index === 0 ? [ev.draft] : [...t.drafts, ev.draft] });
-            if (ev.index === 0) openPanel({ view: "drafts" });
+            if (ev.index === 0) showPlans();
             break;
           case "done":
             setTrip(ev.trip);
@@ -183,7 +196,7 @@ export default function TripScreen({ tripId, firstMessage }: { tripId: string; f
           setDraftingSince(Date.now());
           // The server replaces the old plans, and the new ones only arrive once reviewed.
           setTrip((t) => t && { ...t, drafts: [] });
-          openPanel({ view: "drafts" });
+          showPlans();
         }
       });
     } catch (e) {
@@ -211,7 +224,7 @@ export default function TripScreen({ tripId, firstMessage }: { tripId: string; f
       if (!trip) return;
       const { trip: updated, options } = await api.pickAction(trip.id, placeId, action);
       setTrip(updated);
-      if (options) openPanel({ view: "options", set: options });
+      if (options) openPanel(options);
       if (action === "add") setToast("Added to your trip");
       if (action === "like" && !options) setToast("Noted — more like this");
     });
@@ -232,7 +245,7 @@ export default function TripScreen({ tripId, firstMessage }: { tripId: string; f
       try {
         const { trip: updated, options } = await api.activityAction(trip.id, day, index, action);
         setTrip(updated);
-        if (options) openPanel({ view: "options", set: options });
+        if (options) openPanel(options);
       } finally {
         setBusy(false);
       }
@@ -246,126 +259,145 @@ export default function TripScreen({ tripId, firstMessage }: { tripId: string; f
       setToast("Swapped");
     });
 
+  const freshFacts = useFresh(trip ? profileFacts(trip.profile) : null);
+
   if (!trip) return <div className="center muted">{error ?? "Loading trip…"}</div>;
 
-  const facts = profileFacts(trip.profile);
+
+  const facts = profileFacts(trip.profile).filter((f) => f !== trip.profile.destination);
   const liked = new Set(trip.liked_place_ids);
   const skipped = new Set(trip.skipped_place_ids);
   const question = live?.reply ? live.reply.next_question : busy ? null : trip.next_question;
   const chips = live ? [] : trip.answer_options;
-  // What "Last options" reopens: this session's panel, else what the server remembers.
-  const plansToShow = drafting || trip.drafts.length > 0 || !!trip.no_plans;
-  let lastPanel: PanelView | null = panel?.view === "drafts" && !plansToShow ? null : panel;
-  if (!lastPanel && trip.panel) lastPanel = { view: "options", set: trip.panel };
-  if (!lastPanel && (trip.drafts.length > 0 || trip.no_plans) && !trip.itinerary) lastPanel = { view: "drafts" };
+  // "Last options" reopens this session's panel, else what the server remembers.
+  const lastPanel = panel ?? trip.panel;
+  const showPlanList = !trip.itinerary && (drafting || trip.drafts.length > 0 || !!trip.no_plans);
   const canShowPlans = !!trip.profile.destination && !trip.itinerary && !busy;
+  const title = trip.itinerary?.title ?? trip.profile.destination ?? "Your next trip";
+  const lastIsAssistant = !live && trip.messages[trip.messages.length - 1]?.role === "assistant";
 
-  let panelTitle = "Options";
   let panelBody: React.ReactNode = null;
-  if (panel?.view === "drafts") {
-    panelTitle = "Pick a starting plan";
+  if (panel?.kind === "destinations") {
     panelBody = (
-      <div className="draft-list">
-        {!drafting && trip.drafts.length === 0 && (
-          <div className="no-plans" role="status">
-            <strong className="draft-title">No plans yet</strong>
-            {/* No reason saved means the connection or server dropped before it could say. */}
-            <p>{trip.no_plans?.reason ?? "I couldn't finish your plans. Please try again."}</p>
-            <button
-              className={trip.no_plans?.retry_now === false ? undefined : "primary"}
-              disabled={busy}
-              onClick={() => {
-                setPanelOpen(false);
-                send(SHOW_PLANS);
-              }}
-            >
-              {trip.no_plans?.retry_now === false ? "Check again later" : "Try again"}
-            </button>
-          </div>
-        )}
-        {trip.drafts.map((d) => (
-          <DraftCard key={d.id} draft={d} onChoose={() => chooseDraft(d.id)} />
+      <div className="option-list">
+        {panel.ideas.map((idea) => (
+          <IdeaCard
+            key={idea.title}
+            idea={idea}
+            onChoose={() => {
+              setPanelOpen(false);
+              send(`Let's go to ${idea.destination}`);
+            }}
+          />
         ))}
-        {drafting &&
-          Array.from({ length: DRAFT_COUNT - trip.drafts.length }, (_, i) => (
-            <DraftSkeleton
-              key={i}
-              since={draftingSince}
-              label={`Writing and checking plan ${trip.drafts.length + i + 1} of ${DRAFT_COUNT}…`}
-            />
-          ))}
+        {panel.ideas.length === 0 && <p className="muted">No ideas this time. Try asking in a different way.</p>}
       </div>
     );
-  } else if (panel?.view === "options") {
-    const set = panel.set;
-    panelTitle = set.title;
-    panelBody =
-      set.kind === "destinations" ? (
-        <div className="option-list">
-          {set.ideas.map((idea) => (
-            <IdeaCard
-              key={idea.title}
-              idea={idea}
-              onChoose={() => {
-                setPanelOpen(false);
-                send(`Let's go to ${idea.destination}`);
-              }}
+  } else if (panel) {
+    const set = panel;
+    panelBody = (
+      <div className="option-list">
+        {set.items
+          .filter((p) => !skipped.has(p.place_id))
+          .map((p) => (
+            <PickCard
+              key={p.place_id}
+              pick={p}
+              liked={liked.has(p.place_id)}
+              onAction={(a) => pickAction(p.place_id, a)}
+              onUse={set.kind === "swap" ? () => replace(set, p.place_id) : undefined}
             />
           ))}
-          {set.ideas.length === 0 && <p className="muted">No ideas this time. Try asking in a different way.</p>}
-        </div>
-      ) : (
-        <div className="option-list">
-          {set.items
-            .filter((p) => !skipped.has(p.place_id))
-            .map((p) => (
-              <PickCard
-                key={p.place_id}
-                pick={p}
-                liked={liked.has(p.place_id)}
-                onAction={(a) => pickAction(p.place_id, a)}
-                onUse={set.kind === "swap" ? () => replace(set, p.place_id) : undefined}
-              />
-            ))}
-          {set.items.length === 0 && <p className="muted">Nothing matched. Try asking in a different way.</p>}
-        </div>
-      );
+        {set.items.length === 0 && <p className="muted">Nothing matched. Try asking in a different way.</p>}
+      </div>
+    );
   }
 
   return (
-    <main className={`trip ${trip.itinerary ? "with-itinerary" : "chat-only"} ${chatOpen ? "chat-open" : ""}`}>
-      {trip.itinerary && (
-        <section className="main-plan">
-          <ItineraryView
-            itinerary={trip.itinerary}
-            notes={trip.personality.notes}
-            busy={busy}
-            onSwap={(d, i) => activity(d, i, "swap")}
-            onRemove={(d, i) => activity(d, i, "remove")}
-          />
-          <Credits />
-        </section>
-      )}
+    <main className={`trip ${chatOpen ? "chat-open" : ""}`}>
+      <section className="board">
+        <header className="trip-head">
+          {trip.itinerary && <span className="trip-sub">Your trip to {trip.itinerary.destination}</span>}
+          <h1>{title}</h1>
+          <PersonalityCard personality={trip.personality} />
+        </header>
 
-      <section className="chat">
-        {trip.itinerary && (
-          <button className="chat-toggle" onClick={() => setChatOpen((o) => !o)}>
-            {chatOpen ? "▾ Hide chat" : "▴ Chat about your plan"}
-          </button>
-        )}
-        {facts.length > 0 && (
-          <div className="facts" title="What I know about this trip">
-            {facts.map((f) => (
-              <span key={f} className="fact">
-                {f}
-              </span>
-            ))}
-          </div>
-        )}
-        <PersonalityCard personality={trip.personality} />
+        <div className="board-body">
+          {(facts.length > 0 || (!panelOpen && lastPanel)) && (
+            <div className="facts" title="What I know about this trip">
+              {facts.map((f) => (
+                <span key={f} className={`fact ${freshFacts.has(f) ? "fresh" : ""}`}>
+                  {f}
+                </span>
+              ))}
+              {!panelOpen && lastPanel && (
+                <button className="reopen-panel" onClick={() => openPanel(lastPanel)}>
+                  Last options
+                </button>
+              )}
+            </div>
+          )}
+
+          {trip.itinerary ? (
+            <ItineraryView
+              itinerary={trip.itinerary}
+              notes={trip.personality.notes}
+              busy={busy}
+              onSwap={(d, i) => activity(d, i, "swap")}
+              onRemove={(d, i) => activity(d, i, "remove")}
+              onAsk={ask}
+            />
+          ) : (
+            <WeekSlots days={trip.profile.duration_days} />
+          )}
+
+          {showPlanList && (
+            <section className="plans" ref={plansRef} aria-label="Plans">
+              <h2>{drafting && trip.drafts.length === 0 ? "Putting your plans together" : "Pick a starting plan"}</h2>
+              <div className="draft-list">
+                {!drafting && trip.drafts.length === 0 && (
+                  <div className="no-plans" role="status">
+                    <strong className="draft-title">No plans yet</strong>
+                    {/* No reason saved means the connection or server dropped before it could say. */}
+                    <p>{trip.no_plans?.reason ?? "I couldn't finish your plans. Please try again."}</p>
+                    <button
+                      className={trip.no_plans?.retry_now === false ? undefined : "primary"}
+                      disabled={busy}
+                      onClick={() => send(SHOW_PLANS)}
+                    >
+                      {trip.no_plans?.retry_now === false ? "Check again later" : "Try again"}
+                    </button>
+                  </div>
+                )}
+                {trip.drafts.map((d) => (
+                  <DraftCard key={d.id} draft={d} onChoose={() => chooseDraft(d.id)} />
+                ))}
+                {drafting &&
+                  Array.from({ length: DRAFT_COUNT - trip.drafts.length }, (_, i) => (
+                    <DraftSkeleton
+                      key={i}
+                      since={draftingSince}
+                      label={`Writing and checking plan ${trip.drafts.length + i + 1} of ${DRAFT_COUNT}…`}
+                    />
+                  ))}
+              </div>
+            </section>
+          )}
+
+          <Credits />
+        </div>
+      </section>
+
+      <section className="chat" aria-label="Conversation">
+        <button className="chat-toggle" onClick={() => setChatOpen((o) => !o)} aria-expanded={chatOpen}>
+          {chatOpen ? "Hide conversation" : "Conversation"}
+        </button>
         <div className="log" ref={logRef}>
           {trip.messages.map((m, i) => (
-            <div key={i} className={`msg ${m.role}`}>
+            <div
+              key={i}
+              className={`msg ${m.role} ${lastIsAssistant && i === trip.messages.length - 1 ? "current" : ""}`}
+            >
               {m.content}
             </div>
           ))}
@@ -380,7 +412,7 @@ export default function TripScreen({ tripId, firstMessage }: { tripId: string; f
             </ul>
           )}
           {live?.reply && (
-            <div className="msg assistant">
+            <div className="msg assistant current">
               {live.reply.text}
               {live.reply.next_question && `\n\n${live.reply.next_question}`}
             </div>
@@ -406,7 +438,7 @@ export default function TripScreen({ tripId, firstMessage }: { tripId: string; f
             ))}
             {canShowPlans && (
               <button className="chip-plans" onClick={() => send(SHOW_PLANS)}>
-                ✨ Just show me some plans
+                {trip.drafts.length > 0 ? "New plans" : "Show me plans now"}
               </button>
             )}
           </div>
@@ -420,9 +452,11 @@ export default function TripScreen({ tripId, firstMessage }: { tripId: string; f
           }}
         >
           <input
+            ref={inputRef}
+            aria-label="Message"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder={question ? "Type an answer, or anything else…" : "Tell me more…"}
+            placeholder={question ? "Or say it your way…" : "Tell me what to change…"}
             disabled={busy}
           />
           <button className="primary" disabled={busy || !input.trim()}>
@@ -431,17 +465,51 @@ export default function TripScreen({ tripId, firstMessage }: { tripId: string; f
         </form>
       </section>
 
-      {!panelOpen && lastPanel && (
-        <button className="reopen-panel" onClick={() => openPanel(lastPanel)}>
-          {lastPanel.view === "drafts" ? "◧ Plans" : "◧ Last options"}
-        </button>
-      )}
       {toast && <div className="toast">{toast}</div>}
 
-      <OptionsPanel open={panelOpen && !!panel} title={panelTitle} onClose={() => setPanelOpen(false)}>
+      <OptionsPanel open={panelOpen && !!panel} title={panel?.title ?? "Options"} onClose={() => setPanelOpen(false)}>
         {panelBody}
         <Credits />
       </OptionsPanel>
     </main>
   );
+}
+
+/** The trip's days before there is a plan: empty slots that a chosen plan fills. */
+function WeekSlots({ days }: { days: number | null }) {
+  const n = Math.min(days ?? 0, 14);
+  return (
+    <section className="week" aria-label="Your days">
+      <h2>{n ? `Your ${n} days` : "Your days"}</h2>
+      {n > 0 && (
+        <ol className="slots" aria-hidden>
+          {Array.from({ length: n }, (_, i) => (
+            <li key={i}>{i + 1}</li>
+          ))}
+        </ol>
+      )}
+      <p className="small muted">
+        {n ? "They fill in when you choose a plan." : "Tell me how long you're going and your days appear here."}
+      </p>
+    </section>
+  );
+}
+
+/** Keys that appeared since the last change, for a few seconds, so a new answer visibly lands.
+ * `null` means not loaded yet: what is there on first load is not new. */
+function useFresh(keys: string[] | null): Set<string> {
+  const seen = useRef<Set<string> | null>(null);
+  const [fresh, setFresh] = useState<Set<string>>(new Set());
+  const signature = keys?.join("|") ?? null;
+  useEffect(() => {
+    if (!keys) return;
+    const added = seen.current ? keys.filter((k) => !seen.current!.has(k)) : [];
+    seen.current = new Set(keys);
+    if (!added.length) return;
+    setFresh(new Set(added));
+    const t = setTimeout(() => setFresh(new Set()), 3000);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [signature]);
+  return fresh;
 }
