@@ -18,11 +18,12 @@ class Leg(BaseModel):
 
 
 class City(BaseModel):
-    """One base on a multi-city trip: its nights are the days spent there."""
+    """One base on a multi-city trip."""
     name: str
     lat: float
     lng: float
-    nights: int = 0
+    days: int = 0
+    nights: int = 0  # the days there, one fewer in the last city: the trip ends on its last day
     stay: Pick | None = None
     leg: Leg | None = None  # how to get here; None for the first city
 
@@ -64,7 +65,7 @@ class Itinerary(BaseModel):
         return self
 
     def sync_route(self) -> None:
-        """Every day belongs to a city, and nights are the days there, so they always add up to the trip."""
+        """Every day belongs to a city, so the days always add up to the trip, and the nights to one fewer."""
         if not self.route:
             return
         names = [c.name for c in self.route]
@@ -72,9 +73,11 @@ class Itinerary(BaseModel):
             if day.city not in names:
                 day.city = names[-1]  # a day added later stays on in the last city
         for city in self.route:
-            city.nights = sum(d.city == city.name for d in self.days)
+            city.days = city.nights = sum(d.city == city.name for d in self.days)
         if self.days:  # a shortened trip drops the cities it no longer reaches
-            self.route = [c for c in self.route if c.nights]
+            self.route = [c for c in self.route if c.days]
+        if self.route:
+            self.route[-1].nights = max(0, self.route[-1].days - 1)
 
     def stay_slots(self) -> list[tuple[str, Pick | None, str | None]]:
         """(id, stay, city) for each place to sleep."""

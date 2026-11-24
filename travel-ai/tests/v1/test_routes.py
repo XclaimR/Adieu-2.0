@@ -1,11 +1,14 @@
 """Ticket #27: multi-city routes. Order, nights, pace, a stay per city, days inside their city."""
+import pytest
+
 from app.schemas.itinerary import City, Itinerary, Leg
 from app.schemas.personality import Personality, Scale
 from app.schemas.place import PickCategory, PlaceCandidate
 from app.schemas.trip_profile import TripProfile
 from app.services.draft_service import DraftService, PlacePool, PlanDay, PlanStop, RouteDraftPlan
 from app.services.itinerary_critique_service import ItineraryCritiqueService
-from app.services.route_service import RouteService, city_count, order, share_nights, towns
+from app.services import route_service
+from app.services.route_service import RouteService, checked_leg, city_count, order, share_days, towns
 
 # Japan's main towns, best known first (as the model would rank them), coordinates from the gazetteer.
 JAPAN = {
@@ -28,6 +31,12 @@ def _library():
     return {"places": places, "hubs": hubs}
 
 
+@pytest.fixture(autouse=True)
+def no_transitous(monkeypatch):
+    """Tests never call the real router; one that needs it sets its own answer."""
+    monkeypatch.setattr(route_service, "transit", lambda a, b: None)
+
+
 def _pace(value):
     return Personality(scales={"pace": Scale(value=value, confidence=0.8, source="note")})
 
@@ -37,12 +46,27 @@ def test_the_route_goes_one_way_without_zig_zag():
     assert [c["name"] for c in order(ranked)] == ["Tokyo", "Kanazawa", "Kyoto", "Osaka", "Hiroshima"]
 
 
-def test_nights_add_up_to_the_trip_and_extra_nights_go_to_the_main_cities():
+def test_the_route_starts_where_flights_land_unless_starting_elsewhere_saves_distance():
+    # Sapporo is far north: flying in to Tokyo and ending in Sapporo beats flying on to Sapporo first.
+    ranked = [_town(n) for n in ("Tokyo", "Sapporo", "Kyoto", "Osaka", "Hiroshima")]
+    assert [c["name"] for c in order(ranked)] == ["Tokyo", "Kyoto", "Osaka", "Hiroshima", "Sapporo"]
+    # Two cities: start in the main one.
+    assert [c["name"] for c in order([_town("Kyoto"), _town("Tokyo")])] == ["Kyoto", "Tokyo"]
+
+
+def test_days_add_up_to_the_trip_and_extra_days_go_to_the_main_cities():
     ordered = [_town(n) for n in ("Tokyo", "Kanazawa", "Kyoto", "Osaka", "Hiroshima")]
-    nights = share_nights(14, ordered, ["Tokyo", "Kyoto", "Hiroshima", "Kanazawa", "Osaka"])
-    assert sum(nights) == 14
-    assert nights == [3, 3, 3, 3, 2] or nights[0] >= nights[-1]
-    assert dict(zip([c["name"] for c in ordered], nights))["Tokyo"] == 3
+    days = share_days(14, ordered, ["Tokyo", "Kyoto", "Hiroshima", "Kanazawa", "Osaka"])
+    assert sum(days) == 14
+    assert dict(zip([c["name"] for c in ordered], days)) == {
+        "Tokyo": 3, "Kanazawa": 3, "Kyoto": 3, "Osaka": 2, "Hiroshima": 3}
+
+
+def test_nights_are_strict_the_last_city_has_one_fewer():
+    it = Itinerary(destination="Japan", route=[City(name="Tokyo", lat=0, lng=0), City(name="Kyoto", lat=0, lng=1)],
+                   days=[{"day_number": n, "city": c, "activities": []}
+                         for n, c in enumerate(["Tokyo", "Tokyo", "Kyoto", "Kyoto", "Kyoto"], 1)])
+    assert [(c.days, c.nights) for c in it.route] == [(2, 2), (3, 2)]  # 5 days, 4 nights
 
 
 def test_pace_changes_how_many_cities_and_so_the_nights_in_each():
@@ -58,10 +82,17 @@ def test_towns_are_real_towns_with_enough_to_do_best_known_first():
     assert found[0] == "Tokyo"
 
 
+def test_a_town_within_reach_of_a_base_is_a_day_trip_not_a_base():
+    library = _library()
+    library["hubs"].insert(1, {"name": "Nara", "point": [34.68, 135.80], "district": False})  # 37 km from Kyoto
+    library["places"] += [{**p, "lat": 34.68, "lng": 135.80} for p in library["places"][:8]]  # fewer than Kyoto
+    assert "Nara" not in [t["name"] for t in towns(library)]
+
+
 def test_the_plan_falls_back_to_the_map_when_the_model_fails(fake_llm):
     fake_llm.errors["RouteChoice"] = RuntimeError("quota")
     route, tip = RouteService.plan({"kind": "country"}, _library(), 10, TripProfile(destination="Japan"), _pace(0))
-    assert sum(c.nights for c in route) == 10
+    assert sum(c.days for c in route) == 10
     assert route[0].leg is None and all(c.leg and c.leg.minutes > 0 for c in route[1:])
     assert tip is None
 
@@ -70,8 +101,8 @@ def test_a_city_trip_has_no_route():
     assert RouteService.plan({"kind": "city"}, _library(), 10, TripProfile(destination="Tokyo"), None) == ([], None)
 
 
-ROUTE = [City(name="Tokyo", lat=35.69, lng=139.69, nights=2),
-         City(name="Kyoto", lat=35.01, lng=135.77, nights=2,
+ROUTE = [City(name="Tokyo", lat=35.69, lng=139.69, days=2),
+         City(name="Kyoto", lat=35.01, lng=135.77, days=2,
               leg=Leg(mode="bullet train", minutes=135, cost="~¥14,000", note="covered by the JR Pass"))]
 
 
@@ -123,10 +154,10 @@ def test_nights_follow_the_days_when_the_trip_changes_length():
     it = POOL.to_itinerary(_plan(), "Japan")
     it.days = it.days[:2]
     it.sync_route()
-    assert [(c.name, c.nights) for c in it.route] == [("Tokyo", 2)]  # Kyoto is no longer reached
+    assert [(c.name, c.days) for c in it.route] == [("Tokyo", 2)]  # Kyoto is no longer reached
     data = POOL.to_itinerary(_plan(), "Japan").model_dump()
     data["days"].append({"day_number": 5, "activities": []})
-    assert [c.nights for c in Itinerary.model_validate(data).route] == [2, 3]  # an added day stays in Kyoto
+    assert [c.days for c in Itinerary.model_validate(data).route] == [2, 3]  # an added day stays in Kyoto
 
 
 def test_the_review_flags_a_stop_in_another_city_a_missing_stay_and_a_busy_moving_day():
@@ -167,3 +198,74 @@ def test_the_drafting_prompt_names_the_cities_and_the_moving_day():
     text = _route_rules(ROUTE)
     assert "Day 1-2: Tokyo" in text and "Day 3-4: Kyoto" in text
     assert "Day 3 is a moving day: Tokyo to Kyoto by bullet train (~2h 15m)" in text
+
+
+def test_transitous_time_replaces_the_estimate_and_a_short_ride_replaces_a_flight(monkeypatch):
+    tokyo, kyoto = ROUTE
+    monkeypatch.setattr(route_service, "transit", lambda a, b: Leg(mode="high-speed train", minutes=137))
+    kept = checked_leg(Leg(mode="bullet train", minutes=300, cost="~¥14,000"), tokyo, kyoto)
+    assert (kept.mode, kept.minutes, kept.cost) == ("bullet train", 137, "~¥14,000")  # the model's fare stays
+    flown = checked_leg(Leg(mode="flight", minutes=120, cost="~¥15,000"), tokyo, kyoto)
+    assert (flown.mode, flown.minutes, flown.cost) == ("high-speed train", 137, None)  # a flight fare doesn't fit
+    monkeypatch.setattr(route_service, "transit", lambda a, b: Leg(mode="train", minutes=1400))
+    assert checked_leg(Leg(mode="flight", minutes=150), tokyo, kyoto).mode == "flight"  # a day on trains loses
+
+
+class _Places:
+    """Records the searches an edit makes."""
+
+    def __init__(self, found):
+        self.found, self.queries = found, []
+
+    def candidates(self, destination, category, profile=None, viewport=None, query=None, personality=None,
+                   limit=30):
+        self.queries.append(query)
+        return [p for p in self.found if p.category == category]
+
+
+def _edit_queries(plan, changes, editable, add_to):
+    places = _Places(POOL.places)
+    DraftService(places)._edit_candidates(plan, changes, editable, add_to, TripProfile(destination="x"), None,
+                                          set(), Personality())
+    return places.queries
+
+
+def test_an_edit_searches_near_the_place_asked_for_and_on_a_route_near_its_city():
+    from app.schemas.personality import NoteChange
+    lisbon = Itinerary(destination="Lisbon", days=[{"day_number": 1, "activities": []}])
+    cafes = NoteChange(op="add", text="cafés", quote="cafés", category="eat", search="cafés in Alfama", target="d1")
+    queries = _edit_queries(lisbon, [cafes], set(), {"d1"})
+    assert "cafés in Alfama" in queries and not any("None" in (q or "") for q in queries)
+    japan = POOL.to_itinerary(_plan(), "Japan")
+    assert set(_edit_queries(japan, [], set(), {"d3"})) == {"near Kyoto"}
+
+
+def test_a_swap_only_offers_places_in_the_day_s_city(monkeypatch):
+    from app.schemas.place import PickCategory as Cat
+    from app.schemas.place import SwapTarget
+    from app.services import options_service
+    from app.services.ranking_service import RankingService
+    seen = {}
+    monkeypatch.setattr(RankingService, "rank", staticmethod(lambda cat, found, *a, **k: seen.setdefault("c", found) and []))
+    service = options_service.OptionsService.__new__(options_service.OptionsService)
+    service.places = _Places(POOL.places)
+    service.swap_options(SwapTarget(day_number=3, index=0), "Nishiki", Cat.DO.value, TripProfile(destination="x"),
+                         None, set(), near="Kyoto", route=ROUTE)
+    assert [c.name for c in seen["c"]] == ["Fushimi Inari"]
+
+
+def test_another_round_of_drafts_keeps_the_route_while_days_and_pace_are_the_same(monkeypatch):
+    previous = POOL.to_itinerary(_plan(), "Japan")
+    drafter = DraftService(_Places(POOL.places))
+    asked = []
+    monkeypatch.setattr(drafter, "route", lambda *a: asked.append(a) or ([], None))
+    def stop(*a):
+        raise LookupError("stop before drafting")
+    monkeypatch.setattr(drafter, "pool", stop)
+    profile = TripProfile(destination="Japan", duration_days=4)
+    with pytest.raises(LookupError):
+        next(drafter.generate(profile, None, set(), _pace(1), previous))
+    assert asked == []  # 4 days, packed: 2 cities, as before
+    with pytest.raises(LookupError):
+        next(drafter.generate(profile, None, set(), _pace(-1), previous))
+    assert len(asked) == 1  # slow: one city now, so the route is planned again

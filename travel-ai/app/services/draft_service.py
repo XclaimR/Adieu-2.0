@@ -21,7 +21,7 @@ from app.services.itinerary_critique_service import (MOVING_DAY_STOPS, REVIEW_TI
 from app.services.llm_client import LLMClient
 from app.services.personality_service import PersonalityService
 from app.services.places_service import FACTS_RULE, PlacesService, tier_rank, traveler_fit, unclaimed
-from app.services.route_service import RouteService
+from app.services.route_service import RouteService, city_count
 
 logger = logging.getLogger(__name__)
 
@@ -113,7 +113,7 @@ def _route_rules(route: list[City]) -> str:
         return ""
     lines, start = ["The route is fixed. Plan each day only with places listed under that day's city:"], 1
     for before, city in zip([None, *route], route):
-        end = start + city.nights - 1
+        end = start + city.days - 1
         lines.append(f"- Day {start}{f'-{end}' if end > start else ''}: {city.name}")
         if before and city.leg:
             lines.append(f"  Day {start} is a moving day: {before.name} to {city.name} by {city.leg.mode} "
@@ -197,7 +197,7 @@ class PlacePool:
     def _to_route_itinerary(self, plan: DraftPlan, destination: str, moments: list[str]) -> Itinerary:
         """Every day of the route, each in its own city: a stop in another city is dropped, a day the model
         skipped stays empty for the review to fill, and each city gets a stay (the model's, else its first)."""
-        cities = [c.name for c in self.route for _ in range(c.nights)]
+        cities = [c.name for c in self.route for _ in range(c.days)]
         used: set[str] = set()
         days = []
         for number, city in enumerate(cities, 1):
@@ -280,7 +280,7 @@ class DraftService:
              route_tip: str | None = None) -> PlacePool:
         """Real candidates inside the destination, one search per category (cached). On a route, per city."""
         searches = [(None, category, limit) for category, limit in POOL.items()] if not route else [
-            (city.name, category, base + per_night * city.nights)
+            (city.name, category, base + per_night * city.days)
             for city in route for category, (base, per_night) in CITY_POOL.items()]
         places: list[PlaceCandidate] = []
         for city, category, limit in searches:
@@ -328,11 +328,17 @@ Rules:
 """
 
     def generate(self, profile: TripProfile, viewport: dict | None, exclude_ids: set[str],
-                 personality: Personality | None = None) -> Iterator[Draft]:
+                 personality: Personality | None = None, previous: Itinerary | None = None) -> Iterator[Draft]:
         """Yields 3 drafts with different flavors, one at a time (each is a separate model call).
-        A country or region trip first gets its route (one more call), the same for all three."""
+        A country or region trip first gets its route (one more call), the same for all three. The `previous` plan's
+        route is kept while the days and the number of cities the pace asks for are unchanged."""
         days = min(profile.duration_days or DEFAULT_DAYS, MAX_DAYS)
-        pool = self.pool(profile, viewport, exclude_ids, personality, *self.route(profile, viewport, personality, days))
+        old = previous.route if previous else []
+        if old and sum(c.days for c in old) == days and len(old) == city_count(days, personality):
+            route = (old, previous.route_tip)
+        else:
+            route = self.route(profile, viewport, personality, days)
+        pool = self.pool(profile, viewport, exclude_ids, personality, *route)
         if sum(p.category != PickCategory.STAY for p in pool.places) < MIN_PLACES:
             raise NotEnoughPlacesError(f"Too few places in {profile.destination}")
         allowed = PersonalityService.traits(personality)[0]  # only known traits; guesses stay off the cards
@@ -612,8 +618,8 @@ Rules:
         if add_to:
             wanted |= {PickCategory.DO, PickCategory.EAT, PickCategory.HIDDEN_GEMS}
         # On a route, search around each city being changed; a place elsewhere can't go on its days.
-        cities = sorted({d.city for d in plan.days if d.id in add_to or any(a.id in editable for a in d.activities)}
-                        | {city for sid, _, city in plan.stay_slots() if sid in editable} - {None})
+        cities = sorted(({d.city for d in plan.days if d.id in add_to or any(a.id in editable for a in d.activities)}
+                         | {city for sid, _, city in plan.stay_slots() if sid in editable}) - {None})
         near = [f" near {city}" for city in cities] or [""]
         limit = max(8, 30 // len(near))
         # "Similar but cheaper" must not inherit the trip's "luxury" search hint.

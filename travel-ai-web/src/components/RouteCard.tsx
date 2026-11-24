@@ -60,7 +60,16 @@ export default function RouteCard({ itinerary, notes, onCity }: Props) {
                 )}
               </span>
             ) : (
-              <span className="hotel small muted none">No listed stay here yet</span>
+              <span className="hotel small muted none">
+                No listed stay here yet ·{" "}
+                <a
+                  href={`https://www.openstreetmap.org/search?query=${encodeURIComponent(`hotels in ${city.name}`)}`}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Find hotels on OpenStreetMap ↗
+                </a>
+              </span>
             )}
             <NoteList notes={notes} target={`s${i + 1}`} />
           </li>

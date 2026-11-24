@@ -170,7 +170,8 @@ def meal_only_slots(trip: dict) -> list[str]:
 
 
 def route_gaps(trip: dict) -> list[str]:
-    """Ticket #27: a country trip has a route; every city has its own stay, every move a leg, nights add up."""
+    """Ticket #27: a country trip has a route; every city has its own stay, every move a leg, and the nights are the
+    days less one."""
     gaps = []
     for d in trip["drafts"]:
         plan, title = d["itinerary"], d["title"]
@@ -183,8 +184,8 @@ def route_gaps(trip: dict) -> list[str]:
             gaps.append(f"{title!r} lacks a separate stay in each city")
         if any(not c.get("leg") for c in route[1:]):
             gaps.append(f"{title!r} lacks a leg between cities")
-        if sum(c["nights"] for c in route) != len(plan["days"]):
-            gaps.append(f"{title!r} nights don't add up to its {len(plan['days'])} days")
+        if sum(c["nights"] for c in route) != len(plan["days"]) - 1:
+            gaps.append(f"{title!r} nights don't add up to its {len(plan['days'])} days less one")
     return gaps
 
 

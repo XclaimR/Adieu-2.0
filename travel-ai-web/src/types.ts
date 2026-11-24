@@ -78,7 +78,7 @@ export type Activity = {
 export type Leg = { mode: string; minutes: number; cost: string | null; note: string | null };
 
 /** One base on a multi-city route; its nights are the days spent there. */
-export type City = { name: string; nights: number; stay: Pick | null; leg: Leg | null };
+export type City = { name: string; days: number; nights: number; stay: Pick | null; leg: Leg | null };
 
 export type Itinerary = {
   destination: string;

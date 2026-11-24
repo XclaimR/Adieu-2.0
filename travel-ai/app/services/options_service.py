@@ -1,5 +1,6 @@
 import uuid
 
+from app.schemas.itinerary import City, city_of
 from app.schemas.personality import Personality
 from app.schemas.place import OptionSet, Pick, PickCategory, PlaceCandidate, SwapTarget
 from app.schemas.taste import Taste
@@ -97,13 +98,14 @@ class OptionsService:
         personality: Personality | None = None,
         about: list[str] = (),
         near: str | None = None,
+        route: list[City] = (),
     ) -> OptionSet:
-        """Alternatives for one itinerary activity; `near` is its city on a multi-city route."""
+        """Alternatives for one itinerary activity; `near` is its day's city on a multi-city `route`."""
         cat = PickCategory(category) if category in PickCategory._value2member_map_ else PickCategory.DO
         candidates = [
             c for c in self.places.candidates(profile.destination, cat, profile, viewport,
                                               query=near and f"near {near}", personality=personality)
-            if c.place_id not in exclude_ids
+            if c.place_id not in exclude_ids and (not route or city_of(route, c) == near)
         ]
         picks = RankingService.rank(cat, candidates, profile, focus="; ".join([f"an alternative to {activity_name}", *about]),
                                     personality=personality)

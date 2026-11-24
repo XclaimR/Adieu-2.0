@@ -13,7 +13,7 @@ from app.repositories.trip_repository import TripRepository
 from app.schemas.activity import default_minutes
 from app.schemas.api import TurnResponse
 from app.schemas.draft import NoPlans
-from app.schemas.itinerary import Itinerary
+from app.schemas.itinerary import Itinerary, city_of
 from app.schemas.personality import NoteChange, Personality
 from app.schemas.place import OptionSet, Pick, PickCategory, SwapTarget
 from app.schemas.trip_profile import TripProfile
@@ -307,6 +307,7 @@ class TravelPlannerWorkflow:
     def _offer_drafts(self, trip: TripModel, profile: TripProfile, personality: Personality,
                       answer: MessageModel, reply_with_plans: str) -> Iterator[Event]:
         yield _progress(f"Gathering places in {profile.destination}…")
+        previous = self.trips.itinerary(trip) or next((d.itinerary for d in self.trips.drafts(trip)), None)
         trip.drafts = []
         viewport, skipped = self._viewport(trip), self._skipped(trip)
         # Each plan is reviewed in its own thread while the next is written, and shown once its review is done.
@@ -315,7 +316,7 @@ class TravelPlannerWorkflow:
         places = None
         try:
             try:
-                for draft in self.drafter.generate(profile, viewport, skipped, personality):
+                for draft in self.drafter.generate(profile, viewport, skipped, personality, previous):
                     if places is None:
                         places = self._review_places(profile, viewport, skipped, personality, draft.itinerary)
                     reviews.append(checks.submit(self.drafter.review, draft, places, profile, personality))
@@ -390,6 +391,8 @@ class TravelPlannerWorkflow:
             self.trips.set_feedback(trip.id, pick, "skipped")
         elif action == "add":
             itinerary = self.trips.itinerary(trip) or Itinerary(destination=profile.destination or "", days=[])
+            if itinerary.route and not city_of(itinerary.route, pick):
+                raise TripActionError(f"{pick.name} is outside your route ({', '.join(c.name for c in itinerary.route)})")
             trip.itinerary = DraftService.place_in_itinerary(itinerary, pick).model_dump(mode="json")
             self.db.commit()
         elif action in ("like", "too_pricey"):
@@ -438,7 +441,7 @@ class TravelPlannerWorkflow:
         option_set = self.options.swap_options(
             SwapTarget(day_number=day_number, index=index), activity.name, activity.category,
             self.trips.profile(trip), self._viewport(trip), used | self._skipped(trip),
-            personality, about, near=day.city,
+            personality, about, near=day.city, route=itinerary.route,
         )
         trip.panel = option_set.model_dump(mode="json")
         self.db.commit()

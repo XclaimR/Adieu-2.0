@@ -79,7 +79,7 @@ def test_route_gaps_need_a_stay_per_city_legs_and_nights_that_add_up():
     city = lambda name, stay, leg, nights: {"name": name, "stay": stay and {"place_id": stay}, "leg": leg,
                                             "nights": nights}
     good = {"title": "ok", "itinerary": {"days": [{}] * 4, "route": [
-        city("Tokyo", "a", None, 2), city("Kyoto", "b", {"mode": "train", "minutes": 135}, 2)]}}
+        city("Tokyo", "a", None, 2), city("Kyoto", "b", {"mode": "train", "minutes": 135}, 1)]}}
     same_hotel = {"title": "same", "itinerary": {"days": [{}] * 4, "route": [
         city("Tokyo", "a", None, 2), city("Kyoto", "a", None, 3)]}}
     assert route_gaps({"drafts": [good]}) == []

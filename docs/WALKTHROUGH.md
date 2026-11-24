@@ -94,11 +94,15 @@ only on a clear yes while that is the current question. A no brings back the que
 5. The reply is streamed and **saved immediately**, then the slow part runs:
    - Show options → `OptionsService.build` → the destination's places (`PlacesService.candidates`) → `RankingService` (LLM ranks by the trip's notes) → slide-in panel (`components/OptionsPanel.tsx`, `PickCard.tsx`).
    - Multi-city routes (Ticket #27): for a country or region, `DraftService.route` → `RouteService.plan`
-     (`services/route_service.py`) first picks the bases. Code finds the towns with enough listed places, decides how
-     many cities fit the days and the pace (about 3 nights a city; slow 4, packed 2), orders them as the shortest
-     one-way route (no zig-zag) and shares the nights so they add up to the trip. One model call picks which towns suit
-     this traveler and estimates each leg (mode, minutes, rough fare, a pass tip); without it, code uses the
-     best-known towns and a distance-based estimate. Each city gets its own pool of nearby places, the draft is told
+     (`services/route_service.py`) first picks the bases. Code finds the towns with enough listed places (a town in
+     reach of a better-known one is a day trip, not a base), decides how many cities fit the days and the pace (about
+     3 days a city; slow 4, packed 2), orders them as the shortest one-way route counted from the main city, where
+     flights usually land, and shares the days so they add up to the trip. Nights are strict: the days less one.
+     One model call picks which towns suit this traveler and estimates each leg (mode, rough fare, a pass tip); then
+     Transitous (api.transitous.org, an open, free public-transport router; light non-commercial use) gives the real
+     journey time where it has timetables and the ride is under 8 hours. Without them, code uses the best-known towns
+     and a distance-based estimate. Another round of drafts keeps the route while the days and pace are the same.
+     A city with no listed hotel links an OpenStreetMap hotel search (Booking.com's API needs a partner contract). Each city gets its own pool of nearby places, the draft is told
      which days are in which city and that moving days are light, and code drops a stop outside its day's city and
      gives every city a stay (`Itinerary.route`, stays `s1`, `s2`, ...; `DayPlan.city`). The review flags a stop in
      another city, a missing stay per city and a busy moving day, and a moving day's clock starts when the train gets
