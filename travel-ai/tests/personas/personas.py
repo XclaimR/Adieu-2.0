@@ -1,7 +1,9 @@
-"""The six test travelers. Each one says only what is listed here; the runner checks the app made up nothing else.
+"""The test travelers. Each one says only what is listed here; the runner checks the app made up nothing else.
 
 facts: profile field -> values that count as "what the persona said". Fields a persona never mentions must stay
 empty in the trip profile. `mood` lists word stems; every mood word the app stores must contain one of them.
+swipes: card id -> right/left for the swipe deck (others "not sure"); expect_style: words the deck's "You lean" summary must contain.
+pick_idea: take the first destination idea the app offers.
 answers: (words in the app's question, reply, facts that reply states). Each answer is used at most once.
 chips: if no answer fits, tap the first chip containing one of these words; otherwise say "just show me plans".
 banned: words that must not appear in draft/pick names and notes. banned_tiers: stay price tiers that don't fit.
@@ -112,5 +114,30 @@ PERSONAS = [
         "chips": ["partner", "romantic"],
         "banned": ["hostel", "backpacker", "budget-friendly"],
         "banned_tiers": ["budget"],
+    },
+    {
+        # Ticket #21: can't describe the trip. Swipes slow, quiet and outdoorsy; picks the first idea offered.
+        "name": "unsure",
+        "opening": "I don't know what I want. I just need a week away on my own.",
+        "facts": {
+            "party": ["solo"], "party_size": [1], "kids": [False], "duration_days": [7],
+            # Moods may come only from the cards swiped right.
+            "mood": ["relax", "wellness", "beach", "nature", "adventur"],
+        },
+        "swipes": {"slow_cafe": "right", "spa_day": "right", "empty_beach": "right", "back_streets": "right",
+                   "sunrise_hike": "right", "picnic": "right", "camping": "right", "rooftop_bar": "left",
+                   "dancing": "left", "landmark": "left", "big_day": "left", "hostel_friends": "left",
+                   "quick_bite": "left", "tasting_menu": "left", "luxury_suite": "left"},
+        "expect_style": ["Slow pace", "Avoids crowds", "Chill evenings"],
+        "pick_idea": True,
+        "answers": [
+            (WHO, "Just me.", {}),
+            (HOW_LONG, "A week.", {}),
+            (BUDGET, "Mid-range is fine.", {"budget_level": ["mid"]}),
+            NOT_SURE_DATES,
+        ],
+        "chips": ["just me", "relax"],
+        "banned": ["nightclub", "bar crawl", "pub crawl", "party hostel"],
+        "banned_tiers": [],
     },
 ]

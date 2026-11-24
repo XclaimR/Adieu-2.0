@@ -1,0 +1,132 @@
+/* The swipe deck (Ticket #21). Own file so it doesn't clash with the shared styles; theme tokens only.
+   Phone: a full-screen sheet with a tall photo. Desktop: a centred card over the trip board. */
+.swipe-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: var(--scrim);
+}
+.swipe-dialog {
+  position: relative;
+  width: min(440px, 100%);
+  max-height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden; /* the card flies out sideways */
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 20px 20px 24px;
+  background: var(--panel);
+  color: var(--ink);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sheet);
+  outline: none;
+}
+
+.swipe-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.swipe-head h2 { margin: 0; font-size: 22px; }
+.swipe-out { border: 0; background: none; padding: 6px 0; color: var(--accent-text); font-weight: 600; }
+
+/* One tick per possible card: the traveler's trail of answers so far. */
+.swipe-ticks { display: grid; grid-template-columns: repeat(12, 1fr); gap: 4px; margin: 0; padding: 0; list-style: none; }
+.swipe-ticks li { height: 4px; border-radius: 2px; background: var(--line); }
+.swipe-ticks li.right { background: var(--accent); }
+.swipe-ticks li.left { background: var(--muted); }
+.swipe-ticks li.skip, .swipe-ticks li.earlier { background: var(--ink); opacity: 0.35; }
+
+.swipe-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+.swipe-card {
+  position: relative;
+  margin: 0;
+  aspect-ratio: 4 / 3;
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--bubble);
+  touch-action: pan-y; /* vertical drags still scroll; horizontal ones are swipes */
+  user-select: none;
+  cursor: grab;
+  transition: transform 0.22s ease-out;
+}
+.swipe-card.dragging { cursor: grabbing; transition: none; }
+.swipe-card img { width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
+.swipe-card figcaption {
+  position: absolute;
+  inset: auto 0 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 48px 16px 12px;
+  color: var(--on-photo);
+  background: linear-gradient(transparent, var(--scrim) 35%, var(--scrim));
+}
+.swipe-card figcaption strong { font-family: var(--display); font-size: 26px; font-weight: 800; line-height: 1.1; letter-spacing: -0.02em; }
+.swipe-credit { font-size: 11px; opacity: 0.85; }
+.swipe-credit a { color: inherit; }
+
+/* The one loud moment: a passport stamp that says which way the card is going. */
+.swipe-stamp {
+  position: absolute;
+  top: 22px;
+  padding: 4px 12px;
+  border: 3px solid currentColor;
+  border-radius: 8px;
+  font-family: var(--display);
+  font-size: 24px;
+  font-weight: 800;
+  background: var(--scrim);
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.swipe-card.yes .swipe-stamp { opacity: 1; left: 18px; color: var(--accent); transform: rotate(-10deg); }
+.swipe-card.no .swipe-stamp { opacity: 1; right: 18px; color: var(--on-photo); transform: rotate(10deg); }
+
+.swipe-help { margin: 0; text-align: center; color: var(--muted); font-size: 14px; }
+.swipe-keys { display: none; }
+@media (hover: hover) and (pointer: fine) {
+  .swipe-keys { display: inline; }
+}
+
+.swipe-buttons { display: flex; justify-content: center; align-items: center; gap: 28px; }
+.swipe-round {
+  width: 64px;
+  height: 64px;
+  padding: 0;
+  border-radius: 50%;
+  font-size: 26px;
+  font-weight: 800;
+  line-height: 1;
+  border: 2px solid var(--line);
+  background: var(--panel);
+  color: var(--ink);
+}
+.swipe-round.yes { background: var(--accent); border-color: var(--accent); color: var(--band); } /* --band stays dark teal in both themes */
+.swipe-round:hover:not(:disabled) { border-color: var(--accent); }
+.swipe-skip { border: 0; background: none; color: var(--muted); padding: 8px 4px; }
+
+.swipe-done {
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 16px;
+  aspect-ratio: 4 / 3;
+  text-align: center;
+  border-radius: var(--radius);
+  background: var(--accent-soft);
+}
+.swipe-done strong { font-family: var(--display); font-size: 22px; }
+
+/* Phones: the deck takes the whole screen, with a taller photo. */
+@media (max-width: 640px) {
+  .swipe-backdrop { padding: 0; place-items: stretch; }
+  .swipe-dialog { width: 100%; height: 100dvh; max-height: none; border-radius: 0; padding: 16px 16px 20px; }
+  .swipe-card, .swipe-done { aspect-ratio: auto; flex: 1; min-height: 280px; }
+  .swipe-buttons { gap: 36px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .swipe-card, .swipe-stamp { transition: none; }
+}

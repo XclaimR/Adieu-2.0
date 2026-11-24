@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
 import IdeaCard from "../components/IdeaCard";
+import { OPEN_DECK } from "../components/SwipeDeck";
 import Credits from "../components/Credits";
 import OptionsPanel from "../components/OptionsPanel";
 import type { StarterIdea, TripSummary, User } from "../types";
@@ -137,6 +138,9 @@ export default function Home({ user, openTrip }: Props) {
           </button>
           <button disabled={busy} onClick={() => start("Surprise me")}>
             Surprise me
+          </button>
+          <button disabled={busy} onClick={() => start(OPEN_DECK)}>
+            Not sure? Swipe to find your style
           </button>
         </div>
         {error && <p className="error">{error}</p>}

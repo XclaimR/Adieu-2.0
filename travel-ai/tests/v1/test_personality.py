@@ -122,7 +122,7 @@ def test_inferred_is_a_guess_and_never_beats_a_known_fact():
     guess = add("out late", toward="nightlife", source="inferred")
     assert PersonalityService.traits(update(guess)) == ([], ["Nightlife"])
     family = TripProfile(party=Party.FAMILY, budget_level=BudgetLevel.MID)
-    assert PersonalityService.card(update(guess, profile=family)).traits == ["Chill evenings", "Mid-range comfort"]
+    assert PersonalityService.card(update(guess, profile=family)).traits == ["Some paid experiences", "Chill evenings", "Mid-range stays"]
 
 
 def test_prompts_separate_hard_limits_wishes_and_moments():

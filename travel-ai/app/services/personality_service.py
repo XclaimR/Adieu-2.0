@@ -8,22 +8,23 @@ from app.schemas.trip_profile import BudgetLevel, Party, TripProfile
 # name: (card label, left pole, right pole, middle) in plain words.
 SCALES: dict[str, tuple[str, str, str, str]] = {
     "pace": ("Pace", "Slow pace", "Packed days", "Steady pace"),
-    "money": ("Money", "Money goes to the stay", "Money goes to experiences", "Money split between stay and experiences"),
+    # Two budgets (Ticket #21): what to spend on experiences, and on stays (the key stays "comfort" for saved trips).
+    "money": ("Experiences", "Cheap experiences", "Splurge on experiences", "Some paid experiences"),
     "energy": ("Energy", "Chill evenings", "Nightlife", "Some nights out"),
     "crowds": ("Crowds", "Avoids crowds", "Wants the icons", "Mix of icons and hidden gems"),
     "food": ("Food", "Food is just fuel", "Food is the point", "Good food matters"),
-    "comfort": ("Comfort", "Backpacker comfort", "Luxury", "Mid-range comfort"),
+    "comfort": ("Comfort", "Cheap stays", "Splurge on stays", "Mid-range stays"),
 }
 KNOWN = 0.5  # below this a scale is shown as unknown
 LEAN = 0.25  # |value| below this reads as the middle
 STATED_CONFIDENCE = 0.75
 INFERRED_CONFIDENCE = 0.4  # a guess for prompts, "not sure yet" on the card
 CHAT_CONFIDENCE = 0.7
-# Scales kept from before: older trips' "said" ones and, later, answers to questions (#20).
-KEPT = {"said", "asked"}
+# Scales kept from before: older trips' "said" ones, swipes (#21) and, later, answers to questions (#20).
+KEPT = {"said", "asked", "swiped"}
 # pole -> (scale, direction)
 POLES = {
-    "slow": ("pace", -1), "packed": ("pace", 1), "spend_on_stay": ("money", -1), "spend_on_experiences": ("money", 1),
+    "slow": ("pace", -1), "packed": ("pace", 1), "cheap_experiences": ("money", -1), "splurge_experiences": ("money", 1),
     "chill": ("energy", -1), "nightlife": ("energy", 1), "hidden_gems": ("crowds", -1), "icons": ("crowds", 1),
     "food_as_fuel": ("food", -1), "food_focus": ("food", 1), "backpacker": ("comfort", -1), "luxury": ("comfort", 1),
 }
@@ -67,7 +68,8 @@ def check_changes(changes: list[NoteChange], message: str, stored: Personality |
 def _from_profile(profile: TripProfile) -> dict[str, Scale]:
     scales: dict[str, Scale] = {}
     if profile.budget_level:
-        scales["comfort"] = Scale(value=_BUDGET[profile.budget_level], confidence=CHAT_CONFIDENCE, source="chat")
+        for name in ("comfort", "money"):  # a trip budget is both budgets
+            scales[name] = Scale(value=_BUDGET[profile.budget_level], confidence=CHAT_CONFIDENCE, source="chat")
     if profile.party == Party.FAMILY or profile.kids:
         scales["energy"] = Scale(value=-0.6, confidence=CHAT_CONFIDENCE, source="chat")
     return scales
@@ -118,13 +120,14 @@ class PersonalityService:
         scales = _from_profile(profile)
         if stored:
             forgotten = {POLES[n.toward][0] for n in old if n.id in gone and n.toward}
-            scales.update({k: s for k, s in stored.scales.items() if s.source in KEPT and k not in forgotten})
+            scales.update({k: s for k, s in stored.scales.items() if s.source in KEPT and k not in forgotten
+                           and not (k in scales and scales[k].confidence > s.confidence)})
         for n in notes:
             if n.toward and n.target == "trip" and not n.once and n.category != "diet":
                 name, direction = POLES[n.toward]
                 confidence = INFERRED_CONFIDENCE if n.source == "inferred" else STATED_CONFIDENCE
-                # A guess never overwrites something known.
-                if confidence < KNOWN and name in scales and scales[name].confidence >= KNOWN:
+                # A guess never overwrites something known or surer (swipes).
+                if confidence < KNOWN and name in scales and scales[name].confidence > confidence:
                     continue
                 scales[name] = Scale(value=direction * (0.9 if n.strong else 0.7), confidence=confidence, source="note")
         return Personality(scales=scales, notes=notes)
@@ -173,8 +176,9 @@ class PersonalityService:
     def card(personality: Personality | None) -> Personality:
         """Adds the plain-word traits and the unknown scales, for the trip screen."""
         p = personality or Personality()
+        swiped = {t for n in SCALES if (s := p.scales.get(n)) and s.source == "swiped" and (t := trait(n, s))}
         return p.model_copy(update={
-            "traits": PersonalityService.traits(p)[0],
+            "traits": [f"{t} (from your swipes)" if t in swiped else t for t in PersonalityService.traits(p)[0]],
             "unknown": [label for n, (label, *_) in SCALES.items() if not trait(n, p.scales.get(n))],
         })
 

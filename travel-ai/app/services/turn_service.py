@@ -61,7 +61,8 @@ Return:
   alone or vague praise like "fun" or "nice" (mood null), and never for something they want to avoid.
   toward: null for most points. Only when a whole-trip point itself says that pole: slow/packed is the pace of
   the days, chill/nightlife is the evenings, hidden_gems/icons is crowds, food_focus/food_as_fuel is how much food
-  matters, backpacker/luxury is comfort, spend_on_stay/spend_on_experiences is where money goes. An activity
+  matters, backpacker/luxury is how much to spend on stays, cheap_experiences/splurge_experiences is how much to
+  spend on activities and experiences ("a cheap hotel, but I'll pay for scuba" is backpacker + splurge_experiences). An activity
   (hiking, beach), avoiding a place, diet or group size says no pole.
   then: change = the plan has to change at target now, with search = what to look for; none = only remember it.
   A new whole-trip rule on an existing plan is then change at trip, unless nothing in the plan could break it.

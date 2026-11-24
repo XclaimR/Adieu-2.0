@@ -149,3 +149,7 @@ export type TurnEvent =
   | { type: "error"; detail: string };
 
 export type PickAction = "like" | "unlike" | "skip" | "too_pricey" | "add";
+
+/** The swipe deck (Ticket #21): one card at a time; `card` is null once enough is known or the limit is reached. */
+export type SwipeCard = { id: string; title: string; photo: string; credit: { by: string; licence: string; source: string } };
+export type Deck = { card: SwipeCard | null; answered: number; limit: number };

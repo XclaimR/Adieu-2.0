@@ -8,6 +8,7 @@ import OptionsPanel from "../components/OptionsPanel";
 import ItineraryView from "../components/ItineraryView";
 import NoteList from "../components/NoteList";
 import Credits from "../components/Credits";
+import SwipeDeck, { OPEN_DECK, SWIPE_CHIP } from "../components/SwipeDeck";
 
 const DRAFT_COUNT = 3;
 const SHOW_PLANS = "__show_plans__";
@@ -39,8 +40,8 @@ const SCALES: [string, string, string, string, string][] = [
   ["food", "Food", "Just fuel", "The point", "Matters"],
   ["energy", "Energy", "Chill", "Nightlife", "Some nights"],
   ["crowds", "Crowds", "Hidden gems", "Icons", "A mix"],
-  ["money", "Money goes to", "The stay", "Experiences", "Both"],
-  ["comfort", "Comfort", "Backpacker", "Luxury", "Mid-range"],
+  ["money", "Experiences", "Cheap", "Splurge", "Some paid"],
+  ["comfort", "Comfort", "Cheap stays", "Splurge", "Mid-range"],
 ];
 const KNOWN = 0.5;
 const LEAN = 0.25;
@@ -104,6 +105,7 @@ export default function TripScreen({ tripId, firstMessage }: { tripId: string; f
   const [retryText, setRetryText] = useState<string | null>(null);
   const streamAbort = useRef<AbortController | null>(null);
   const [chatOpen, setChatOpen] = useState(false);
+  const [deckOpen, setDeckOpen] = useState(firstMessage === OPEN_DECK);
   const logRef = useRef<HTMLDivElement>(null);
   const plansRef = useRef<HTMLElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -114,7 +116,7 @@ export default function TripScreen({ tripId, firstMessage }: { tripId: string; f
   }, [tripId]);
 
   useEffect(() => {
-    if (trip && firstMessage && !sentFirst.current) {
+    if (trip && firstMessage && firstMessage !== OPEN_DECK && !sentFirst.current) {
       sentFirst.current = true;
       send(firstMessage);
     }
@@ -432,7 +434,7 @@ export default function TripScreen({ tripId, firstMessage }: { tripId: string; f
         {!busy && (chips.length > 0 || canShowPlans) && (
           <div className="chips">
             {chips.map((c) => (
-              <button key={c} onClick={() => send(c)}>
+              <button key={c} onClick={() => (c === SWIPE_CHIP ? setDeckOpen(true) : send(c))}>
                 {c}
               </button>
             ))}
@@ -466,6 +468,18 @@ export default function TripScreen({ tripId, firstMessage }: { tripId: string; f
       </section>
 
       {toast && <div className="toast">{toast}</div>}
+      {deckOpen && (
+        <SwipeDeck
+          tripId={trip.id}
+          onDone={(t) => {
+            setDeckOpen(false);
+            if (t) {
+              setTrip(t);
+              send(SHOW_PLANS); // the summary is said; carry on as usual: destination ideas or plans
+            }
+          }}
+        />
+      )}
 
       <OptionsPanel open={panelOpen && !!panel} title={panel?.title ?? "Options"} onClose={() => setPanelOpen(false)}>
         {panelBody}

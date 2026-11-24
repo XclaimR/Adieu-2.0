@@ -19,6 +19,7 @@ from app.schemas.trip_profile import TripProfile
 from app.schemas.turn import OptionsKind, OptionsRequest, TurnAction
 from app.services.draft_service import DEFAULT_DAYS, DraftService, NotEnoughPlacesError, NoUsableDraftError
 from app.services.options_service import OptionsService
+from app.services import swipe_service
 from app.services.personality_service import PersonalityService, check_changes, describe_note
 from app.services.places_service import PlacesService, PlacesUnavailableError, tier_rank
 from app.services.trip_profile_service import TripProfileService
@@ -184,6 +185,9 @@ class TravelPlannerWorkflow:
             surprise=surprise,
         )
 
+        mood_again = plan.asked_field == "mood" and "mood" in state.get("asked_fields", [])
+        if swipe_service.offer(message, decision.user_stuck or surprise, mood_again, state, itinerary is not None):
+            plan.answer_options = [*plan.answer_options[:4], swipe_service.SWIPE_CHIP]
         if plan.action == TurnAction.OFFER_DRAFTS and not new_profile.duration_days:
             new_profile.duration_days = DEFAULT_DAYS
         trip.profile = new_profile.model_dump(mode="json")
