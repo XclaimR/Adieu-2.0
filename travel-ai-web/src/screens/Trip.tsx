@@ -277,6 +277,7 @@ export default function TripScreen({ tripId, firstMessage }: { tripId: string; f
               }}
             />
           ))}
+          {set.ideas.length === 0 && <p className="muted">No ideas this time. Try asking in a different way.</p>}
         </div>
       ) : (
         <div className="option-list">

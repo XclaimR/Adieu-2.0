@@ -52,6 +52,8 @@ class FakeLLM:
     """Stands in for the model. Tests queue TurnDecisions; other schemas get canned answers."""
 
     def __init__(self):
+        self.ideas_photo = None
+        self.ideas = [("Slow food week", "Lisbon, Portugal"), ("Nowhere", "Atlantis"), ("Temples and ramen", "Japan")]
         self.decisions: list[TurnDecision] = []
         self.prompts: list[tuple[str, str]] = []
         self.edits: list[dict] = []
@@ -76,10 +78,8 @@ class FakeLLM:
                                                  PlanStop(place="Tiny Bar", ref=6, time_of_day="afternoon", note="gem")]),
             ])
         if schema is StarterIdeas:
-            return StarterIdeas(ideas=[
-                StarterIdea(title="Slow food week", destination="Lisbon, Portugal", pitch="You love food"),
-                StarterIdea(title="Nowhere", destination="Atlantis", pitch="Not real"),
-            ])
+            return StarterIdeas(ideas=[StarterIdea(title=t, destination=d, pitch="It fits", photo_name=self.ideas_photo)
+                                       for t, d in self.ideas])
         raise AssertionError(f"unexpected schema {schema}")
 
 

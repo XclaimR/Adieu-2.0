@@ -229,14 +229,6 @@ class PlacesService:
             return area
         return self.resolve_destination(destination, viewport) if destination else None
 
-    def verify_destination(self, destination: str) -> PlaceCandidate | None:
-        """The best match for a destination name, or None if it isn't a real place."""
-        area = self.resolve_destination(destination)
-        if not area:
-            return None
-        return PlaceCandidate(place_id=area["place_id"], name=area["name"], category=PickCategory.DO,
-                              address=area["formatted_address"])
-
     # ---------- what is there ----------
 
     def _release(self) -> dict:
