@@ -110,12 +110,12 @@ def scales(answers: dict[str, str]) -> dict[str, Scale]:
 
 def apply(personality: Personality, answers: dict[str, str]) -> Personality:
     """Swipes fill a scale only where nothing surer is known: a scale from words is never replaced."""
-    merged = dict(personality.scales)
-    for name, scale in scales(answers).items():
+    merged, new = dict(personality.scales), scales(answers)
+    for name, scale in new.items():
         old = merged.get(name)
         if old is None or old.source == SOURCE or old.confidence < scale.confidence:
             merged[name] = scale
-    for name in [n for n, s in merged.items() if s.source == SOURCE and n not in scales(answers)]:
+    for name in [n for n, s in merged.items() if s.source == SOURCE and n not in new]:
         del merged[name]  # all its swipes became skips
     return personality.model_copy(update={"scales": merged})
 

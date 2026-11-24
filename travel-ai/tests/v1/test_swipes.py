@@ -179,3 +179,16 @@ def test_unsure_persona_swipes_to_a_style_then_gets_plans(client, fake_llm):
     assert run["swiped"] and run["swiped"]["summary"].startswith("You lean: slow pace")
     rules = dict((r, ok) for r, ok, _ in check(unsure, run))
     assert all(rules.values()), check(unsure, run)
+
+
+def test_a_money_lean_from_before_the_two_budgets_is_dropped_on_load():
+    old = {"scales": {"money": {"value": -0.7, "confidence": 0.75, "source": "note"},
+                      "pace": {"value": -0.7, "confidence": 0.75, "source": "note"}},
+           "notes": [{"id": "n1", "text": "spend on the hotel", "toward": "spend_on_stay"},
+                     {"id": "n2", "text": "slow", "toward": "slow"}]}
+    p = Personality.model_validate(old)
+    assert "money" not in p.scales and "pace" in p.scales  # "Cheap experiences" was never said
+    new = {**old, "notes": [{"id": "n1", "text": "cheap activities", "toward": "cheap_experiences"}]}
+    assert Personality.model_validate(new).scales["money"].value == -0.7
+    swiped = {"scales": {"money": {"value": 0.8, "confidence": 0.6, "source": "swiped"}}, "notes": []}
+    assert "money" in Personality.model_validate(swiped).scales  # swipes and chat are not notes

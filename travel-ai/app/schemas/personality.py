@@ -10,6 +10,7 @@ Pole = Literal["slow", "packed", "cheap_experiences", "splurge_experiences", "ch
 Mood = Literal["relaxed", "adventurous", "romantic", "foodie", "culture", "nightlife", "nature", "beach",
                "celebration", "wellness", "shopping", "indulgent"]
 _OLD_MONEY_POLES = {"spend_on_stay", "spend_on_experiences"}
+_EXPERIENCES = {"cheap_experiences", "splurge_experiences"}
 NoteCategory = Literal["stay", "eat", "do", "pace", "budget", "diet", "access", "general"]
 
 
@@ -80,3 +81,17 @@ class Personality(BaseModel):
     # Filled for the API only: known traits in plain words, and labels of the scales still unknown.
     traits: list[str] = Field(default_factory=list)
     unknown: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_old_money_lean(cls, data):
+        """Before the two budgets (Ticket #21) a money scale from notes meant stay vs experiences. A trip saved then
+        still has those notes' old poles; its money scale is stale, not "cheap/splurge on experiences"."""
+        if not isinstance(data, dict):
+            return data
+        poles = {n.get("toward") for n in data.get("notes") or [] if isinstance(n, dict)}
+        money = (data.get("scales") or {}).get("money")
+        if poles & _OLD_MONEY_POLES and not poles & _EXPERIENCES and isinstance(money, dict) \
+                and money.get("source") == "note":
+            data = {**data, "scales": {k: v for k, v in data["scales"].items() if k != "money"}}
+        return data
