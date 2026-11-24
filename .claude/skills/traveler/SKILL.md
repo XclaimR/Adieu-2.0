@@ -14,7 +14,7 @@ Request: $ARGUMENTS
 
 - App: the URL in the request, else `http://localhost:8080`.
 - Traveler: whoever the request describes. Roll for everything it leaves open.
-- A walk saves a test trip in that app and spends its model and Google Places quota.
+- A walk saves a test trip in that app and spends its model quota and builds place data for new destinations.
 
 ## 1. Become someone
 

@@ -173,9 +173,10 @@ Credits for all sources are under "Data credits" at the bottom of every page.
   rule checks above; the checks decide their own rules, the judge decides those two. It waits 60s between personas so
   the test doesn't trip a 15-a-minute limit itself. It stops at the chosen draft: edits are not exercised. Uses the app's LLM settings, so run it inside an api container:
   `docker compose exec api python -m tests.agent.run [--persona NAME] [--report agent-report.md]`. About 4 model calls
-  per persona on top of the app's own; waits out 429/503 a few times. Sample: `docs/reports/agent-report-sample.md`.
+  per persona on top of the app's own (about 15 more, with the critic); waits out 429/503 a few times. With open place
+  data stays rarely have a price tier, so the budget checks in "picks fit the traveler" seldom have anything to check. Sample: `docs/reports/agent-report-sample.md`.
 - `.claude/skills/traveler/` — `/traveler [local url] [who the traveler is]` in Claude Code: Claude plays a random
   person in the browser, seeing only the screen, and plans the way people think: where, weather and best time, how
   long, what's of interest, hidden gems, route, where to stay, cost. It reports which of those Adieu answered.
   Exploratory, so it varies per run (the scripted agent above is the repeatable check). A walk saves a test trip
-  and spends that app's model and Places quota.
+  and spends that app's model quota.
