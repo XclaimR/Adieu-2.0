@@ -191,6 +191,9 @@ def _changed(before: Itinerary, after: Itinerary) -> set[str]:
     return {key for key in was.keys() | now.keys() if was.get(key) != now.get(key)}
 
 
+UNREVIEWED = "I couldn't double-check this plan."
+
+
 class DraftService:
 
     def __init__(self, places: PlacesService):
@@ -355,79 +358,81 @@ Rules:
         warnings, checked = [], True
         if scope:
             try:
-                [(plan, warnings)], checked = self._check_and_fix(
-                    [plan], list(places.values()), profile, personality, scope=scope, request=request)
+                plan, warnings, checked = self._check_and_fix(
+                    plan, list(places.values()), profile, personality, scope=scope, request=request)
             except Exception:
                 logger.exception("Couldn't review the edit")
                 checked = False
         plan.days = [d for d in plan.days if d.activities or d.id not in new_ids]
         return plan, warnings, checked
 
-    def review(self, drafts: list[Draft], profile: TripProfile, viewport: dict | None, exclude_ids: set[str],
-               personality: Personality | None = None) -> tuple[list[Draft], bool]:
-        """The drafts with their errors fixed or listed, and whether the review worked. Never loses a draft."""
+    def review(self, draft: Draft, places: list[PlaceCandidate], profile: TripProfile,
+               personality: Personality | None = None) -> Draft:
+        """The draft with its errors fixed or listed. Never raises, so a draft is never lost.
+        Safe to run in a thread: it only calls the model."""
         try:
-            places = self.pool(profile, viewport, exclude_ids, personality).places  # cached by generate
             days = min(profile.duration_days or DEFAULT_DAYS, MAX_DAYS)
-            plans = [d.itinerary.model_copy(update={"days": d.itinerary.days[:days]}, deep=True) for d in drafts]
-            results, checked = self._check_and_fix(plans, places, profile, personality, days=days)
-            moments = PersonalityService.moments(personality)
-            return [draft.model_copy(update={
-                "itinerary": plan,
-                "warnings": warnings,
-                "photo_name": next((a.photo_name for d in plan.days for a in d.activities if a.photo_name), None),
-                "unplanned": [m for m in moments if m not in fulfilled(plan)],
-            }) for draft, (plan, warnings) in zip(drafts, results)], checked
+            plan = draft.itinerary.model_copy(update={"days": draft.itinerary.days[:days]}, deep=True)
+            plan, warnings, checked = self._check_and_fix(plan, places, profile, personality, days=days)
         except Exception:
-            logger.exception("Couldn't review the drafts")
-            return drafts, False
+            logger.exception("Couldn't review a draft")
+            plan, warnings, checked = draft.itinerary, [], False
+        moments = PersonalityService.moments(personality)
+        return draft.model_copy(update={
+            "itinerary": plan,
+            "warnings": warnings + ([] if checked else [UNREVIEWED]),
+            "photo_name": next((a.photo_name for d in plan.days for a in d.activities if a.photo_name), None),
+            "unplanned": [m for m in moments if m not in fulfilled(plan)],
+        })
 
-    def _check_and_fix(self, plans: list[Itinerary], places: list[PlaceCandidate], profile: TripProfile,
+    def _check_and_fix(self, plan: Itinerary, places: list[PlaceCandidate], profile: TripProfile,
                        personality: Personality | None, days: int | None = None, scope: set[str] | None = None,
-                       request: str = "") -> tuple[list[tuple[Itinerary, list[str]]], bool]:
-        """One review of all the plans, then at most one repair call. `days` is set for drafts, `scope` for an edit."""
+                       request: str = "") -> tuple[Itinerary, list[str], bool]:
+        """Review, at most one repair, and one re-check of what the repair changed.
+        `days` is set for drafts, `scope` for an edit. Returns the plan, what is still wrong, and if the review worked."""
         try:
-            critiques = ItineraryCritiqueService.critique(plans, profile, personality, places, scope, request)
+            [critique] = ItineraryCritiqueService.critique([plan], profile, personality, places, scope, request)
             checked = True
         except Exception:
             logger.exception("The critic failed")
-            critiques, checked = [ItineraryCritique() for _ in plans], False
+            critique, checked = ItineraryCritique(), False
 
         # Missing days are added only now, so the critic judges the plan and not our count.
-        padded, flagged = [], {}
-        for i, (plan, critique) in enumerate(zip(plans, critiques)):
-            plan = plan.model_copy(deep=True)
-            if days:
-                plan.days += [DayPlan(day_number=n, activities=[]) for n in range(len(plan.days) + 1, days + 1)]
-            padded.append(plan)
-            found = ItineraryCritique(
-                issues=ItineraryCritiqueService.counted(plan, places, days, scope, critique.visit_minutes) + critique.issues)
-            if not found.is_valid:
-                flagged[i] = found.issues
+        plan = plan.model_copy(deep=True)
+        if days:
+            plan.days += [DayPlan(day_number=n, activities=[]) for n in range(len(plan.days) + 1, days + 1)]
+        visits = dict(critique.visit_minutes)
+        issues = ItineraryCritiqueService.counted(plan, places, days, scope, visits) + critique.issues
 
-        fixes = {}
-        if checked and flagged:  # a model that just failed won't repair either
+        fixed = plan
+        if checked and issues:  # a model that just failed won't repair either
             try:
-                fixes = self._repairs(padded, flagged, places, profile, personality, scope, request)
+                [edits] = self._repairs([plan], {0: issues}, places, profile, personality, scope, request).values()
+                fixed = self._repaired(plan, issues, edits, places, days, scope, visits)
+                present = {a.id for d in fixed.days for a in d.activities} | ({STAY_ID} if fixed.stay else set())
+                if redo := _changed(plan, fixed) & present:
+                    # A repair is the model's own guess too: check just what it changed, once. No loop: fixes can
+                    # chase each other, and every round is another 3-50 s.
+                    [again] = ItineraryCritiqueService.critique([fixed], profile, personality, places, redo, request)
+                    visits |= again.visit_minutes
+                    if again.issues or len(ItineraryCritiqueService.counted(fixed, places, days, scope, visits)) > \
+                            len(ItineraryCritiqueService.counted(plan, places, days, scope, visits)):
+                        logger.info("Repair failed its re-check: %s", [x.problem for x in again.issues])
+                        fixed = plan
             except Exception:
-                logger.exception("The repair failed")
+                logger.exception("The repair or its re-check failed")
+                fixed = plan
 
-        results = []
-        for i, (plan, critique) in enumerate(zip(padded, critiques)):
-            fixed = (self._repaired(plan, flagged[i], fixes[i], places, days, scope, critique.visit_minutes)
-                     if i in fixes else plan)
-            changed = _changed(plan, fixed)
-            added = {a.id for d in fixed.days for a in d.activities} - {a.id for d in plan.days for a in d.activities}
-            # shortcut: changing what was flagged counts as fixed, review again if the traveler evals show bad repairs.
-            unfixed = [x.problem for x in critique.issues if not (changed & set(x.where) if x.where else added)]
-            if days:
-                fixed.days = [d for d in fixed.days if d.activities]
-                for number, day in enumerate(fixed.days, 1):
-                    day.day_number = number
-            counted = [x.problem for x in ItineraryCritiqueService.counted(
-                fixed, places, days, scope and scope | changed, critique.visit_minutes)]
-            results.append((fixed, list(dict.fromkeys(counted + unfixed))))
-        return results, checked
+        changed = _changed(plan, fixed)
+        added = {a.id for d in fixed.days for a in d.activities} - {a.id for d in plan.days for a in d.activities}
+        unfixed = [x.problem for x in critique.issues if not (changed & set(x.where) if x.where else added)]
+        if days:
+            fixed.days = [d for d in fixed.days if d.activities]
+            for number, day in enumerate(fixed.days, 1):
+                day.day_number = number
+        counted = [x.problem for x in ItineraryCritiqueService.counted(
+            fixed, places, days, scope and scope | changed, visits)]
+        return fixed, list(dict.fromkeys(counted + unfixed)), checked
 
     @staticmethod
     def _repairs(plans: list[Itinerary], flagged: dict[int, list[Issue]], places: list[PlaceCandidate],

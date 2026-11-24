@@ -57,20 +57,24 @@ class FakeLLM:
         self.decisions: list[TurnDecision] = []
         self.prompts: list[tuple[str, str]] = []
         self.edits: list[dict] = []
-        # The critic: failed verdicts as {plan: {rule: verdict}}, the repairs, and what either call raises.
-        self.fails: dict[str, dict[str, dict]] = {}
+        # The critic: failed verdicts as {plan: {rule: verdict}} (a list: one per review call, then none), the
+        # repairs, and what either call raises.
+        self.fails: dict[str, dict[str, dict]] | list[dict] = {}
         self.fixes: dict[str, list[dict]] = {}
         self.errors: dict[str, Exception] = {}
-        self.minutes: dict[str, int] = {}  # visit minutes by item id; 60 when not set
+        self.minutes: dict[str, int] = {}  # visit minutes by item id on a first review; 60 otherwise
 
     def __call__(self, prompt, schema, history=None, system=None, model=None, timeout=None):
         self.prompts.append((schema.__name__, prompt))
         if schema.__name__ in self.errors:
             raise self.errors[schema.__name__]
         if schema.__name__ == "PlanReviews":
+            # A re-check judges what a repair put in the slot, not the old place.
+            minutes = {} if "Only these parts changed" in prompt else self.minutes
+            fails = self.fails if isinstance(self.fails, dict) else self.fails.pop(0) if self.fails else {}
             return schema.model_validate({
-                plan: {name: {item: self.minutes.get(item, 60) for item in f.annotation.model_fields}
-                       if name == "visit_minutes" else self.fails.get(plan, {}).get(name, {"passed": True})
+                plan: {name: {item: minutes.get(item, 60) for item in f.annotation.model_fields}
+                       if name == "visit_minutes" else fails.get(plan, {}).get(name, {"passed": True})
                        for name, f in field.annotation.model_fields.items()}
                 for plan, field in schema.model_fields.items()})
         if schema.__name__ == "PlanFixes":

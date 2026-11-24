@@ -188,8 +188,9 @@ class ItineraryCritiqueService:
             f"Facts about these places:\n{plan_facts(plan, places, scope)}"
             for i, plan in enumerate(plans))
         edit_rules = "" if scope is None else (
-            f'- The traveler just asked: "{request}". What they asked for is never an error, even against an older note.\n'
-            f"- Only these parts changed, so only these may fail: {', '.join(sorted(scope))}. Leave everything else alone.")
+            (f'- The traveler just asked: "{request}". What they asked for is never an error, even against an older note.\n'
+             if request else "")
+            + f"- Only these parts changed, so only these may fail: {', '.join(sorted(scope))}. Leave everything else alone.")
         prompt = f"""
 You review trip plans to {profile.destination} before the traveler sees them.
 Find logical errors and real misfits. Don't polish, and don't suggest nice-to-haves.

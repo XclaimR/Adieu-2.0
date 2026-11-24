@@ -93,8 +93,8 @@ only on a clear yes while that is the current question. A no brings back the que
 4. `TurnService.plan` — rules decide what happens next: ask a question, show options, offer drafts, or edit the itinerary.
 5. The reply is streamed and **saved immediately**, then the slow part runs:
    - Show options → `OptionsService.build` → the destination's places (`PlacesService.candidates`) → `RankingService` (LLM ranks by the trip's notes) → slide-in panel (`components/OptionsPanel.tsx`, `PickCard.tsx`).
-   - Offer drafts → `DraftService.generate` → one pool of places (name, type, area, description), then one LLM call per flavor (easy / classic / local) → `DraftService.review` → `DraftCard.tsx`, all three together once reviewed.
-     Until the reviewed drafts arrive the reply is only "Let me put some plans together"; then a second `reply` event replaces it
+   - Offer drafts → `DraftService.generate` → one pool of places (name, type, area, description), then one LLM call per flavor (easy / classic / local) → `DraftService.review` per plan → `DraftCard.tsx`, each shown once its own review is done.
+     Until the first reviewed draft arrives the reply is only "Let me put some plans together"; then a second `reply` event replaces it
      with the model's words and "Here are 3 ways". With no draft (too few places, so no LLM call; place data or the LLM
      unavailable; all drafts rejected) the reply and the panel say why, from `trip.state.no_plans`.
    - Every destination has a real area (atolls and mountain ranges too). Trips saved with Google's area, which could
@@ -102,9 +102,11 @@ only on a clear yes while that is the current question. A no brings back the que
    - Edit itinerary → `DraftService.edit`: the model gets the changed part with its notes and returns edit
      operations (replace / remove / add / move); code applies them and leaves everything else untouched.
      `LLM_MODEL_PLAN` can name a stronger model for drafts, edits and their review (default: `LLM_MODEL`).
-   - Review, before the traveler sees a plan or an edit (`DraftService._check_and_fix`):
-     1. `ItineraryCritiqueService.critique` is one LLM call for all the plans. It must give a verdict per rule and
-        per plan: destination, travel style, activity balance, purpose, logic, budget (only if stated), and one
+   - Review, before the traveler sees a plan or an edit (`DraftService._check_and_fix`, one plan at a time). Each
+     draft's review starts in a thread as soon as it is written, so it overlaps writing the next
+     (`TravelPlannerWorkflow._offer_drafts`); only the workflow thread touches the database.
+     1. `ItineraryCritiqueService.critique` is one LLM call per plan (one call for three plans mixed them up, live).
+        It must give a verdict per rule: destination, travel style, activity balance, purpose, logic, budget (only if stated), and one
         rule per stated note. A failure that points at nothing real is ignored. The same call estimates the
         minutes needed at every stop.
      2. `ItineraryCritiqueService.counted` is plain code: day count, empty or one-stop days, a missing stay, and
@@ -112,12 +114,16 @@ only on a clear yes while that is the current question. A no brings back the que
         an estimated travel time (straight line plus 30%: walking, transit or road; no routing API), and flags
         a stop that can't start in its morning / afternoon / evening, a day past 1 am, or over 4 hours of travel.
         Stops keep their `lat`/`lng` for this. The model never sees these results, so it can't parrot them.
-     3. One repair call for all flagged plans. It returns the same edit operations, and code lets them touch only
-        what was flagged. After an edit that is only what the edit changed, and a repair can't remove a stop. A
-        repair that leaves more countable errors is thrown away.
-     4. What is still wrong shows on the card ("Check before choosing") or after the edit ("Worth a look").
-        If the critic fails or times out (45 s per attempt), the plans still show, and the reply says they weren't
-        double-checked. Cost: a drafting turn is 5 LLM calls, 6 with a repair; an edit is 3, or 4.
+     3. One repair call. It returns the same edit operations, and code lets them touch only what was flagged. After
+        an edit that is only what the edit changed, and a repair can't remove a stop. A repair that leaves more
+        countable errors is thrown away.
+     4. One re-check of only what the repair changed (the same critic, scoped like an edit). If it finds a problem,
+        or fails, the plan goes back to how it was before the repair and the original problems are shown. No loop:
+        repairs can chase each other and each round costs 3-50 s.
+     5. What is still wrong shows on the card ("Check before choosing") or after the edit ("Worth a look").
+        If the critic fails or times out (45 s per attempt), the plan still shows, marked "I couldn't double-check
+        this plan." Cost: a drafting turn is 7 LLM calls, up to 13 with repairs and re-checks (under the free
+        tier's 15 a minute); an edit is 3, up to 5.
 6. A final `done` event carries the refreshed trip.
 
 Events the browser handles: `progress` (step list), `reply`, `note`, `options`, `draft`, `done`, `error` (shown with a **Try again** button if the message wasn't saved).

@@ -1,5 +1,6 @@
 import logging
 import re
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from collections.abc import Iterator
 
 import httpx
@@ -303,36 +304,59 @@ class TravelPlannerWorkflow:
         yield _progress(f"Gathering places in {profile.destination}…")
         trip.drafts = []
         viewport, skipped = self._viewport(trip), self._skipped(trip)
-        written = []
+        # Each plan is reviewed in its own thread while the next is written, and shown once its review is done.
+        checks = ThreadPoolExecutor(max_workers=DRAFT_COUNT)
+        reviews: list[Future] = []
+        places = None
         try:
-            for draft in self.drafter.generate(profile, viewport, skipped, personality):
-                written.append(draft)
-                if len(written) < DRAFT_COUNT:
-                    yield _progress(f"Drafting plan {len(written) + 1} of {DRAFT_COUNT}…")
-        except Exception as e:
-            if not written:
-                logger.warning("No plans for %s: %r", profile.destination, e, exc_info=True)
-                no_plans = _why_no_plans(e, profile.destination)
-                self.db.refresh(trip)  # an older draft may have been chosen while we worked
-                trip.drafts = []
-                trip.state = {**(trip.state or {}), "no_plans": no_plans.model_dump()}
-                answer.content = f"{answer.content} {no_plans.reason}"
-                self.db.commit()
-                yield {"type": "note", "text": no_plans.reason}
-                return
-            logger.exception("Drafting stopped early; showing the plans already written")
+            try:
+                for draft in self.drafter.generate(profile, viewport, skipped, personality):
+                    if places is None:
+                        places = self._review_places(profile, viewport, skipped, personality)
+                    reviews.append(checks.submit(self.drafter.review, draft, places, profile, personality))
+                    yield from self._show_reviewed(trip, reviews, answer, reply_with_plans, wait=False)
+                    if len(trip.drafts) + len(reviews) < DRAFT_COUNT:
+                        yield _progress(f"Drafting plan {len(trip.drafts) + len(reviews) + 1} of {DRAFT_COUNT}…")
+            except Exception as e:
+                if not reviews and not trip.drafts:
+                    logger.warning("No plans for %s: %r", profile.destination, e, exc_info=True)
+                    no_plans = _why_no_plans(e, profile.destination)
+                    self.db.refresh(trip)  # an older draft may have been chosen while we worked
+                    trip.drafts = []
+                    trip.state = {**(trip.state or {}), "no_plans": no_plans.model_dump()}
+                    answer.content = f"{answer.content} {no_plans.reason}"
+                    self.db.commit()
+                    yield {"type": "note", "text": no_plans.reason}
+                    return
+                logger.exception("Drafting stopped early; showing the plans already written")
+            if reviews:
+                yield _progress("Checking your plans…")
+            yield from self._show_reviewed(trip, reviews, answer, reply_with_plans, wait=True)
+        finally:
+            checks.shutdown(wait=False, cancel_futures=True)  # a closed stream doesn't wait for the model
 
-        yield _progress("Checking your plans…")
-        drafts, checked = self.drafter.review(written, profile, viewport, skipped, personality)
-        # Saved before the first is shown: choosing one closes the stream.
-        trip.drafts = [d.model_dump(mode="json") for d in drafts]
-        answer.content = reply_with_plans if checked else f"{reply_with_plans} {UNCHECKED}"
-        self.db.commit()
-        yield _reply(reply_with_plans)  # replaces the one shown while we worked
-        if not checked:
-            yield {"type": "note", "text": UNCHECKED}
-        for i, shown in enumerate(list(trip.drafts)):
-            yield {"type": "draft", "index": i, "draft": shown}
+    def _review_places(self, profile: TripProfile, viewport: dict | None, skipped: set[str],
+                       personality: Personality) -> list:
+        try:
+            return self.drafter.pool(profile, viewport, skipped, personality).places  # cached by generate
+        except Exception:
+            logger.exception("No places for the review; it judges without them")
+            return []
+
+    def _show_reviewed(self, trip: TripModel, reviews: list[Future], answer: MessageModel, reply: str,
+                       wait: bool) -> Iterator[Event]:
+        """Shows reviewed plans as they finish: all that are done, or with `wait` every one left."""
+        for future in as_completed(list(reviews)) if wait else [f for f in reviews if f.done()]:
+            reviews.remove(future)
+            # Saved before it is shown: choosing a plan closes the stream.
+            trip.drafts = [*trip.drafts, future.result().model_dump(mode="json")]
+            first = len(trip.drafts) == 1
+            if first:
+                answer.content = reply
+            self.db.commit()
+            if first:
+                yield _reply(reply)  # replaces the one shown while we worked
+            yield {"type": "draft", "index": len(trip.drafts) - 1, "draft": trip.drafts[-1]}
 
     # ---------- actions ----------
 
