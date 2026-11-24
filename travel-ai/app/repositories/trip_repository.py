@@ -116,8 +116,9 @@ class TripRepository:
             if pick.place_id == place_id:
                 return pick
         itinerary = self.itinerary(trip)
-        if itinerary and itinerary.stay and itinerary.stay.place_id == place_id:
-            return itinerary.stay
+        for _, stay, _ in itinerary.stay_slots() if itinerary else []:
+            if stay and stay.place_id == place_id:
+                return stay
         row = self.db.scalar(select(PickFeedbackModel).where(
             PickFeedbackModel.trip_id == trip.id, PickFeedbackModel.place_id == place_id
         ))

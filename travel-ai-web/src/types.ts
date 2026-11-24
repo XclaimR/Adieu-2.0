@@ -74,11 +74,20 @@ export type Activity = {
   minutes: number;
 };
 
+/** Getting to a city from the one before it: rough estimates. */
+export type Leg = { mode: string; minutes: number; cost: string | null; note: string | null };
+
+/** One base on a multi-city route; its nights are the days spent there. */
+export type City = { name: string; days: number; nights: number; stay: Pick | null; leg: Leg | null };
+
 export type Itinerary = {
   destination: string;
   title: string | null;
+  /** One-city plans; a route has a stay per city instead. */
   stay: Pick | null;
-  days: { day_number: number; theme: string | null; activities: Activity[] }[];
+  route: City[];
+  route_tip: string | null;
+  days: { day_number: number; theme: string | null; city: string | null; activities: Activity[] }[];
 };
 
 export type Draft = {

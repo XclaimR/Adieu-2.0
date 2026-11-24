@@ -13,7 +13,7 @@ from app.repositories.trip_repository import TripRepository
 from app.schemas.activity import default_minutes
 from app.schemas.api import TurnResponse
 from app.schemas.draft import NoPlans
-from app.schemas.itinerary import Itinerary
+from app.schemas.itinerary import Itinerary, city_of
 from app.schemas.personality import NoteChange, Personality
 from app.schemas.place import OptionSet, Pick, PickCategory, SwapTarget
 from app.schemas.trip_profile import TripProfile
@@ -317,7 +317,7 @@ class TravelPlannerWorkflow:
             try:
                 for draft in self.drafter.generate(profile, viewport, skipped, personality):
                     if places is None:
-                        places = self._review_places(profile, viewport, skipped, personality)
+                        places = self._review_places(profile, viewport, skipped, personality, draft.itinerary)
                     reviews.append(checks.submit(self.drafter.review, draft, places, profile, personality))
                     yield from self._show_reviewed(trip, reviews, answer, reply_with_plans, wait=False)
                     if len(trip.drafts) + len(reviews) < DRAFT_COUNT:
@@ -341,9 +341,9 @@ class TravelPlannerWorkflow:
             checks.shutdown(wait=False, cancel_futures=True)  # a closed stream doesn't wait for the model
 
     def _review_places(self, profile: TripProfile, viewport: dict | None, skipped: set[str],
-                       personality: Personality) -> list:
-        try:
-            return self.drafter.pool(profile, viewport, skipped, personality).places  # cached by generate
+                       personality: Personality, itinerary: Itinerary) -> list:
+        try:  # cached by generate; all three drafts share the route
+            return self.drafter.pool(profile, viewport, skipped, personality, itinerary.route).places
         except Exception:
             logger.exception("No places for the review; it judges without them")
             return []
@@ -390,6 +390,8 @@ class TravelPlannerWorkflow:
             self.trips.set_feedback(trip.id, pick, "skipped")
         elif action == "add":
             itinerary = self.trips.itinerary(trip) or Itinerary(destination=profile.destination or "", days=[])
+            if itinerary.route and not city_of(itinerary.route, pick):
+                raise TripActionError(f"{pick.name} is outside your route ({', '.join(c.name for c in itinerary.route)})")
             trip.itinerary = DraftService.place_in_itinerary(itinerary, pick).model_dump(mode="json")
             self.db.commit()
         elif action in ("like", "too_pricey"):
@@ -438,7 +440,7 @@ class TravelPlannerWorkflow:
         option_set = self.options.swap_options(
             SwapTarget(day_number=day_number, index=index), activity.name, activity.category,
             self.trips.profile(trip), self._viewport(trip), used | self._skipped(trip),
-            personality, about,
+            personality, about, near=day.city, route=itinerary.route,
         )
         trip.panel = option_set.model_dump(mode="json")
         self.db.commit()

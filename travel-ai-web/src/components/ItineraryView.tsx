@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import Photo, { Credit } from "./Photo";
 import type { Itinerary, Note } from "../types";
 import NoteList from "./NoteList";
+import RouteCard from "./RouteCard";
 
 const SLOTS = ["morning", "afternoon", "evening"];
 // An evening bar is the outing itself, not a meal that leaves the evening free.
@@ -45,6 +46,13 @@ export default function ItineraryView({ itinerary, notes, busy, onSwap, onRemove
 
   return (
     <div className="timeline">
+      {itinerary.route?.length > 0 && (
+        <RouteCard
+          itinerary={itinerary}
+          notes={notes}
+          onCity={(city) => goTo(Math.max(0, itinerary.days.findIndex((d) => d.city === city.name)))}
+        />
+      )}
       {itinerary.stay && (
         <section className="stay-card">
           {itinerary.stay.photo_name && <Photo name={itinerary.stay.photo_name} fallback="" />}
@@ -89,6 +97,7 @@ export default function ItineraryView({ itinerary, notes, busy, onSwap, onRemove
             <div className="day-head">
               <h3>
                 Day {day.day_number}
+                {day.city && <span className="muted"> · {day.city}</span>}
                 {day.theme && <span className="muted"> · {day.theme}</span>}
                 {day.activities.length > 0 && (
                   <span className="day-total">

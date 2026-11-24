@@ -53,3 +53,8 @@ def test_a_repeat_never_moves_earlier():
 def test_a_draft_day_stays_at_four_stops_for_gemini():
     # Ticket #75: five nested under ten days made Gemini refuse the schema ("too many states") on every draft.
     assert PlanDay.model_json_schema()["properties"]["stops"]["maxItems"] == 4
+
+
+def test_draft_days_have_no_cap_for_gemini():
+    # Ticket #27: a 14-day cap with nested stops made Gemini refuse the schema (400); code trims the days instead.
+    assert "maxItems" not in DraftPlan.model_json_schema()["properties"]["days"]

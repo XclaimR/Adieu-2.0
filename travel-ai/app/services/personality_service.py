@@ -1,7 +1,7 @@
 import re
 import uuid
 
-from app.schemas.itinerary import STAY_ID, Itinerary
+from app.schemas.itinerary import Itinerary
 from app.schemas.personality import Note, NoteChange, Personality, Scale
 from app.schemas.trip_profile import BudgetLevel, Party, TripProfile
 
@@ -57,7 +57,8 @@ def check_changes(changes: list[NoteChange], message: str, stored: Personality |
             continue
         target, then = change.target, change.then
         if itinerary and then == "change" and change.category == "stay" and re.fullmatch(r"d\d+", target):
-            target = STAY_ID  # one stay serves every night, whichever day they mention
+            # The stay serves every night (in that day's city on a route), whichever day they mention.
+            target = itinerary.stay_id(next((d for d in itinerary.days if d.id == target), None))
         if target not in targets:
             # Without a plan everything is about the trip; with one, a wrong id must not edit the whole trip.
             target, then = "trip", "none" if itinerary else then
@@ -161,13 +162,15 @@ class PersonalityService:
         lines = ["TRIP [trip]", *under("trip")]
         if not itinerary:
             return "\n".join(lines)
-        stay = itinerary.stay
-        price = f", est. {stay.tier} price" if stay and stay.tier else ""
-        lines += [f"STAY [{STAY_ID}] {stay.name if stay else 'none chosen yet'}{price}, all nights", *under(STAY_ID)]
+        for sid, stay, city in itinerary.stay_slots():
+            price = f", est. {stay.tier} price" if stay and stay.tier else ""
+            nights = next((f"{c.nights} nights in {c.name}" for c in itinerary.route if c.name == city), "all nights")
+            lines += [f"STAY [{sid}] {stay.name if stay else 'none chosen yet'}{price}, {nights}", *under(sid)]
         for day in itinerary.days:
             if days is not None and day.id not in days:
                 continue
-            lines += [f"DAY {day.day_number} [{day.id}] {day.theme or ''}".rstrip(), *under(day.id)]
+            where = f" (in {day.city}{', moving day' if itinerary.moving_day(day) else ''})" if day.city else ""
+            lines += [f"DAY {day.day_number} [{day.id}]{where} {day.theme or ''}".rstrip(), *under(day.id)]
             for a in day.activities:
                 lines += [f"  [{a.id}] {a.name} ({a.category}, {a.time_of_day or 'any time'})", *under(a.id, "    ")]
         return "\n".join(lines)
