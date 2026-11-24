@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api } from "../api";
 import Photo from "../components/Photo";
 import IdeaCard from "../components/IdeaCard";
+import Credits from "../components/Credits";
 import type { StarterIdea, TripSummary, User } from "../types";
 
 type Props = { user: User; openTrip: (id: string, firstMessage?: string) => void };
@@ -117,6 +118,7 @@ export default function Home({ user, openTrip }: Props) {
           </div>
         </section>
       )}
+      <Credits />
     </main>
   );
 }
