@@ -34,21 +34,52 @@ function profileFacts(p: TripProfile): string[] {
   return [...new Set(facts.filter((f): f is string => !!f))];
 }
 
-/** The trip's personality in plain words: "Slow pace, food is the point". Unknown scales are named, never guessed. */
+// Mirrors personality_service.SCALES / KNOWN / LEAN: [label, left pole, right pole, middle].
+const SCALES: [string, string, string, string, string][] = [
+  ["pace", "Pace", "Slow", "Packed", "Steady"],
+  ["food", "Food", "Just fuel", "The point", "Matters"],
+  ["energy", "Energy", "Chill", "Nightlife", "Some nights"],
+  ["crowds", "Crowds", "Hidden gems", "Icons", "A mix"],
+  ["money", "Money goes to", "The stay", "Experiences", "Both"],
+  ["comfort", "Comfort", "Backpacker", "Luxury", "Mid-range"],
+];
+const KNOWN = 0.5;
+const LEAN = 0.25;
+
+/** The trip's personality as six small scales: a solid knob when Adieu is sure, a dashed one while it isn't.
+ * The traveler's notes about the whole trip open underneath. */
 function PersonalityCard({ personality }: { personality: Personality }) {
-  const { traits, unknown, notes } = personality;
+  const { scales, notes } = personality;
   const tripNotes = notes.filter((n) => n.target === "trip");
   const isMoment = (n: (typeof notes)[number]) => n.once && n.kind !== "avoid";
   const moments = tripNotes.filter(isMoment).map((n) => n.text);
-  const sentence = traits.map((t, i) => (i ? t.toLowerCase() : t)).join(", ");
   return (
     <details className="personality">
       <summary>
-        <span className="personality-label">Trip personality</span> {sentence || "Still getting to know this trip"}
+        <span className="personality-head">
+          <span className="personality-label">Trip personality</span>
+          {tripNotes.length > 0 && <span className="small">Notes ({tripNotes.length})</span>}
+        </span>
+        <span className="fingerprint">
+          {SCALES.map(([key, label, left, right, middle]) => {
+            const s = scales[key];
+            const known = !!s && s.confidence >= KNOWN;
+            const value = s?.value ?? 0;
+            const word = !known ? "Not sure" : value < -LEAN ? left : value > LEAN ? right : middle;
+            return (
+              <span key={key} className={`scale ${known ? "known" : ""}`}>
+                <span className="scale-text">
+                  <span>{label}</span>
+                  <span className="scale-word">{word}</span>
+                </span>
+                <span className="scale-track" aria-hidden>
+                  <span className="scale-knob" style={{ left: `${((value + 1) / 2) * 100}%` }} />
+                </span>
+              </span>
+            );
+          })}
+        </span>
       </summary>
-      {traits.length > 0 && unknown.length > 0 && (
-        <span className="small muted">Not sure yet: {unknown.join(", ").toLowerCase()}</span>
-      )}
       <NoteList notes={tripNotes.filter((n) => !isMoment(n))} target="trip" />
       {moments.length > 0 && <span className="small">To fit in: {moments.join(", ")}</span>}
     </details>
