@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_DAYS = 4
 MAX_DAYS = 10
-MAX_STOPS = 5  # a thing to do in each time of day, and lunch and dinner beside two of them
+MAX_STOPS = 5  # after edits: a thing to do in each time of day, and lunch and dinner beside two of them
 MIN_PLACES = 2
 # How many of each kind the drafting model sees: enough to plan from, few enough for a free-tier prompt.
 POOL = {PickCategory.DO: 18, PickCategory.EAT: 14, PickCategory.HIDDEN_GEMS: 8, PickCategory.STAY: 8}  # places to visit or eat at: one day's minimum
@@ -56,7 +56,8 @@ class PlanStop(BaseModel):
 
 class PlanDay(BaseModel):
     theme: str = Field(description="2-4 word theme for the day")
-    stops: list[PlanStop] = Field(min_length=2, max_length=MAX_STOPS)
+    # 4, not MAX_STOPS: Gemini refuses a longer list nested in days ("too many states"); an empty slot is free time.
+    stops: list[PlanStop] = Field(min_length=2, max_length=4)
 
 
 class DraftPlan(BaseModel):
@@ -229,6 +230,8 @@ Places you may use (refer to them ONLY by [n]):
 Rules:
 - Exactly {days} days, each with 2-3 things to do or see and places to eat beside them.
 - Each time of day holds at most one thing to do and one meal. Lunch is afternoon, dinner is evening.
+- Plan meals in pairs: lunch with a thing to do in the same afternoon, dinner with one in the same evening.
+  Leave out a meal rather than give it a time of day alone.
 - A meal takes an hour or two, so it never has a morning, afternoon or evening to itself: it shares that time
   of day with a thing to do or see (in the evening a bar, a show or a walk counts).
 - Each stop's place and note must be about the same listed place. Don't plan anything that isn't on the list.

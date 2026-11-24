@@ -47,3 +47,8 @@ def test_a_repeat_never_moves_earlier():
         PlanStop(place="Lisbon Cathedral", ref=1, time_of_day="evening", note="2"),
     ), "Lisbon")
     assert [a.time_of_day for a in it.days[0].activities] == ["evening", "evening"]
+
+
+def test_a_draft_day_stays_at_four_stops_for_gemini():
+    # Ticket #75: five nested under ten days made Gemini refuse the schema ("too many states") on every draft.
+    assert PlanDay.model_json_schema()["properties"]["stops"]["maxItems"] == 4
