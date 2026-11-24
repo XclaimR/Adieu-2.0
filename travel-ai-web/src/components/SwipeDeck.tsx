@@ -90,6 +90,10 @@ export default function SwipeDeck({ tripId, onDone }: { tripId: string; onDone: 
         tabIndex={-1}
         ref={dialog}
         onKeyDown={onKey}
+        onBlur={(e) => {
+          // A modal keeps focus: Tab past the last button comes back to the deck, not the board behind it.
+          if (!e.currentTarget.contains(e.relatedTarget as Node | null)) dialog.current?.focus();
+        }}
       >
         <header className="swipe-head">
           <h2 id="swipe-title">Find your trip style</h2>
@@ -116,6 +120,7 @@ export default function SwipeDeck({ tripId, onDone }: { tripId: string; onDone: 
             className={`swipe-card ${lean} ${dragging ? "dragging" : ""}`}
             style={{ transform: `translateX(${dx}px) rotate(${dx / 24}deg)` }}
             onPointerDown={(e) => {
+              if ((e.target as HTMLElement).closest("a")) return; // let the licence link take the tap
               start.current = e.clientX;
               setDragging(true);
               e.currentTarget.setPointerCapture(e.pointerId);
