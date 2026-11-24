@@ -4,6 +4,7 @@ legs (mode, fare), which it knows and open data doesn't. Transitous, an open pub
 real journey time where it covers the trip. Without the model, code does the rest, roughly."""
 import logging
 import re
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from itertools import permutations
 from typing import Literal
@@ -65,7 +66,9 @@ def _length(route: tuple[dict, ...]) -> float:
 
 def order(cities: list[dict]) -> list[dict]:
     """The shortest one-way route (no zig-zag), counting the trip from the main city, where flights usually land,
-    to the first stop. So it starts in the main city unless starting elsewhere still saves distance."""
+    to the first stop. So it starts in the main city unless starting elsewhere still saves distance.
+    shortcut: the main city is the model's first pick; without the model it is the town with the most listed places
+    (Kyoto, not Tokyo); add a gateway airport per country if that fallback is used often."""
     main = cities[0]
     def cost(route: tuple[dict, ...]) -> tuple:
         arrive = distance_km((main["lat"], main["lng"]), (route[0]["lat"], route[0]["lng"]))
@@ -94,16 +97,20 @@ def transit(a: City, b: City) -> Leg | None:
                                                  "time": _morning(a.lng), "numItineraries": 3},
                              headers={"User-Agent": USER_AGENT}, timeout=10)
         response.raise_for_status()
-        trips = response.json().get("itineraries") or []
-    except (httpx.HTTPError, ValueError):
+        best = min(response.json().get("itineraries") or [], key=lambda t: t["duration"], default=None)
+        rides = [leg for leg in best["legs"] if leg["mode"] != "WALK"] if best else []
+        if not rides:
+            return None
+        main = max(rides, key=lambda leg: leg.get("duration", 0))["mode"]
+        return Leg(mode=_RIDES.get(main, "train"), minutes=round(best["duration"] / 60))
+    except Exception:  # the time is a bonus: an outage or a new answer format must never cost the plans
         logger.warning("Transitous couldn't route %s to %s", a.name, b.name, exc_info=True)
         return None
-    best = min(trips, key=lambda t: t["duration"], default=None)
-    rides = [leg for leg in best["legs"] if leg["mode"] != "WALK"] if best else []
-    if not rides:
-        return None
-    main = max(rides, key=lambda leg: leg.get("duration", 0))["mode"]
-    return Leg(mode=_RIDES.get(main, "train"), minutes=round(best["duration"] / 60))
+
+
+def _kind(mode: str) -> str:
+    return "flight" if _FLIGHT.search(mode) else "bus" if re.search(r"bus|coach", mode, re.I) else \
+        "ferry" if re.search(r"ferry|boat", mode, re.I) else "train"
 
 
 def checked_leg(estimate: Leg, a: City, b: City) -> Leg:
@@ -112,8 +119,8 @@ def checked_leg(estimate: Leg, a: City, b: City) -> Leg:
     found = transit(a, b)
     if not found or found.minutes > MAX_GROUND_MINUTES:
         return estimate
-    if bool(_FLIGHT.search(estimate.mode)) or estimate.mode == "train or bus":
-        return found
+    if estimate.mode == "train or bus" or _kind(estimate.mode) != _kind(found.mode):
+        return found  # another vehicle: the estimate's fare and tip were for that one
     return estimate.model_copy(update={"minutes": found.minutes})
 
 
@@ -154,9 +161,12 @@ class RouteService:
         ordered = order([by_name[name] for name in ranked])
         route = [City(name=c["name"], lat=c["lat"], lng=c["lng"], days=k)
                  for c, k in zip(ordered, share_days(days, ordered, ranked))]
-        for before, city in zip(route, route[1:]):
-            estimate = legs.get(frozenset((before.name, city.name))) or rough_leg(before, city)
-            city.leg = checked_leg(estimate, before, city)
+        pairs = list(zip(route, route[1:]))
+        with ThreadPoolExecutor(max_workers=MAX_CITIES) as pool:  # at once: a slow router costs one timeout, not five
+            checked = pool.map(lambda pair: checked_leg(
+                legs.get(frozenset((pair[0].name, pair[1].name))) or rough_leg(*pair), *pair), pairs)
+            for (_, city), leg in zip(pairs, checked):
+                city.leg = leg
         return route, tip
 
     @staticmethod
@@ -167,7 +177,9 @@ class RouteService:
         leg = create_model("LegBetween", __base__=_Leg, a=(Literal[names], ...), b=(Literal[names], ...))
         schema = create_model(
             "RouteChoice",
-            cities=(list[Literal[names]], Field(description=f"the {n} best bases, most important first")),
+            cities=(list[Literal[names]], Field(
+                description=f"the {n} best bases: first the one most international flights land in, if chosen, "
+                            "then the most important")),
             legs=(list[leg], Field(description="the usual way between every pair of the chosen cities")),
             tip=(str | None, Field(default=None, description="one pass or ticket tip that fits these legs, or null")),
         )
@@ -182,7 +194,8 @@ What we know about the traveler:
 Cities with enough to see (name, coordinates):
 {listing}
 
-Choose the {n} cities this traveler should base themselves in, most important first. First-time visitors usually
+Choose the {n} cities this traveler should base themselves in. List first the one most international flights land
+in (if it is one of them), then the rest by importance. First-time visitors usually
 want the best-known ones unless the traveler wants quieter places. Don't choose a city that is an easy day trip
 from another chosen one. Code decides the order and the days.
 For every pair of chosen cities give the usual public way to travel between them: mode, typical minutes and a rough

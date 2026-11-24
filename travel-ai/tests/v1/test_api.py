@@ -229,6 +229,22 @@ def test_add_puts_places_in_the_itinerary(client, auth, fake_llm):
     assert result["trip"]["itinerary"]["stay"]["place_id"] == "stay-1"
 
 
+def test_add_refuses_a_place_outside_the_route(client, auth, fake_llm, db_session):
+    from app.database.models import TripModel
+    trip = ready_trip(client, auth, fake_llm)
+    fake_llm.decisions.append(TurnDecision(action=TurnAction.SHOW_OPTIONS, reply="Sure.",
+                                           options_request=OptionsRequest(kind=OptionsKind.STAY, query="")))
+    say(client, auth, trip["id"], "show me places to stay")
+    row = db_session.get(TripModel, trip["id"])
+    row.itinerary = {"destination": "Japan", "days": [{"day_number": 1, "city": "Faraway", "activities": []}],
+                     "route": [{"name": "Faraway", "lat": 40.0, "lng": 40.0}]}  # the places are at 1.5, 1.5
+    db_session.commit()
+
+    result = client.post(f"/trips/{trip['id']}/picks/stay-1", json={"action": "add"}, headers=auth)
+
+    assert result.status_code == 404 and "outside your route (Faraway)" in result.json()["detail"]
+
+
 def test_swap_and_remove_activities(client, auth, fake_llm):
     trip = ready_trip(client, auth, fake_llm)
     draft = say(client, auth, trip["id"], "not sure")["drafts"][0]

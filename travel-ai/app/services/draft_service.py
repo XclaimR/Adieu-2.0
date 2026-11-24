@@ -21,7 +21,7 @@ from app.services.itinerary_critique_service import (MOVING_DAY_STOPS, REVIEW_TI
 from app.services.llm_client import LLMClient
 from app.services.personality_service import PersonalityService
 from app.services.places_service import FACTS_RULE, PlacesService, tier_rank, traveler_fit, unclaimed
-from app.services.route_service import RouteService, city_count
+from app.services.route_service import RouteService
 
 logger = logging.getLogger(__name__)
 
@@ -328,17 +328,12 @@ Rules:
 """
 
     def generate(self, profile: TripProfile, viewport: dict | None, exclude_ids: set[str],
-                 personality: Personality | None = None, previous: Itinerary | None = None) -> Iterator[Draft]:
+                 personality: Personality | None = None) -> Iterator[Draft]:
         """Yields 3 drafts with different flavors, one at a time (each is a separate model call).
-        A country or region trip first gets its route (one more call), the same for all three. The `previous` plan's
-        route is kept while the days and the number of cities the pace asks for are unchanged."""
+        A country or region trip first gets its route (one more call), the same for all three. Each round asks
+        again, so new wishes can change the cities."""
         days = min(profile.duration_days or DEFAULT_DAYS, MAX_DAYS)
-        old = previous.route if previous else []
-        if old and sum(c.days for c in old) == days and len(old) == city_count(days, personality):
-            route = (old, previous.route_tip)
-        else:
-            route = self.route(profile, viewport, personality, days)
-        pool = self.pool(profile, viewport, exclude_ids, personality, *route)
+        pool = self.pool(profile, viewport, exclude_ids, personality, *self.route(profile, viewport, personality, days))
         if sum(p.category != PickCategory.STAY for p in pool.places) < MIN_PLACES:
             raise NotEnoughPlacesError(f"Too few places in {profile.destination}")
         allowed = PersonalityService.traits(personality)[0]  # only known traits; guesses stay off the cards

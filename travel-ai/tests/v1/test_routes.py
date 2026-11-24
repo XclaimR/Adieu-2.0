@@ -254,18 +254,27 @@ def test_a_swap_only_offers_places_in_the_day_s_city(monkeypatch):
     assert [c.name for c in seen["c"]] == ["Fushimi Inari"]
 
 
-def test_another_round_of_drafts_keeps_the_route_while_days_and_pace_are_the_same(monkeypatch):
-    previous = POOL.to_itinerary(_plan(), "Japan")
-    drafter = DraftService(_Places(POOL.places))
-    asked = []
-    monkeypatch.setattr(drafter, "route", lambda *a: asked.append(a) or ([], None))
-    def stop(*a):
-        raise LookupError("stop before drafting")
-    monkeypatch.setattr(drafter, "pool", stop)
-    profile = TripProfile(destination="Japan", duration_days=4)
-    with pytest.raises(LookupError):
-        next(drafter.generate(profile, None, set(), _pace(1), previous))
-    assert asked == []  # 4 days, packed: 2 cities, as before
-    with pytest.raises(LookupError):
-        next(drafter.generate(profile, None, set(), _pace(-1), previous))
-    assert len(asked) == 1  # slow: one city now, so the route is planned again
+def test_a_shortened_trip_never_ends_in_a_city_for_0_nights():
+    it = Itinerary(destination="Japan", route=[City(name="Tokyo", lat=0, lng=0), City(name="Kyoto", lat=0, lng=1)],
+                   days=[{"day_number": n, "city": c, "activities": []}
+                         for n, c in enumerate(["Tokyo", "Tokyo", "Kyoto"], 1)])
+    assert [(c.name, c.days, c.nights) for c in it.route] == [("Tokyo", 3, 2)]
+    assert [d.city for d in it.days] == ["Tokyo"] * 3
+
+
+def test_a_leg_takes_the_router_s_vehicle_when_it_is_another_one(monkeypatch):
+    tokyo, kyoto = ROUTE
+    monkeypatch.setattr(route_service, "transit", lambda a, b: Leg(mode="bus", minutes=360))
+    leg = checked_leg(Leg(mode="train", minutes=480, cost="~₫500,000"), tokyo, kyoto)
+    assert (leg.mode, leg.minutes, leg.cost) == ("bus", 360, None)
+
+
+def test_a_broken_router_answer_keeps_the_estimate(monkeypatch):
+    class Answer:
+        status_code = 200
+        def raise_for_status(self): pass
+        def json(self): return [{"unexpected": True}]
+    monkeypatch.undo()  # the real transit(), with a fake HTTP answer
+    monkeypatch.setattr(route_service.httpx, "get", lambda *a, **k: Answer())
+    tokyo, kyoto = ROUTE
+    assert route_service.transit(tokyo, kyoto) is None

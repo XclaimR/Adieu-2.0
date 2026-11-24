@@ -72,6 +72,9 @@ class Itinerary(BaseModel):
         for day in self.days:
             if day.city not in names:
                 day.city = names[-1]  # a day added later stays on in the last city
+        last = [d for d in self.days if d.city == names[-1]]
+        if len(names) > 1 and len(last) == 1:  # one day there would be a hotel for 0 nights: stay where you were
+            last[0].city = names[-2]
         for city in self.route:
             city.days = city.nights = sum(d.city == city.name for d in self.days)
         if self.days:  # a shortened trip drops the cities it no longer reaches

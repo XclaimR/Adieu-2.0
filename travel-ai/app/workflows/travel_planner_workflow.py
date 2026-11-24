@@ -307,7 +307,6 @@ class TravelPlannerWorkflow:
     def _offer_drafts(self, trip: TripModel, profile: TripProfile, personality: Personality,
                       answer: MessageModel, reply_with_plans: str) -> Iterator[Event]:
         yield _progress(f"Gathering places in {profile.destination}…")
-        previous = self.trips.itinerary(trip) or next((d.itinerary for d in self.trips.drafts(trip)), None)
         trip.drafts = []
         viewport, skipped = self._viewport(trip), self._skipped(trip)
         # Each plan is reviewed in its own thread while the next is written, and shown once its review is done.
@@ -316,7 +315,7 @@ class TravelPlannerWorkflow:
         places = None
         try:
             try:
-                for draft in self.drafter.generate(profile, viewport, skipped, personality, previous):
+                for draft in self.drafter.generate(profile, viewport, skipped, personality):
                     if places is None:
                         places = self._review_places(profile, viewport, skipped, personality, draft.itinerary)
                     reviews.append(checks.submit(self.drafter.review, draft, places, profile, personality))
