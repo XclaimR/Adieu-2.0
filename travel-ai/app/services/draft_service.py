@@ -466,6 +466,7 @@ Rules:
   remove a stop, or move one to a day or time with room.
 - An empty day needs 2-3 stops added. A stay is replaced at item_id {STAY_ID}, and is never an activity.
 - Never choose a place that breaks a stated must or avoid.
+- A new place must suit its slot's time of day and who is going: no night club in the morning, no zoo for a stag party.
 - If nothing listed fixes an error, return no edit for it.
 {asked}
 """

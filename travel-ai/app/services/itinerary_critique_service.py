@@ -225,6 +225,9 @@ How to judge:
         critiques = []
         for i, plan in enumerate(plans):
             real = set(plan.target_ids()) if scope is None else scope
+            mine = {a.name for d in plan.days for a in d.activities} | ({plan.stay.name} if plan.stay else set())
+            # Seen live: reviewing three plans at once, the model blames one for another's stop.
+            elsewhere = re.compile("|".join(rf"\b{re.escape(p.name)}\b" for p in places if p.name not in mine) or "$^", re.I)
             issues = []
             for name in rules:
                 verdict = getattr(getattr(result, f"plan_{i}"), name)
@@ -232,8 +235,11 @@ How to judge:
                     continue
                 where = [w for w in (w.strip("[] ") for w in verdict.where) if w in real]
                 # An error that points at nothing real is invented, unless a note's wish is missing from a draft.
+                problem = _readable(verdict.problem, plan)
+                if elsewhere.search(problem):
+                    continue
                 if where or (scope is None and not verdict.where and name.startswith("note_")):
-                    issues.append(Issue(problem=_readable(verdict.problem, plan), suggestion=verdict.fix, where=where))
+                    issues.append(Issue(problem=problem, suggestion=verdict.fix, where=where))
             visits = {}
             for stop in stops[i]:
                 minutes = getattr(getattr(result, f"plan_{i}").visit_minutes, stop.id)

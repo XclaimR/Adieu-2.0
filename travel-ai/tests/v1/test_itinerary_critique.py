@@ -382,3 +382,10 @@ def test_the_critic_sees_what_a_place_is_next_to_what_it_is_planned_for(drafter,
     [prompt] = calls(fake_llm, "PlanReviews")
     assert "- [i2] Sandwich Shop · meant for: one big night out" in prompt
     assert "- [i3] planned: Swim at the beach" in prompt
+
+
+def test_a_problem_about_another_plans_place_is_dropped(drafter, fake_llm):
+    # Seen live on gemini-3.1-flash-lite: one plan got the warning meant for another plan's morning night club.
+    fake_llm.fails = {"plan_0": {"purpose": {**MISFIT, "problem": "Night Owl is a night club planned for the morning"}}}
+    assert review(drafter) == ([draft()], True)
+    assert not calls(fake_llm, "PlanFixes")
