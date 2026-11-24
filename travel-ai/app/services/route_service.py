@@ -92,7 +92,7 @@ def gateway(library: dict, found: list[dict]) -> dict:
 
 
 def one_way(found: list[dict], start: dict, n: int) -> list[dict]:
-    """Without the model: the start and the best-known towns that keep the trip going one way from it. A town that
+    """The start and the best-known towns that keep the trip going one way from it. A town that
     would mean doubling back (Sapporo on a Tokyo, Kyoto, Hiroshima trip) is left out, even if that means fewer."""
     chosen = [start]
     for town in found:
@@ -222,10 +222,10 @@ class RouteService:
             logger.exception("Couldn't ask for the route; planning it from the map alone")
             picked, legs, tip = [], {}, None
         by_name = {t["name"]: t for t in found}
-        if picked := [p for p in picked if p in by_name]:
-            ranked = list(dict.fromkeys(picked + [t["name"] for t in found]))[:n]
-        else:
-            ranked = [t["name"] for t in one_way(found, gateway(library, found), n)]
+        picked = [p for p in picked if p in by_name]
+        start = by_name[picked[0]] if picked else gateway(library, found)  # the model lists the gateway first
+        towns_in_order = [by_name[name] for name in dict.fromkeys(picked + [t["name"] for t in found])]
+        ranked = [t["name"] for t in one_way(towns_in_order, start, n)]
         ordered = order([by_name[name] for name in ranked])
         route = [City(name=c["name"], lat=c["lat"], lng=c["lng"], days=k)
                  for c, k in zip(ordered, share_days(days, ordered, ranked))]

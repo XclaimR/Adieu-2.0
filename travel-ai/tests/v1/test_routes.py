@@ -400,3 +400,12 @@ def test_transitous_too_many_requests_pauses_every_call(monkeypatch):
     assert route_service.transit(_city("Tokyo"), _city("Kyoto")) is None and len(calls) == 1  # paused, not asked
     monkeypatch.setattr(route_service, "_paused_until", 0.0)  # two minutes later
     assert route_service.transit(_city("Kyoto"), _city("Hiroshima")).minutes == 113  # the 429 wasn't kept
+
+
+def test_the_model_s_picks_also_go_one_way(monkeypatch):
+    # The model picked Sapporo too: a flight back north after Hiroshima. It gives way to the next town on the line.
+    picks = ["Tokyo", "Kyoto", "Hiroshima", "Sapporo"]
+    monkeypatch.setattr(RouteService, "_ask", staticmethod(lambda *a: (picks, {}, None)))
+    route, _ = RouteService.plan({"kind": "country", "code": "JP"}, _owner_library(), 12,
+                                 TripProfile(destination="Japan"), Personality())
+    assert [c.name for c in route] == ["Tokyo", "Kyoto", "Osaka", "Hiroshima"]
