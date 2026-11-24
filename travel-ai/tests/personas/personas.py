@@ -2,7 +2,7 @@
 
 facts: profile field -> values that count as "what the persona said". Fields a persona never mentions must stay
 empty in the trip profile. `mood` lists word stems; every mood word the app stores must contain one of them.
-swipes: card id -> right/left for the swipe deck (others "not sure"); expect_style: words the card must show after.
+swipes: card id -> right/left for the swipe deck (others "not sure"); expect_style: words the deck's "You lean" summary must contain.
 pick_idea: take the first destination idea the app offers.
 answers: (words in the app's question, reply, facts that reply states). Each answer is used at most once.
 chips: if no answer fits, tap the first chip containing one of these words; otherwise say "just show me plans".
@@ -125,8 +125,9 @@ PERSONAS = [
             "mood": ["relax", "wellness", "beach", "nature", "adventur"],
         },
         "swipes": {"slow_cafe": "right", "spa_day": "right", "empty_beach": "right", "back_streets": "right",
-                   "sunrise_hike": "right", "rooftop_bar": "left", "dancing": "left", "landmark": "left",
-                   "big_day": "left", "hostel_friends": "left"},
+                   "sunrise_hike": "right", "picnic": "right", "camping": "right", "rooftop_bar": "left",
+                   "dancing": "left", "landmark": "left", "big_day": "left", "hostel_friends": "left",
+                   "quick_bite": "left", "tasting_menu": "left", "luxury_suite": "left"},
         "expect_style": ["Slow pace", "Avoids crowds", "Chill evenings"],
         "pick_idea": True,
         "answers": [

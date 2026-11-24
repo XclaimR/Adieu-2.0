@@ -184,7 +184,9 @@ def check(persona: dict, run: dict) -> list[tuple[str, bool | None, str]]:
     if persona.get("swipes"):
         swiped = run.get("swiped")
         traits = " | ".join(swiped["traits"]) if swiped else ""
-        ok = bool(swiped) and len(swiped["cards"]) <= 12 and all(t in traits for t in persona["expect_style"])
+        # The summary line includes leanings: 12 cards can't make every scale certain.
+        ok = bool(swiped) and len(swiped["cards"]) <= 12 and all(t.lower() in swiped["summary"].lower()
+                                                                  for t in persona["expect_style"])
         rules.append(("style found by swiping", ok, f"{len(swiped['cards'])} cards; {swiped['summary']}; card: {traits}"
                       if swiped else "the deck was never offered"))
     n = len(trip["drafts"])

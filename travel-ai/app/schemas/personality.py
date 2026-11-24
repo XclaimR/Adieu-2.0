@@ -4,11 +4,12 @@ from typing import Literal
 from pydantic import BaseModel, Field, model_validator
 
 # Each pole of the six scales, as the model names it.
-Pole = Literal["slow", "packed", "spend_on_stay", "spend_on_experiences", "chill", "nightlife",
+Pole = Literal["slow", "packed", "cheap_experiences", "splurge_experiences", "chill", "nightlife",
                "hidden_gems", "icons", "food_as_fuel", "food_focus", "backpacker", "luxury"]
 # A closed list, so vague praise ("fun", "nice") has no mood to land on.
 Mood = Literal["relaxed", "adventurous", "romantic", "foodie", "culture", "nightlife", "nature", "beach",
                "celebration", "wellness", "shopping", "indulgent"]
+_OLD_MONEY_POLES = {"spend_on_stay", "spend_on_experiences"}
 NoteCategory = Literal["stay", "eat", "do", "pace", "budget", "diet", "access", "general"]
 
 
@@ -54,6 +55,9 @@ class Note(BaseModel):
     @classmethod
     def _from_topic_note(cls, data):
         """Notes saved before targets existed had a topic and a trip/moment scope."""
+        if isinstance(data, dict) and data.get("toward") in _OLD_MONEY_POLES:
+            # Before Ticket #21 money meant stay vs experiences; that says nothing about cheap vs splurge.
+            data = {**data, "toward": None}
         if isinstance(data, dict) and "id" not in data and "topic" in data:
             digest = hashlib.sha1(f"{data['topic']}:{data['text']}".encode()).hexdigest()[:6]
             return {"id": f"o{digest}", "text": data["text"], "once": data.get("scope") == "moment",

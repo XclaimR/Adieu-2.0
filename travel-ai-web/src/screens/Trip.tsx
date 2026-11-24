@@ -40,8 +40,8 @@ const SCALES: [string, string, string, string, string][] = [
   ["food", "Food", "Just fuel", "The point", "Matters"],
   ["energy", "Energy", "Chill", "Nightlife", "Some nights"],
   ["crowds", "Crowds", "Hidden gems", "Icons", "A mix"],
-  ["money", "Money goes to", "The stay", "Experiences", "Both"],
-  ["comfort", "Comfort", "Backpacker", "Luxury", "Mid-range"],
+  ["money", "Experiences", "Cheap", "Splurge", "Some paid"],
+  ["comfort", "Comfort", "Cheap stays", "Splurge", "Mid-range"],
 ];
 const KNOWN = 0.5;
 const LEAN = 0.25;

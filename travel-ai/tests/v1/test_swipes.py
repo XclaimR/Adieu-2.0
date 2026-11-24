@@ -9,20 +9,22 @@ from tests.v1.test_api import decision, new_trip, say
 # Each card's direction on each scale it touches, swiped right. Changing a card's effects must change this table.
 EXPECTED = {
     "slow_cafe": {"pace": -1, "energy": -1},
-    "rooftop_bar": {"energy": 1, "comfort": 1},
-    "street_food": {"food": 1, "comfort": -1},
+    "rooftop_bar": {"energy": 1, "money": 1},
+    "street_food": {"food": 1, "money": -1},
     "empty_beach": {"crowds": -1, "pace": -1},
-    "luxury_suite": {"money": -1, "comfort": 1},
+    "luxury_suite": {"comfort": 1},  # an expensive stay
     "landmark": {"crowds": 1},
     "hostel_friends": {"comfort": -1, "energy": 1},
-    "balloon_ride": {"money": 1},
+    "balloon_ride": {"money": 1},  # an expensive experience
     "big_day": {"pace": 1, "crowds": 1},
-    "tasting_menu": {"food": 1, "comfort": 1, "money": 1},
+    "tasting_menu": {"food": 1, "money": 1},
     "sunrise_hike": {"pace": 1, "crowds": -1},
-    "spa_day": {"pace": -1, "comfort": 1, "energy": -1},
+    "spa_day": {"pace": -1, "money": 1, "energy": -1},
     "back_streets": {"crowds": -1},
     "dancing": {"energy": 1, "pace": 1},
     "camping": {"comfort": -1, "crowds": -1},
+    "quick_bite": {"food": -1, "pace": 1},
+    "picnic": {"money": -1, "pace": -1},
 }
 
 
@@ -94,7 +96,7 @@ def test_skipping_every_swipe_on_a_scale_removes_it():
 
 def test_order_asks_about_the_least_known_scales_and_stops_at_twelve():
     first = swipes.next_card(Personality(), {})
-    assert first.id == "luxury_suite"  # nothing known yet: the card that touches the most
+    assert first.id == "tasting_menu"  # nothing known yet: the card that touches the most
     # Pace is already known from words, so a pace-only card is never the most telling one.
     known_pace = Personality(scales={"pace": Scale(value=-0.7, confidence=0.75, source="note")})
     assert "pace" not in swipes.next_card(known_pace, {}).effects or len(swipes.next_card(known_pace, {}).effects) > 1
@@ -107,7 +109,7 @@ def test_order_asks_about_the_least_known_scales_and_stops_at_twelve():
 def test_summary_and_moods_come_from_the_swipes():
     answers = {"slow_cafe": "right", "spa_day": "right", "empty_beach": "right", "back_streets": "right"}
     p = swipes.apply(Personality(), answers)
-    assert swipes.summary(p) == "You lean: slow pace, chill evenings, avoids crowds, luxury."
+    assert swipes.summary(p) == "You lean: slow pace, splurge on experiences, chill evenings, avoids crowds."
     assert swipes.moods(answers)[0] in {"relaxed", "wellness", "beach"}
     assert swipes.summary(Personality()).startswith("No clear lean")
 
