@@ -471,3 +471,20 @@ def test_plans_saved_before_durations_load_with_a_default_per_category():
     stops = Itinerary.model_validate(saved).days[0].activities
     assert [a.minutes for a in stops] == [90, 75]
     assert Itinerary.model_validate(Itinerary.model_validate(saved).model_dump(mode="json")).days[0].activities[1].minutes == 75
+
+
+def test_a_barbecue_dinner_alone_at_night_is_still_a_meal():
+    bbq = place("bbq", "Smoke House", PickCategory.EAT, type_label="Barbecue restaurant")
+    plan = draft().itinerary
+    plan.days[0].activities = [stop("i1", "museum"), Activity(id="i6", name="Smoke House", category="eat",
+                                                               time_of_day="evening", place_id="bbq")]
+    [issue] = ItineraryCritiqueService.counted(plan, [*PLACES, bbq])
+    assert "evening is only a meal at Smoke House" in issue.problem
+
+
+def test_an_edit_flags_only_the_lone_meals_it_changed():
+    plan = draft().itinerary
+    plan.days[0].activities.pop()  # day 1's dinner is alone, from before
+    assert ItineraryCritiqueService.counted(plan, PLACES, scope={"s1"}) == []  # a new hotel leaves it be
+    [issue] = ItineraryCritiqueService.counted(plan, PLACES, scope={"i2"})
+    assert "evening is only a meal" in issue.problem

@@ -4,6 +4,8 @@ import type { Itinerary, Note } from "../types";
 import NoteList from "./NoteList";
 
 const SLOTS = ["morning", "afternoon", "evening"];
+// An evening bar is the outing itself, not a meal that leaves the evening free.
+const NIGHT_OUT = /\b(bar|pub|club|cocktails?|brewery)\b/i;
 
 /** "45 min", "1.5 h", "2 h": to the nearest half hour, since these are estimates. */
 export function duration(minutes: number) {
@@ -88,9 +90,11 @@ export default function ItineraryView({ itinerary, notes, busy, onSwap, onRemove
               <h3>
                 Day {day.day_number}
                 {day.theme && <span className="muted"> · {day.theme}</span>}
-                <span className="day-total">
-                  ≈ {duration(day.activities.reduce((sum, a) => sum + a.minutes, 0))} planned, plus travel
-                </span>
+                {day.activities.length > 0 && (
+                  <span className="day-total">
+                    ≈ {duration(day.activities.reduce((sum, a) => sum + a.minutes, 0))} planned, plus travel
+                  </span>
+                )}
               </h3>
               <button className="ghost small" disabled={busy} onClick={() => onAsk(`On day ${day.day_number}, `)}>
                 Change this day
@@ -103,7 +107,12 @@ export default function ItineraryView({ itinerary, notes, busy, onSwap, onRemove
                 .filter(({ a }) => (slot ? a.time_of_day === slot : !SLOTS.includes(a.time_of_day ?? "")));
               if (!stops.length) return null;
               // Only a meal here (e.g. its neighbour was removed): say the rest is free, not a whole slot of lunch.
-              const free = slot && stops.every(({ a }) => a.category === "eat");
+              const free =
+                slot &&
+                stops.every(
+                  ({ a }) =>
+                    a.category === "eat" && !(slot === "evening" && NIGHT_OUT.test(`${a.name} ${a.description ?? ""}`)),
+                );
               return (
                 <section key={slot ?? "any"} className="slot" aria-label={slot ?? "Any time"}>
                   <h4 className="tod">{slot ?? "Any time"}</h4>

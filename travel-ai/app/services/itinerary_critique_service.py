@@ -23,7 +23,7 @@ CLOCK = {"morning": (9 * 60, 12 * 60 + 30), "afternoon": (12 * 60, 17 * 60 + 30)
 DAY_ENDS = 25 * 60  # 1 am
 MAX_TRAVEL = 4 * 60  # minutes in one day
 # A drink place is the evening's outing, not a meal; Wikivoyage's "Bar or cafe" is a café by day.
-NIGHT_OUT = re.compile(r"\b(bar|pub|club|brewery|lounge|wine)", re.I)
+NIGHT_OUT = re.compile(r"\b(bar|pub|club|brewery|lounge|wine)\b", re.I)
 
 RULES = {
     "destination": "destination relevance. Every stop and the stay belongs on a trip to this destination.",
@@ -127,12 +127,14 @@ def is_meal(stop: Activity, place: PlaceCandidate | None) -> bool:
         stop.time_of_day == "evening" and place and NIGHT_OUT.search(place.type_label or ""))
 
 
-def _meal_only(day: DayPlan, known: dict[str, PlaceCandidate]) -> list[Issue]:
-    """A meal takes an hour or two, so it never fills a morning, afternoon or evening on its own."""
+def _meal_only(day: DayPlan, known: dict[str, PlaceCandidate], scope: set[str] | None) -> list[Issue]:
+    """A meal takes an hour or two, so it never fills a morning, afternoon or evening on its own.
+    After an edit, only slots the edit changed: a new hotel mustn't rework every old lone dinner."""
     issues = []
     for slot in CLOCK:
         stops = [a for a in day.activities if a.time_of_day == slot]
-        if stops and all(is_meal(a, known.get(a.place_id)) for a in stops):
+        changed = scope is None or day.id in scope or any(a.id in scope for a in stops)
+        if stops and changed and all(is_meal(a, known.get(a.place_id)) for a in stops):
             issues.append(Issue(
                 problem=f"Day {day.day_number}'s {slot} is only a meal at {stops[0].name}",
                 suggestion=f"add something to do or see nearby in the {slot}, or move the meal next to one",
@@ -166,7 +168,7 @@ class ItineraryCritiqueService:
             elif days and len(day.activities) == 1:
                 issues.append(Issue(problem=f"Day {day.day_number} has only one stop", where=[day.id]))
             if day.id in touched:
-                issues += _meal_only(day, known)
+                issues += _meal_only(day, known, scope)
                 if issue := _timing(plan, day, known, visits or {}):
                     issues.append(issue)
         if days and days > 1 and not plan.stay and any(p.category == PickCategory.STAY for p in places):
