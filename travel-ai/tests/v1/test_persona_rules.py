@@ -1,6 +1,6 @@
 """The persona suite's own rule checks, on canned trips (the suite itself runs against the live app)."""
 from tests.personas.personas import PERSONAS
-from tests.personas.run import check, converse, invented_facts, misfit_picks, pick_reply
+from tests.personas.run import check, converse, invented_facts, meal_only_slots, misfit_picks, pick_reply
 
 BACHELOR = next(p for p in PERSONAS if p["name"] == "bachelor")
 BACKPACKER = next(p for p in PERSONAS if p["name"] == "budget_backpacker")
@@ -62,3 +62,13 @@ def test_drafts_may_wait_one_turn_for_the_duration_question():
 def test_drafts_late_after_the_duration_question_fail():
     api = FakeApi([("Where to?", 0), ("How many days?", 0), ("Any diet needs?", 0), (None, 3)])
     assert drafts_rule(api)[1] is False
+
+
+def test_meal_only_slots_are_flagged_but_an_evening_bar_is_an_outing():
+    def stop(name, category, when, description=None):
+        return {"name": name, "category": category, "time_of_day": when, "description": description}
+    day = {"day_number": 1, "activities": [
+        stop("Museum", "do", "morning"), stop("Trattoria", "eat", "afternoon"),
+        stop("Osteria", "eat", "evening"), stop("Rooftop", "eat", "evening", "Cocktails at sunset")]}
+    trip = {"drafts": [{"title": "Rome", "itinerary": {"days": [day]}}]}
+    assert meal_only_slots(trip) == ["'Rome' day 1 afternoon: Trattoria"]

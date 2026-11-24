@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.database.models.trip import MessageModel, TripModel
 from app.database.models.user import UserModel
 from app.repositories.trip_repository import TripRepository
+from app.schemas.activity import default_minutes
 from app.schemas.api import TurnResponse
 from app.schemas.draft import NoPlans
 from app.schemas.itinerary import Itinerary
@@ -456,6 +457,7 @@ class TravelPlannerWorkflow:
             "lat": pick.lat, "lng": pick.lng,
             "source_url": pick.source_url,
             "for_note": None,  # the replacement wasn't chosen for that moment
+            "minutes": default_minutes(pick.category.value),
         })
         trip.itinerary = itinerary.model_dump(mode="json")
         trip.panel = None

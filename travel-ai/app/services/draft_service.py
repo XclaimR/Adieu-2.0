@@ -8,7 +8,7 @@ from typing import Literal
 from pydantic import BaseModel, Field, create_model
 
 from app.core.config import settings
-from app.schemas.activity import Activity
+from app.schemas.activity import Activity, default_minutes
 from app.schemas.dayplan import DayPlan
 from app.schemas.draft import Draft
 from app.schemas.itinerary import STAY_ID, Itinerary
@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_DAYS = 4
 MAX_DAYS = 10
-MAX_STOPS = 4
+MAX_STOPS = 5  # after edits: a thing to do in each time of day, and lunch and dinner beside two of them
 MIN_PLACES = 2
 # How many of each kind the drafting model sees: enough to plan from, few enough for a free-tier prompt.
 POOL = {PickCategory.DO: 18, PickCategory.EAT: 14, PickCategory.HIDDEN_GEMS: 8, PickCategory.STAY: 8}  # places to visit or eat at: one day's minimum
@@ -56,6 +56,7 @@ class PlanStop(BaseModel):
 
 class PlanDay(BaseModel):
     theme: str = Field(description="2-4 word theme for the day")
+    # 4, not MAX_STOPS: Gemini refuses a longer list nested in days ("too many states"); an empty slot is free time.
     stops: list[PlanStop] = Field(min_length=2, max_length=4)
 
 
@@ -92,16 +93,8 @@ def _same(a: str, b: str) -> bool:
     return bool(a and b) and (a == b or (min(len(a), len(b)) >= 6 and (a in b or b in a)))
 
 
-def _one_per_slot(activities: list[Activity]) -> list[Activity]:
-    """Move a repeated time of day to a free one, then order the day morning → evening."""
-    taken: set[str] = set()
-    for a in activities:
-        if a.time_of_day in taken:
-            free = [s for s in _SLOTS if s not in taken]
-            if free:  # with 4 stops one slot must repeat
-                later = [s for s in free if _SLOTS.index(s) > _SLOTS.index(a.time_of_day)]
-                a.time_of_day = (later or free)[0]
-        taken.add(a.time_of_day)
+def _in_order(activities: list[Activity]) -> list[Activity]:
+    """Morning → evening. A time of day may hold several stops; the timing check says when it's too many."""
     return sorted(activities, key=lambda a: _SLOTS.index(a.time_of_day) if a.time_of_day in _SLOTS else len(_SLOTS))
 
 
@@ -167,7 +160,7 @@ class PlacePool:
                     source_url=place.source_url,
                 ))
             if activities:
-                days.append(DayPlan(day_number=len(days) + 1, theme=day.theme, activities=_one_per_slot(activities)))
+                days.append(DayPlan(day_number=len(days) + 1, theme=day.theme, activities=_in_order(activities)))
 
         stay = self.get(plan.stay_ref)
         return Itinerary(
@@ -227,8 +220,12 @@ Places you may use (refer to them ONLY by [n]):
 {pool.listing()}
 
 Rules:
-- Exactly {days} days, 2-3 stops each, mixing things to do and places to eat.
-- Each day uses morning, afternoon and evening at most once. Lunch is afternoon, dinner is evening.
+- Exactly {days} days, each with 2-3 things to do or see and places to eat beside them.
+- A time of day may hold several stops when they are close by. Lunch is afternoon, dinner is evening.
+- Plan meals in pairs: lunch with a thing to do in the same afternoon, dinner with one in the same evening.
+  Leave out a meal rather than give it a time of day alone.
+- A meal takes an hour or two, so it never has a morning, afternoon or evening to itself: it shares that time
+  of day with a thing to do or see (in the evening a bar, a show or a walk counts).
 - Each stop's place and note must be about the same listed place. Don't plan anything that isn't on the list.
 - Group places from the same area on the same day, and keep each day to one or two nearby areas.
   Don't repeat a place.
@@ -345,6 +342,8 @@ Rules:
   if no listed stay has a lower estimated tier, return no edit for it.
 - A note says only what the place's line supports.
 {FACTS_RULE}
+- A meal takes an hour or two, so it never has a morning, afternoon or evening to itself: it shares that time
+  of day with a thing to do or see (in the evening a bar, a show or a walk counts).
 - replace keeps the slot and its notes. move changes an item's day or time of day. Don't use stays as activities.
 - If no listed place fits, return no edit for it.
 """
@@ -432,6 +431,8 @@ Rules:
                 day.day_number = number
         counted = [x.problem for x in ItineraryCritiqueService.counted(
             fixed, places, days, scope and scope | changed, visits)]
+        for stop in (a for d in fixed.days for a in d.activities):
+            stop.minutes = visits.get(stop.place_id, stop.minutes)  # the critic's estimate is what the traveler sees
         return fixed, list(dict.fromkeys(counted + unfixed)), checked
 
     @staticmethod
@@ -471,6 +472,8 @@ Rules:
   remove a stop, or move one to a day or time with room.
 - An empty day needs 2-3 stops added. A stay is replaced at item_id {STAY_ID}, and is never an activity.
 - Never choose a place that breaks a stated must or avoid.
+- A meal takes an hour or two, so it never has a morning, afternoon or evening to itself: it shares that time
+  of day with a thing to do or see (in the evening a bar, a show or a walk counts).
 - A new place must suit its slot's time of day and who is going: no night club in the morning, no zoo for a stag party.
 - If nothing listed fixes an error, return no edit for it.
 {asked}
@@ -571,6 +574,7 @@ Rules:
                 item.place_id, item.photo_name, item.maps_url = place.place_id, place.photo_name, place.maps_url
                 item.lat, item.lng = place.lat, place.lng
                 item.source_url = place.source_url
+                item.minutes = default_minutes(item.category)  # the old place's time doesn't carry over
                 item.time_of_day = e.time_of_day or item.time_of_day
                 used.add(place.place_id)
             elif e.op == "remove":

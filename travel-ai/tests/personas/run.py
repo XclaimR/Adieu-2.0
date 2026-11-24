@@ -152,6 +152,23 @@ def misfit_picks(trip: dict, persona: dict) -> list[str]:
     return sorted(set(bad))
 
 
+NIGHT_OUT = re.compile(r"\b(bar|pub|club|cocktails?|wine|brewery|beer|drinks?)\b", re.I)
+
+
+def meal_only_slots(trip: dict) -> list[str]:
+    """Ticket #75: a meal shares its morning, afternoon or evening with a thing to do. An evening bar is the outing."""
+    bad = []
+    for d in trip["drafts"]:
+        for day in d["itinerary"]["days"]:
+            for slot in ("morning", "afternoon", "evening"):
+                stops = [a for a in day["activities"] if a.get("time_of_day") == slot]
+                meals = [a for a in stops if a["category"] == "eat" and not (
+                    slot == "evening" and NIGHT_OUT.search(f"{a['name']} {a.get('description') or ''}"))]
+                if stops and len(meals) == len(stops):
+                    bad.append(f"{d['title']!r} day {day['day_number']} {slot}: {stops[0]['name']}")
+    return bad
+
+
 def check(persona: dict, run: dict) -> list[tuple[str, bool | None, str]]:
     """(rule, passed or None if it couldn't be checked, detail)."""
     trip, has_drafts = run["trip"], bool(run["trip"]["drafts"])
@@ -179,8 +196,11 @@ def check(persona: dict, run: dict) -> list[tuple[str, bool | None, str]]:
     if has_drafts:
         bad = misfit_picks(trip, persona)
         rules.append(("picks fit the traveler", not bad, "; ".join(bad) or f"{len(pick_texts(trip)[0])} items checked"))
+        lonely = meal_only_slots(trip)
+        rules.append(("no meal-only slots", not lonely, "; ".join(lonely) or "every meal shares its slot"))
     else:
         rules.append(("picks fit the traveler", None, "no drafts to check"))
+        rules.append(("no meal-only slots", None, "no drafts to check"))
     if persona.get("swipes"):
         swiped = run.get("swiped")
         traits = " | ".join(swiped["traits"]) if swiped else ""

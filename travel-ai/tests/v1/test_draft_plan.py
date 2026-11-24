@@ -31,10 +31,25 @@ def test_stop_about_an_unlisted_place_is_dropped():
     assert [a.name for a in it.days[0].activities] == ["National Pantheon"]
 
 
-def test_repeated_time_of_day_moves_to_a_free_slot_in_order():
+def test_stops_keep_their_time_of_day_and_the_day_is_ordered():
+    # Close-by places can share a morning; the timing check flags a slot that is too full.
     it = POOL.to_itinerary(plan(
-        PlanStop(place="National Pantheon", ref=0, time_of_day="morning", note="1"),
+        PlanStop(place="National Pantheon", ref=0, time_of_day="afternoon", note="1"),
         PlanStop(place="Lisbon Cathedral", ref=1, time_of_day="morning", note="2"),
         PlanStop(place="Pata Negra - Portuguese Kitchen & Steak House", ref=3, time_of_day="morning", note="3"),
     ), "Lisbon")
-    assert [a.time_of_day for a in it.days[0].activities] == ["morning", "afternoon", "evening"]
+    assert [(a.name[:6], a.time_of_day) for a in it.days[0].activities] == [
+        ("Lisbon", "morning"), ("Pata N", "morning"), ("Nation", "afternoon")]
+
+
+def test_a_repeat_never_moves_earlier():
+    it = POOL.to_itinerary(plan(
+        PlanStop(place="National Pantheon", ref=0, time_of_day="evening", note="1"),
+        PlanStop(place="Lisbon Cathedral", ref=1, time_of_day="evening", note="2"),
+    ), "Lisbon")
+    assert [a.time_of_day for a in it.days[0].activities] == ["evening", "evening"]
+
+
+def test_a_draft_day_stays_at_four_stops_for_gemini():
+    # Ticket #75: five nested under ten days made Gemini refuse the schema ("too many states") on every draft.
+    assert PlanDay.model_json_schema()["properties"]["stops"]["maxItems"] == 4

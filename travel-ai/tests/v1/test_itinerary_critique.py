@@ -32,6 +32,7 @@ PLACES = [
     place("museum", "Museum", type_label="Museum"),
     place("park", "Park"),
     place("garden", "Garden"),
+    place("walk", "Old Town Walk"),
 ]
 PROFILE = TripProfile(destination="Rome", duration_days=2)
 NIGHT_OUT = Personality(notes=[Note(id="n1", text="one big night out", once=True)])
@@ -40,13 +41,15 @@ MISFIT = {"problem": "i2 is a sandwich shop, not a big night out", "where": ["[i
 
 def stop(id, place_id, when="morning", **kw):
     p = next(p for p in PLACES if p.place_id == place_id)
+    kw.setdefault("minutes", 60)  # what the fake critic estimates, so a plan that passes comes back unchanged
     return Activity(id=id, name=p.name, category=p.category.value, time_of_day=when, place_id=place_id, **kw)
 
 
 def draft(**kw):
     plan = Itinerary(destination="Rome", stay=Pick(**PLACES[0].model_dump()), days=[
         DayPlan(day_number=1, activities=[stop("i1", "museum"),
-                                          stop("i2", "panini", "evening", for_note="one big night out")]),
+                                          stop("i2", "panini", "evening", for_note="one big night out"),
+                                          stop("i5", "walk", "evening")]),
         DayPlan(day_number=2, activities=[stop("i3", "park"), stop("i4", "garden", "afternoon")]),
     ])
     return Draft(id="a", flavor="easy", title="Rome", summary="Nice", itinerary=kw.get("plan", plan))
@@ -139,7 +142,7 @@ def test_a_repair_cannot_use_a_place_the_plan_already_has(drafter, fake_llm):
 
 def test_a_repair_that_makes_the_plan_worse_is_thrown_away(drafter, fake_llm):
     fake_llm.fails = {"purpose": MISFIT}
-    fake_llm.fixes = [{"op": "remove", "item_id": "i2"}]  # leaves day 1 with one stop
+    fake_llm.fixes = [{"op": "move", "item_id": "i2", "time_of_day": "afternoon"}]  # a lunch with nothing beside it
     [kept] = review(drafter)
     assert kept.itinerary == draft().itinerary and kept.warnings
 
@@ -239,7 +242,7 @@ def test_travel_grows_with_distance():
 
 def test_too_much_travel_in_a_day_is_an_error():
     [issue] = ItineraryCritiqueService.counted(located(i2=(45.46, 9.19)), [])  # Rome and Milan
-    assert "travel" in issue.problem and issue.where == ["i1", "i2"]
+    assert "travel" in issue.problem and issue.where == ["i1", "i2", "i5"]
 
 
 def test_a_visit_too_long_for_the_next_stop_is_an_error():
@@ -248,7 +251,7 @@ def test_a_visit_too_long_for_the_next_stop_is_an_error():
 
 
 def test_a_visit_that_runs_into_the_night_is_an_error():
-    [issue] = ItineraryCritiqueService.counted(located(), [], visits={"panini": 480})
+    [issue] = ItineraryCritiqueService.counted(located(), [], visits={"walk": 480})
     assert "past 1 am" in issue.problem
 
 
@@ -422,3 +425,66 @@ def test_the_critic_sees_what_a_place_is_next_to_what_it_is_planned_for(drafter,
     assert "- [i2] Sandwich Shop · meant for: one big night out" in prompt
     assert "- [i3] planned: Swim at the beach" in prompt
 
+
+
+# ---------- Ticket #75: meals never fill a slot, and every stop knows how long it takes ----------
+
+def test_a_slot_with_only_a_meal_is_an_error():
+    plan = draft().itinerary
+    plan.days[0].activities.pop()  # the evening walk: dinner is left alone
+    [issue] = ItineraryCritiqueService.counted(plan, PLACES)
+    assert "evening is only a meal" in issue.problem and issue.where == ["d1", "i2"]
+
+
+def test_a_cafe_alone_in_the_afternoon_is_an_error_but_a_bar_alone_at_night_is_not():
+    cafe = place("cafe", "Cafe Roma", PickCategory.EAT, type_label="Bar or cafe")
+    plan = draft().itinerary
+    plan.days[0].activities = [stop("i1", "museum"),
+                               Activity(id="i6", name="Cafe Roma", category="eat", time_of_day="afternoon",
+                                        place_id="cafe")]
+    [issue] = ItineraryCritiqueService.counted(plan, [*PLACES, cafe])
+    assert "afternoon is only a meal at Cafe Roma" in issue.problem
+    plan.days[0].activities[1].time_of_day = "evening"
+    assert ItineraryCritiqueService.counted(plan, [*PLACES, cafe]) == []
+
+
+def test_a_meal_only_slot_is_repaired_with_a_thing_to_do_beside_it(drafter, fake_llm):
+    lonely = draft().itinerary
+    lonely.days[0].activities.pop()
+    fake_llm.fixes = [{"op": "add", "day_id": "d1", "place": "c2", "time_of_day": "evening"}]
+    [fixed] = review(drafter, draft(plan=lonely))
+    evening = [a.name for a in fixed.itinerary.days[0].activities if a.time_of_day == "evening"]
+    assert evening == ["Pane e Salame", "Night Owl"] and fixed.warnings == []
+    assert "Rules:" in calls(fake_llm, "PlanFixes")[0] and "never has a morning" in calls(fake_llm, "PlanFixes")[0]
+
+
+def test_the_critics_minutes_are_saved_on_each_stop(drafter, fake_llm):
+    fake_llm.minutes = {"i1": 150}
+    [reviewed] = review(drafter)
+    assert [a.minutes for a in reviewed.itinerary.days[0].activities] == [150, 60, 60]
+
+
+def test_plans_saved_before_durations_load_with_a_default_per_category():
+    saved = {"destination": "Rome", "days": [{"day_number": 1, "activities": [
+        {"id": "i1", "name": "Museum", "category": "do", "time_of_day": "morning"},
+        {"id": "i2", "name": "Pane e Salame", "category": "eat", "time_of_day": "afternoon"}]}]}
+    stops = Itinerary.model_validate(saved).days[0].activities
+    assert [a.minutes for a in stops] == [90, 75]
+    assert Itinerary.model_validate(Itinerary.model_validate(saved).model_dump(mode="json")).days[0].activities[1].minutes == 75
+
+
+def test_a_barbecue_dinner_alone_at_night_is_still_a_meal():
+    bbq = place("bbq", "Smoke House", PickCategory.EAT, type_label="Barbecue restaurant")
+    plan = draft().itinerary
+    plan.days[0].activities = [stop("i1", "museum"), Activity(id="i6", name="Smoke House", category="eat",
+                                                               time_of_day="evening", place_id="bbq")]
+    [issue] = ItineraryCritiqueService.counted(plan, [*PLACES, bbq])
+    assert "evening is only a meal at Smoke House" in issue.problem
+
+
+def test_an_edit_flags_only_the_lone_meals_it_changed():
+    plan = draft().itinerary
+    plan.days[0].activities.pop()  # day 1's dinner is alone, from before
+    assert ItineraryCritiqueService.counted(plan, PLACES, scope={"s1"}) == []  # a new hotel leaves it be
+    [issue] = ItineraryCritiqueService.counted(plan, PLACES, scope={"i2"})
+    assert "evening is only a meal" in issue.problem
