@@ -173,7 +173,7 @@ def test_surprise_me_shows_only_verified_destination_ideas(client, auth, fake_ll
 
     assert turn["trip"]["profile"]["destination"] is None
     assert turn["options"]["kind"] == "destinations"
-    assert [i["destination"] for i in turn["options"]["ideas"]] == ["Lisbon, Portugal"]
+    assert [i["destination"] for i in turn["options"]["ideas"]] == ["Japan"]
 
 
 def test_choosing_a_draft_sets_the_itinerary_and_asks_for_changes(client, auth, fake_llm):
@@ -328,7 +328,7 @@ def test_starter_ideas_are_cached_per_user(client, auth, fake_llm):
     first = client.get("/starter-ideas", headers=auth).json()
     second = client.get("/starter-ideas", headers=auth).json()
 
-    assert [i["destination"] for i in first] == ["Lisbon, Portugal"]
+    assert [i["destination"] for i in first] == ["Japan"]
     assert second == first
     assert [name for name, _ in fake_llm.prompts].count("StarterIdeas") == 1
 
