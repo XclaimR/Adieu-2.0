@@ -155,11 +155,10 @@ class ItineraryCritiqueService:
         return issues
 
     @staticmethod
-    def critique(plans: list[Itinerary], profile: TripProfile, personality: Personality | None,
-                 places: list[PlaceCandidate], scope: set[str] | None = None,
-                 request: str = "") -> list[ItineraryCritique]:
-        """One model call for all the plans. `scope` is what an edit changed."""
-        touched_days = None if scope is None else _touched_days(plans[0], scope)
+    def critique(plan: Itinerary, profile: TripProfile, personality: Personality | None,
+                 places: list[PlaceCandidate], scope: set[str] | None = None, request: str = "") -> ItineraryCritique:
+        """One model call for one plan (three plans in one call got mixed up). `scope` is what an edit changed."""
+        touched_days = None if scope is None else _touched_days(plan, scope)
         targets = {"trip"} if scope is None else {"trip", *scope, *touched_days}
         notes = personality.notes if personality else []
 
@@ -171,41 +170,35 @@ class ItineraryCritiqueService:
         for i, note in enumerate(said):
             rules[f"note_{i}"] = f'they said "{describe_note(note)}" about {note.target}.'
 
-        # A field per rule: given a list, small models skip rules.
-        # And a field per stop, so none goes without a visit time.
-        stops = [[a for d in plan.days if touched_days is None or d.id in touched_days for a in d.activities]
-                 for plan in plans]
-        reviews = {}
-        for i, timed in enumerate(stops):
-            fields = {name: (Verdict, ...) for name in rules}
-            if timed:  # some providers refuse an object without properties
-                fields["visit_minutes"] = (create_model(f"Visits{i}", **{a.id: (int, ...) for a in timed}), ...)
-            reviews[f"plan_{i}"] = (create_model(f"PlanReview{i}", **fields), ...)
-        schema = create_model("PlanReviews", **reviews)
+        # A field per rule: given a list, small models skip rules. And a field per stop, so each gets a visit time.
+        stops = [a for d in plan.days if touched_days is None or d.id in touched_days for a in d.activities]
+        fields = {name: (Verdict, ...) for name in rules}
+        if stops:  # some providers refuse an object without properties
+            fields["visit_minutes"] = (create_model("Visits", **{a.id: (int, ...) for a in stops}), ...)
+        schema = create_model("PlanReview", **fields)
 
-        shown = "\n\n".join(
-            f"PLAN plan_{i}\n{PersonalityService.plan_view(plan, personality, touched_days)}\n"
-            f"Facts about these places:\n{plan_facts(plan, places, scope)}"
-            for i, plan in enumerate(plans))
         edit_rules = "" if scope is None else (
             (f'- The traveler just asked: "{request}". What they asked for is never an error, even against an older note.\n'
              if request else "")
             + f"- Only these parts changed, so only these may fail: {', '.join(sorted(scope))}. Leave everything else alone.")
         prompt = f"""
-You review trip plans to {profile.destination} before the traveler sees them.
+You review a trip plan for {profile.destination} before the traveler sees it.
 Find logical errors and real misfits. Don't polish, and don't suggest nice-to-haves.
 
 What we know about the traveler:
 {profile.model_dump_json(exclude_none=True, exclude={"preferences", "duration_days"})}
 {traveler_fit(profile, personality)}
 
-{shown}
+The plan:
+{PersonalityService.plan_view(plan, personality, touched_days)}
+Facts about these places:
+{plan_facts(plan, places, scope)}
 
 Rules:
 {chr(10).join(f"- {name}: {text}" for name, text in rules.items())}
 
 How to judge:
-- Give a verdict on every rule for every plan. Judge each plan on its own.
+- Give a verdict on every rule.
 - Only use what is shown above or what you are sure that place is. Do not guess occasions, budgets, preferences
   or motivations, and never fault a plan for a wish they didn't state.
 - Fail a rule only for an error you can point at. If you are unsure, it passes.
@@ -223,28 +216,19 @@ How to judge:
 """
         result = LLMClient.generate_structured(prompt, schema, model=settings.LLM_MODEL_PLAN, timeout=REVIEW_TIMEOUT)
 
-        critiques = []
-        for i, plan in enumerate(plans):
-            real = set(plan.target_ids()) if scope is None else scope
-            mine = {a.name for d in plan.days for a in d.activities} | ({plan.stay.name} if plan.stay else set())
-            # Seen live: reviewing three plans at once, the model blames one for another's stop.
-            elsewhere = re.compile("|".join(rf"\b{re.escape(p.name)}\b" for p in places if p.name not in mine) or "$^", re.I)
-            issues = []
-            for name in rules:
-                verdict = getattr(getattr(result, f"plan_{i}"), name)
-                if verdict.passed or not verdict.problem:
-                    continue
-                where = [w for w in (w.strip("[] ") for w in verdict.where) if w in real]
-                # An error that points at nothing real is invented, unless a note's wish is missing from a draft.
-                problem = _readable(verdict.problem, plan)
-                if elsewhere.search(problem):
-                    continue
-                if where or (scope is None and not verdict.where and name.startswith("note_")):
-                    issues.append(Issue(problem=problem, suggestion=verdict.fix, where=where))
-            visits = {}
-            for stop in stops[i]:
-                minutes = getattr(getattr(result, f"plan_{i}").visit_minutes, stop.id)
-                if stop.place_id and minutes > 0:
-                    visits[stop.place_id] = min(minutes, 12 * 60)  # no stop takes longer than a day out
-            critiques.append(ItineraryCritique(issues=issues, visit_minutes=visits))
-        return critiques
+        real = set(plan.target_ids()) if scope is None else scope
+        issues = []
+        for name in rules:
+            verdict = getattr(result, name)
+            if verdict.passed or not verdict.problem:
+                continue
+            where = [w for w in (w.strip("[] ") for w in verdict.where) if w in real]
+            # An error that points at nothing real is invented, unless a note's wish is missing from a draft.
+            if where or (scope is None and not verdict.where and name.startswith("note_")):
+                issues.append(Issue(problem=_readable(verdict.problem, plan), suggestion=verdict.fix, where=where))
+        visits = {}
+        for stop in stops:
+            minutes = getattr(result.visit_minutes, stop.id)
+            if stop.place_id and minutes > 0:
+                visits[stop.place_id] = min(minutes, 12 * 60)  # no stop takes longer than a day out
+        return ItineraryCritique(issues=issues, visit_minutes=visits)

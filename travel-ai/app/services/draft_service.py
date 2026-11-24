@@ -391,7 +391,7 @@ Rules:
         """Review, at most one repair, and one re-check of what the repair changed.
         `days` is set for drafts, `scope` for an edit. Returns the plan, what is still wrong, and if the review worked."""
         try:
-            [critique] = ItineraryCritiqueService.critique([plan], profile, personality, places, scope, request)
+            critique = ItineraryCritiqueService.critique(plan, profile, personality, places, scope, request)
             checked = True
         except Exception:
             logger.exception("The critic failed")
@@ -407,13 +407,13 @@ Rules:
         fixed = plan
         if checked and issues:  # a model that just failed won't repair either
             try:
-                [edits] = self._repairs([plan], {0: issues}, places, profile, personality, scope, request).values()
+                edits = self._repairs(plan, issues, places, profile, personality, scope, request)
                 fixed = self._repaired(plan, issues, edits, places, days, scope, visits)
                 present = {a.id for d in fixed.days for a in d.activities} | ({STAY_ID} if fixed.stay else set())
                 if redo := _changed(plan, fixed) & present:
                     # A repair is the model's own guess too: check just what it changed, once. No loop: fixes can
                     # chase each other, and every round is another 3-50 s.
-                    [again] = ItineraryCritiqueService.critique([fixed], profile, personality, places, redo, request)
+                    again = ItineraryCritiqueService.critique(fixed, profile, personality, places, redo, request)
                     visits |= again.visit_minutes
                     if again.issues or len(ItineraryCritiqueService.counted(fixed, places, days, scope, visits)) > \
                             len(ItineraryCritiqueService.counted(plan, places, days, scope, visits)):
@@ -435,16 +435,10 @@ Rules:
         return fixed, list(dict.fromkeys(counted + unfixed)), checked
 
     @staticmethod
-    def _repairs(plans: list[Itinerary], flagged: dict[int, list[Issue]], places: list[PlaceCandidate],
-                 profile: TripProfile, personality: Personality | None, scope: set[str] | None,
-                 request: str) -> dict[int, list[PlanEdit]]:
-        schema = create_model("PlanFixes", **{f"plan_{i}": (list[PlanEdit], ...) for i in flagged})
-        shown = "\n\n".join(
-            f"PLAN plan_{i}\n{PersonalityService.plan_view(plans[i], personality)}\n"
-            f"Facts about these places:\n{plan_facts(plans[i], places)}\nWhat the reviewer found:\n"
-            + "\n".join(f"- {x.problem} (at {', '.join(x.where) or 'the whole plan'})"
-                        + (f". Suggested: {x.suggestion}" if x.suggestion else "") for x in issues)
-            for i, issues in flagged.items())
+    def _repairs(plan: Itinerary, issues: list[Issue], places: list[PlaceCandidate], profile: TripProfile,
+                 personality: Personality | None, scope: set[str] | None, request: str) -> list[PlanEdit]:
+        found = "\n".join(f"- {x.problem} (at {', '.join(x.where) or 'the whole plan'})"
+                          + (f". Suggested: {x.suggestion}" if x.suggestion else "") for x in issues)
         listing = "\n".join(
             f"[c{i}] " + " · ".join(b for b in (p.name, p.category.value, p.type_label, p.price_level
                                                or (p.tier and f"est. {p.tier} price"), p.address,
@@ -453,20 +447,26 @@ Rules:
         asked = "" if scope is None else (
             f'- The traveler just asked: "{request}". Keep what they asked for, and never remove a stop.')
         prompt = f"""
-A reviewer found errors in trip plans to {profile.destination}. Fix them before the traveler sees the plans.
+A reviewer found errors in a trip plan for {profile.destination}. Fix them before the traveler sees it.
 
 What we know about the traveler:
 {profile.model_dump_json(exclude_none=True, exclude={"preferences"})}
 {traveler_fit(profile, personality)}
 
-{shown}
+The plan:
+{PersonalityService.plan_view(plan, personality)}
+Facts about these places:
+{plan_facts(plan, places)}
+
+What the reviewer found:
+{found}
 
 Places you may use:
 {listing}
 
 Rules:
-- For each plan, return the fewest edits that fix what the reviewer found. Change nothing else.
-- Use only listed places, and none that the same plan already has. Give each new place a note.
+- Return the fewest edits that fix what the reviewer found. Change nothing else.
+- Use only listed places, and none that the plan already has. Give each new place a note.
 - For a day with too much travel or too little time, use places close by (see "at lat,lng") or quicker ones,
   remove a stop, or move one to a day or time with room.
 - An empty day needs 2-3 stops added. A stay is replaced at item_id {STAY_ID}, and is never an activity.
@@ -475,8 +475,8 @@ Rules:
 - If nothing listed fixes an error, return no edit for it.
 {asked}
 """
-        result = LLMClient.generate_structured(prompt, schema, model=settings.LLM_MODEL_PLAN, timeout=REVIEW_TIMEOUT)
-        return {i: getattr(result, f"plan_{i}") for i in flagged}
+        schema = create_model("PlanFixes", edits=(list[PlanEdit], ...))
+        return LLMClient.generate_structured(prompt, schema, model=settings.LLM_MODEL_PLAN, timeout=REVIEW_TIMEOUT).edits
 
     def _repaired(self, plan: Itinerary, issues: list[Issue], edits: list[PlanEdit], places: list[PlaceCandidate],
                   days: int | None, scope: set[str] | None, visits: dict[str, int]) -> Itinerary:

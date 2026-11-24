@@ -79,40 +79,40 @@ def timeout():
 def test_good_plans_pass_untouched_with_one_call_each(drafter, fake_llm):
     made = [draft(), draft(), draft()]
     assert review(drafter, *made) == made
-    assert [n for n, _ in fake_llm.prompts] == ["PlanReviews"] * 3
+    assert [n for n, _ in fake_llm.prompts] == ["PlanReview"] * 3
 
 
 def test_a_misfit_is_repaired_and_the_repair_rechecked_before_it_is_shown(drafter, fake_llm):
-    fake_llm.fails = [{"plan_0": {"purpose": MISFIT}}]
-    fake_llm.fixes = {"plan_0": [{"op": "replace", "item_id": "i2", "place": "c2", "note": "Dance late"}]}
+    fake_llm.fails = [{"purpose": MISFIT}]
+    fake_llm.fixes = [{"op": "replace", "item_id": "i2", "place": "c2", "note": "Dance late"}]
     [fixed] = review(drafter)
     first, second = fixed.itinerary.days
     assert fixed.warnings == []
     assert (first.activities[1].id, first.activities[1].name) == ("i2", "Night Owl")
     assert second == draft().itinerary.days[1]
-    assert [n for n, _ in fake_llm.prompts] == ["PlanReviews", "PlanFixes", "PlanReviews"]
+    assert [n for n, _ in fake_llm.prompts] == ["PlanReview", "PlanFixes", "PlanReview"]
     recheck = fake_llm.prompts[-1][1]
     assert "Only these parts changed, so only these may fail: i2." in recheck and "just asked" not in recheck
 
 
 def test_a_repair_that_fails_its_recheck_is_undone(drafter, fake_llm):
     # Seen live: the zoo was swapped for a night club in the morning.
-    fake_llm.fails = [{"plan_0": {"purpose": MISFIT}},
-                      {"plan_0": {"purpose": {**MISFIT, "problem": "A night club in the morning"}}}]
-    fake_llm.fixes = {"plan_0": [{"op": "replace", "item_id": "i2", "place": "c2"}]}
+    fake_llm.fails = [{"purpose": MISFIT},
+                      {"purpose": {**MISFIT, "problem": "A night club in the morning"}}]
+    fake_llm.fixes = [{"op": "replace", "item_id": "i2", "place": "c2"}]
     [kept] = review(drafter)
     assert kept.itinerary == draft().itinerary
     assert kept.warnings == ["Pane e Salame is a sandwich shop, not a big night out"]
 
 
 def test_a_failed_recheck_undoes_the_repair(drafter, fake_llm, monkeypatch):
-    fake_llm.fails = [{"plan_0": {"purpose": MISFIT}}]
-    fake_llm.fixes = {"plan_0": [{"op": "replace", "item_id": "i2", "place": "c2"}]}
+    fake_llm.fails = [{"purpose": MISFIT}]
+    fake_llm.fixes = [{"op": "replace", "item_id": "i2", "place": "c2"}]
     real = fake_llm.__call__
     reviews = []
 
     def second_review_times_out(prompt, schema, **kw):
-        if schema.__name__ == "PlanReviews":
+        if schema.__name__ == "PlanReview":
             reviews.append(1)
             if len(reviews) == 2:
                 raise timeout()
@@ -124,34 +124,34 @@ def test_a_failed_recheck_undoes_the_repair(drafter, fake_llm, monkeypatch):
 
 
 def test_a_repair_cannot_touch_what_was_not_flagged(drafter, fake_llm):
-    fake_llm.fails = {"plan_0": {"purpose": MISFIT}}
-    fake_llm.fixes = {"plan_0": [{"op": "replace", "item_id": "i3", "place": "c2"}]}
+    fake_llm.fails = {"purpose": MISFIT}
+    fake_llm.fixes = [{"op": "replace", "item_id": "i3", "place": "c2"}]
     [kept] = review(drafter)
     assert kept.itinerary == draft().itinerary and kept.warnings
 
 
 def test_a_repair_cannot_use_a_place_the_plan_already_has(drafter, fake_llm):
-    fake_llm.fails = {"plan_0": {"purpose": MISFIT}}
-    fake_llm.fixes = {"plan_0": [{"op": "replace", "item_id": "i2", "place": "c3"}]}  # the museum of that morning
+    fake_llm.fails = {"purpose": MISFIT}
+    fake_llm.fixes = [{"op": "replace", "item_id": "i2", "place": "c3"}]  # the museum of that morning
     [kept] = review(drafter)
     assert kept.itinerary == draft().itinerary and kept.warnings
 
 
 def test_a_repair_that_makes_the_plan_worse_is_thrown_away(drafter, fake_llm):
-    fake_llm.fails = {"plan_0": {"purpose": MISFIT}}
-    fake_llm.fixes = {"plan_0": [{"op": "remove", "item_id": "i2"}]}  # leaves day 1 with one stop
+    fake_llm.fails = {"purpose": MISFIT}
+    fake_llm.fixes = [{"op": "remove", "item_id": "i2"}]  # leaves day 1 with one stop
     [kept] = review(drafter)
     assert kept.itinerary == draft().itinerary and kept.warnings
 
 
 def test_what_could_not_be_fixed_is_shown_in_words_not_ids(drafter, fake_llm):
-    fake_llm.fails = {"plan_0": {"purpose": MISFIT}}
+    fake_llm.fails = {"purpose": MISFIT}
     [kept] = review(drafter)
     assert kept.warnings == ["Pane e Salame is a sandwich shop, not a big night out"]
 
 
 def test_a_failed_repair_still_shows_the_plan_with_a_warning(drafter, fake_llm):
-    fake_llm.fails = {"plan_0": {"purpose": MISFIT}}
+    fake_llm.fails = {"purpose": MISFIT}
     fake_llm.errors = {"PlanFixes": timeout()}
     [kept] = review(drafter)
     assert not unreviewed(kept) and kept.itinerary == draft().itinerary and kept.warnings
@@ -159,7 +159,7 @@ def test_a_failed_repair_still_shows_the_plan_with_a_warning(drafter, fake_llm):
 
 @pytest.mark.parametrize("error", [timeout(), RuntimeError("bad output")])
 def test_a_broken_critic_returns_every_plan_unchanged(drafter, fake_llm, error):
-    fake_llm.errors = {"PlanReviews": error}
+    fake_llm.errors = {"PlanReview": error}
     reviewed = review(drafter, draft(), draft())
     assert all(unreviewed(d) and d.itinerary == draft().itinerary for d in reviewed)
     assert not calls(fake_llm, "PlanFixes")
@@ -172,41 +172,41 @@ def test_a_review_that_breaks_loses_no_plan(drafter, fake_llm, monkeypatch):
 
 
 def test_an_error_that_points_at_nothing_real_is_ignored(drafter, fake_llm):
-    fake_llm.fails = {"plan_0": {"logic": {**MISFIT, "where": ["i999"]}, "balance": {**MISFIT, "where": []}}}
+    fake_llm.fails = {"logic": {**MISFIT, "where": ["i999"]}, "balance": {**MISFIT, "where": []}}
     assert review(drafter) == [draft()]
     assert not calls(fake_llm, "PlanFixes")
 
 
 def test_a_missing_must_can_be_added_to_any_day(drafter, fake_llm):
-    fake_llm.fails = [{"plan_0": {"note_0": {"problem": "No night club", "where": [], "passed": False}}}]
-    fake_llm.fixes = {"plan_0": [{"op": "add", "day_id": "d2", "place": "c2", "time_of_day": "evening"}]}
+    fake_llm.fails = [{"note_0": {"problem": "No night club", "where": [], "passed": False}}]
+    fake_llm.fixes = [{"op": "add", "day_id": "d2", "place": "c2", "time_of_day": "evening"}]
     [fixed] = review(drafter)
     assert fixed.itinerary.days[1].activities[-1].name == "Night Owl" and fixed.warnings == []
 
 
 def test_the_budget_is_only_judged_when_the_traveler_stated_one(drafter, fake_llm):
     review(drafter)
-    assert "- budget:" not in calls(fake_llm, "PlanReviews")[0]
+    assert "- budget:" not in calls(fake_llm, "PlanReview")[0]
     review(drafter, profile=PROFILE.model_copy(update={"budget_level": BudgetLevel.BUDGET}))
-    assert "- budget:" in calls(fake_llm, "PlanReviews")[1]
+    assert "- budget:" in calls(fake_llm, "PlanReview")[1]
 
 
 def test_each_stated_note_gets_its_own_verdict_and_a_guess_gets_none(drafter, fake_llm):
     notes = [Note(id="n1", kind="avoid", text="beach"), Note(id="n2", text="jazz"),
              Note(id="n3", text="maybe bars", source="inferred")]
     review(drafter, personality=Personality(notes=notes))
-    [prompt] = calls(fake_llm, "PlanReviews")
+    [prompt] = calls(fake_llm, "PlanReview")
     assert '- note_0: they said "avoid: beach"' in prompt and '- note_1: they said "want: jazz"' in prompt
     assert "note_2" not in prompt
 
 
 def test_missing_days_are_counted_by_code_and_filled(drafter, fake_llm):
-    fake_llm.fixes = {"plan_0": [{"op": "add", "day_id": "d3", "place": "c2", "time_of_day": "evening"},
-                                 {"op": "add", "day_id": "d3", "place": "c9"}]}
+    fake_llm.fixes = [{"op": "add", "day_id": "d3", "place": "c2", "time_of_day": "evening"},
+                                 {"op": "add", "day_id": "d3", "place": "c9"}]
     [fixed] = review(drafter, profile=PROFILE.model_copy(update={"duration_days": 3}))
     assert [a.name for a in fixed.itinerary.days[2].activities] == ["Night Owl"]
     assert fixed.warnings == ["Day 3 has only one stop"]
-    assert "nothing planned" not in calls(fake_llm, "PlanReviews")[0]  # it would parrot the result
+    assert "nothing planned" not in calls(fake_llm, "PlanReview")[0]  # it would parrot the result
 
 
 def test_days_nobody_could_fill_are_not_shown_empty(drafter, fake_llm):
@@ -268,7 +268,7 @@ def test_a_stay_too_far_from_the_days_stops_is_an_error():
 
 def test_the_models_visit_times_reach_the_check_and_a_tight_day_is_repaired(drafter, fake_llm):
     fake_llm.minutes = {"i3": 540}
-    fake_llm.fixes = {"plan_0": [{"op": "replace", "item_id": "i3", "place": "c2", "time_of_day": "morning"}]}
+    fake_llm.fixes = [{"op": "replace", "item_id": "i3", "place": "c2", "time_of_day": "morning"}]
     [fixed] = review(drafter)
     assert "Garden" in calls(fake_llm, "PlanFixes")[0].split("What the reviewer found:")[1]
     assert fixed.itinerary.days[1].activities[0].name == "Night Owl" and fixed.warnings == []
@@ -298,14 +298,14 @@ def test_each_plan_is_reviewed_on_its_own_and_streamed(client, auth, fake_llm):
     with client.stream("POST", f"/trips/{trip['id']}/messages/stream", json={"message": "2 days"}, headers=auth) as r:
         events = [json.loads(line) for line in r.iter_lines() if line]
     shown = [e for e in events if e["type"] == "draft"]
-    assert [e["index"] for e in shown] == [0, 1, 2] and len(calls(fake_llm, "PlanReviews")) == 3
+    assert [e["index"] for e in shown] == [0, 1, 2] and len(calls(fake_llm, "PlanReview")) == 3
     assert next(i for i, e in enumerate(events) if e["type"] == "reply" and "3 ways" in e["text"]) < \
         next(i for i, e in enumerate(events) if e["type"] == "draft")
 
 
 def test_a_critic_timeout_still_shows_three_plans_and_says_so(client, auth, fake_llm):
     trip = ready_trip(client, auth, fake_llm)
-    fake_llm.errors = {"PlanReviews": timeout()}
+    fake_llm.errors = {"PlanReview": timeout()}
     turn = say(client, auth, trip["id"], "2 days")
     assert len(turn["drafts"]) == 3 and all(UNREVIEWED in d["warnings"] for d in turn["drafts"])
     assert all(UNREVIEWED in d["warnings"] for d in turn["trip"]["drafts"])
@@ -324,12 +324,12 @@ def test_an_edit_is_reviewed_and_repaired_only_where_it_changed(client, auth, fa
     trip, days = chosen(client, auth, fake_llm)  # c0 and c1 are stays, so activities start at c2
     changed, other = days[0]["activities"][0]["id"], days[1]["activities"][0]["id"]
     fake_llm.edits = [{"op": "replace", "item_id": changed, "place": "c2"}]
-    fake_llm.fails = [{"plan_0": {"purpose": {**MISFIT, "where": [changed]}}}]
-    fake_llm.fixes = {"plan_0": [{"op": "replace", "item_id": changed, "place": "c3"},
-                                 {"op": "replace", "item_id": other, "place": "c4"}]}
+    fake_llm.fails = [{"purpose": {**MISFIT, "where": [changed]}}]
+    fake_llm.fixes = [{"op": "replace", "item_id": changed, "place": "c3"},
+                                 {"op": "replace", "item_id": other, "place": "c4"}]
     after = say(client, auth, trip["id"], "change it")["trip"]["itinerary"]["days"]
-    assert [n for n, _ in fake_llm.prompts if n.startswith("Plan")] == ["PlanEdits", "PlanReviews", "PlanFixes",
-                                                                          "PlanReviews"]
+    assert [n for n, _ in fake_llm.prompts if n.startswith("Plan")] == ["PlanEdits", "PlanReview", "PlanFixes",
+                                                                          "PlanReview"]
     assert after[1] == days[1]
     assert after[0]["activities"][0]["id"] == changed and after[0]["activities"][0]["name"] != days[0]["activities"][0]["name"]
 
@@ -338,8 +338,8 @@ def test_the_repair_of_an_edit_never_removes_what_was_asked_for(client, auth, fa
     trip, days = chosen(client, auth, fake_llm)
     changed = days[0]["activities"][0]["id"]
     fake_llm.edits = [{"op": "replace", "item_id": changed, "place": "c2"}]
-    fake_llm.fails = {"plan_0": {"purpose": {**MISFIT, "problem": "That doesn't fit", "where": [changed]}}}
-    fake_llm.fixes = {"plan_0": [{"op": "remove", "item_id": changed}]}
+    fake_llm.fails = {"purpose": {**MISFIT, "problem": "That doesn't fit", "where": [changed]}}
+    fake_llm.fixes = [{"op": "remove", "item_id": changed}]
     turn = say(client, auth, trip["id"], "change it")
     assert len(turn["trip"]["itinerary"]["days"][0]["activities"]) == len(days[0]["activities"])
     assert "Worth a look: That doesn't fit" in turn["reply"]
@@ -349,7 +349,7 @@ def test_the_repair_of_an_edit_never_removes_what_was_asked_for(client, auth, fa
 def test_an_edit_is_kept_when_the_critic_times_out(client, auth, fake_llm):
     trip, days = chosen(client, auth, fake_llm)
     fake_llm.edits = [{"op": "replace", "item_id": days[0]["activities"][0]["id"], "place": "c2"}]
-    fake_llm.errors = {"PlanReviews": timeout()}
+    fake_llm.errors = {"PlanReview": timeout()}
     turn = say(client, auth, trip["id"], "change it")
     assert turn["trip"]["itinerary"]["days"] != days and "couldn't double-check" in turn["reply"]
 
@@ -358,7 +358,7 @@ def test_an_edit_that_only_removes_costs_no_review(client, auth, fake_llm):
     trip, days = chosen(client, auth, fake_llm)
     fake_llm.edits = [{"op": "remove", "item_id": days[1]["activities"][1]["id"]}]
     say(client, auth, trip["id"], "change it")
-    assert not calls(fake_llm, "PlanReviews")
+    assert not calls(fake_llm, "PlanReview")
 
 
 def test_a_timeout_is_passed_to_the_model_call(monkeypatch):
@@ -418,13 +418,7 @@ def test_the_critic_sees_what_a_place_is_next_to_what_it_is_planned_for(drafter,
     cafe = draft()
     cafe.itinerary.days[1].activities[0].description = "Swim at the beach"
     review(drafter, cafe)
-    [prompt] = calls(fake_llm, "PlanReviews")
+    [prompt] = calls(fake_llm, "PlanReview")
     assert "- [i2] Sandwich Shop · meant for: one big night out" in prompt
     assert "- [i3] planned: Swim at the beach" in prompt
 
-
-def test_a_problem_about_another_plans_place_is_dropped(drafter, fake_llm):
-    # Seen live on gemini-3.1-flash-lite: one plan got the warning meant for another plan's morning night club.
-    fake_llm.fails = {"plan_0": {"purpose": {**MISFIT, "problem": "Night Owl is a night club planned for the morning"}}}
-    assert review(drafter) == [draft()]
-    assert not calls(fake_llm, "PlanFixes")
