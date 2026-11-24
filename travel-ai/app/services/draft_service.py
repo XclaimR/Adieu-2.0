@@ -93,16 +93,8 @@ def _same(a: str, b: str) -> bool:
     return bool(a and b) and (a == b or (min(len(a), len(b)) >= 6 and (a in b or b in a)))
 
 
-def _one_per_slot(activities: list[Activity]) -> list[Activity]:
-    """A time of day holds one thing to do and one meal: a repeat moves to a later free one, if any.
-    Then order the day morning → evening."""
-    taken: set[tuple[str, bool]] = set()
-    for a in activities:
-        meal = a.category == PickCategory.EAT.value
-        if (a.time_of_day, meal) in taken and a.time_of_day in _SLOTS:
-            later = [s for s in _SLOTS[_SLOTS.index(a.time_of_day) + 1:] if (s, meal) not in taken]
-            a.time_of_day = later[0] if later else a.time_of_day  # never earlier: no bar in the morning
-        taken.add((a.time_of_day, meal))
+def _in_order(activities: list[Activity]) -> list[Activity]:
+    """Morning → evening. A time of day may hold several stops; the timing check says when it's too many."""
     return sorted(activities, key=lambda a: _SLOTS.index(a.time_of_day) if a.time_of_day in _SLOTS else len(_SLOTS))
 
 
@@ -168,7 +160,7 @@ class PlacePool:
                     source_url=place.source_url,
                 ))
             if activities:
-                days.append(DayPlan(day_number=len(days) + 1, theme=day.theme, activities=_one_per_slot(activities)))
+                days.append(DayPlan(day_number=len(days) + 1, theme=day.theme, activities=_in_order(activities)))
 
         stay = self.get(plan.stay_ref)
         return Itinerary(
@@ -229,7 +221,7 @@ Places you may use (refer to them ONLY by [n]):
 
 Rules:
 - Exactly {days} days, each with 2-3 things to do or see and places to eat beside them.
-- Each time of day holds at most one thing to do and one meal. Lunch is afternoon, dinner is evening.
+- A time of day may hold several stops when they are close by. Lunch is afternoon, dinner is evening.
 - Plan meals in pairs: lunch with a thing to do in the same afternoon, dinner with one in the same evening.
   Leave out a meal rather than give it a time of day alone.
 - A meal takes an hour or two, so it never has a morning, afternoon or evening to itself: it shares that time
