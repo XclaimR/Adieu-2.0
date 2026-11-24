@@ -3,6 +3,7 @@
 Guide text is untrusted: anyone can edit it. It is cut to short plain lines before it is stored.
 """
 import hashlib
+import logging
 import re
 from urllib.parse import quote, unquote, urlsplit
 
@@ -10,11 +11,13 @@ from app.services.open_data import (
     COMMONS, WIKIVOYAGE, box_reach_km, distance_km, normalize, safe_text, valid_point, wikimedia,
 )
 
+logger = logging.getLogger(__name__)
+
 NAME_LIMIT = 80
 TEXT_LIMIT = 220
 MAX_GUIDES = 24
 MAX_DISTRICTS = 20
-PAGES_PER_CALL = 25
+PAGES_PER_CALL = 10  # big guides come back in parts; fewer per call keeps each batch within a few parts
 MAX_PHOTOS = 50
 # Nearby guides count as "in reach" of a town: Sintra is 22 km from Lisbon.
 NEARBY_KM = 30
@@ -172,6 +175,8 @@ def _fetch(titles: list[str]) -> tuple[dict[str, dict], dict[str, str]]:
             more = data.get("continue") or {}
             if not more:
                 break
+        else:
+            logger.warning("Wikivoyage answer still incomplete for %s", titles[start])
     pages = {}
     for title, entry in raw.items():
         if "revisions" not in entry:

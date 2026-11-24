@@ -127,8 +127,3 @@ def box_reach_km(box: dict) -> float:
     south, west, _, _ = corners(box)
     return distance_km(box_centre(box), (south, west))
 
-
-def in_box(point: tuple[float, float], box: dict) -> bool:
-    south, west, north, east = corners(box)
-    lat, lng = point
-    return south <= lat <= north and (west <= lng <= east if west <= east else lng >= west or lng <= east)

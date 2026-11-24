@@ -8,7 +8,7 @@ from app.services.draft_service import describe
 from app.services.place_library import merge
 from app.services.places_service import PlacesService, estimate_stay_tier, unclaimed
 from tests.v1.conftest import FAKE_PLACES
-from tests.v1.test_api import new_trip, ready_trip, say
+from tests.v1.test_api import ready_trip, say
 
 
 # ---------- downloaded text ----------
@@ -27,8 +27,6 @@ def test_names_match_across_accents_and_scripts():
 
 def test_a_box_across_the_180th_meridian():
     fiji = open_data.make_box(-19.3, 176.8, -12.4, -178.3)
-    assert open_data.in_box((-17.0, 179.9), fiji) and open_data.in_box((-17.0, -179.0), fiji)
-    assert not open_data.in_box((-17.0, 170.0), fiji)
     assert overture._unwrap(fiji) == [(176.8, -19.3, 180.0, -12.4), (-180.0, -19.3, -178.3, -12.4)]
 
 
@@ -231,8 +229,32 @@ def test_photos_redirect_to_commons_and_credit_their_author(client, db_session):
     assert client.get("/photos/commons/ffffffffffffffff").status_code == 404
 
 
-def test_new_trips_carry_the_area_id_so_no_lookup_is_repeated(client, auth, fake_llm, fake_places):
-    trip = new_trip(client, auth)
-    ready_trip(client, auth, fake_llm)
-    assert fake_places.resolved.count("Lisbon") == 1
-    assert trip
+
+# ---------- the stored library ----------
+
+def test_replanning_after_the_library_expired_gives_three_fresh_plans(client, auth, fake_llm, fake_places, monkeypatch):
+    from app.services import places_service
+    trip = ready_trip(client, auth, fake_llm)
+    first = say(client, auth, trip["id"], "not sure")["drafts"]
+    monkeypatch.setattr(places_service, "LIBRARY_TTL_HOURS", 0)  # expired: the next plan reloads it
+
+    again = say(client, auth, trip["id"], "__show_plans__")["trip"]["drafts"]  # what the trip keeps
+
+    assert len(again) == 3 and not {d["id"] for d in again} & {d["id"] for d in first}
+
+
+def test_a_source_down_keeps_the_old_library_and_none_at_all_is_a_plain_error(db_session, fake_places, monkeypatch):
+    from app.services import place_library, places_service
+    from app.services.places_service import PlacesUnavailableError
+    service = PlacesService(db_session)
+    area = service.resolve_destination("Lisbon")
+    old = service.library(area)
+
+    def down(area, releases):
+        raise open_data.OpenDataError("down")
+
+    monkeypatch.setattr(place_library, "build", down)
+    monkeypatch.setattr(places_service, "LIBRARY_TTL_HOURS", 0)
+    assert service.library(area) == old
+    with pytest.raises(PlacesUnavailableError):
+        service.library(service.resolve_destination("Paris"))

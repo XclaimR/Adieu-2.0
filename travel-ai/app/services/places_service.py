@@ -258,8 +258,8 @@ class PlacesService:
         if fresh(row):
             return row.data
         with self._loading:
-            self.db.expire_all()
-            row = self._row(key)
+            # Re-read only this row: expiring the whole session would drop the trip's unsaved changes.
+            row = self.db.get(PlaceCacheModel, key, populate_existing=True)
             if fresh(row):  # loaded by another request while this one waited
                 return row.data
             try:
