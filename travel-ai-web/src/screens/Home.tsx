@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { api, photoUrl } from "../api";
+import { api } from "../api";
+import Photo from "../components/Photo";
 import IdeaCard from "../components/IdeaCard";
 import type { StarterIdea, TripSummary, User } from "../types";
 
@@ -67,16 +68,12 @@ export default function Home({ user, openTrip }: Props) {
           <h2>Your trips</h2>
           <ul className="trip-list">
             {trips.map((t) => {
-              const src = photoUrl(t.photo_name);
               return (
                 <li key={t.id}>
                   <button onClick={() => openTrip(t.id)}>
-                    <span className="trip-thumb">{src ? (
-                        // Google photo names expire, so old trips can point at a dead photo.
-                        <img src={src} alt="" loading="lazy" onError={(e) => e.currentTarget.remove()} />
-                      ) : (
-                        "🧭"
-                      )}</span>
+                    <span className="trip-thumb">
+                      <Photo name={t.photo_name} fallback="🧭" />
+                    </span>
                     <span className="trip-text">
                       <strong>{t.title}</strong>
                       <span className="muted small">
