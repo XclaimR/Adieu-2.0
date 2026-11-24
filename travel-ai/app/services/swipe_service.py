@@ -78,7 +78,8 @@ CARDS: list[Card] = [
     Card("quick_bite", "Quick bite between sights", {"food": -1, "pace": 0.3}, (),
          _commons("Daniel Case", "CC BY-SA 3.0", "People_at_taco_cart_in_Mexico_City.jpg")),
     Card("picnic", "Picnic in the park", {"money": -1, "pace": -0.3}, ("relaxed",),
-         _commons("Virginia State Parks", "CC BY 2.0", "BC_-_Picnic_(32074357744).jpg")),
+         _commons("Billie Grace Ward from New York, USA", "CC BY 2.0",
+                  "An_afternoon_in_the_park..._(37313150922).jpg")),
 ]
 BY_ID = {c.id: c for c in CARDS}
 
