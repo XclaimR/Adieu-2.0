@@ -1,7 +1,7 @@
 import pytest
 
 from app.schemas.personality import NoteChange, Personality, Scale
-from app.schemas.trip_profile import TripProfile
+from app.schemas.trip_profile import Party, TripProfile
 from app.services import swipe_service as swipes
 from app.services.personality_service import KNOWN, POLES, STATED_CONFIDENCE, PersonalityService
 from tests.v1.test_api import decision, new_trip, say
@@ -153,3 +153,27 @@ def test_unsure_traveler_is_offered_the_deck(client, auth, fake_llm):
     trip = new_trip(client, auth)
     fake_llm.decisions.append(decision())
     assert swipes.SWIPE_CHIP in say(client, auth, trip["id"], "I don't know what I want")["answer_options"]
+
+
+class AppApi:
+    """The persona runner's Api, answered in-process by the app with the fake model."""
+    def __init__(self, client):
+        self.client, self.token = client, None
+
+    def post(self, path, body, method="POST"):
+        headers = {"Authorization": f"Bearer {self.token}"} if self.token else {}
+        return self.client.request(method, path, json=body, headers=headers).json()
+
+
+def test_unsure_persona_swipes_to_a_style_then_gets_plans(client, fake_llm):
+    from tests.personas.personas import PERSONAS
+    from tests.personas.run import check, converse
+
+    unsure = next(p for p in PERSONAS if p["name"] == "unsure")
+    fake_llm.decisions += [decision(party=Party.SOLO, party_size=1, duration_days=7),  # "I don't know what I want"
+                           decision(),  # "just show me plans" after the deck -> destination ideas
+                           decision(destination="Japan")]  # picks the first idea -> plans
+    run = converse(AppApi(client), unsure)
+    assert run["swiped"] and run["swiped"]["summary"].startswith("You lean: slow pace")
+    rules = dict((r, ok) for r, ok, _ in check(unsure, run))
+    assert all(rules.values()), check(unsure, run)

@@ -1,4 +1,4 @@
-"""Runs the six test travelers against the running app over HTTP and prints pass/fail per persona per rule.
+"""Runs the test travelers against the running app over HTTP and prints pass/fail per persona per rule.
 
     docker compose exec api python -m tests.personas.run
     python -m tests.personas.run --base-url http://localhost:8000 --persona bachelor --timeout 300
@@ -18,6 +18,8 @@ from tests.personas.personas import PERSONAS
 MAX_TURNS = 12
 MAX_QUESTIONS = 8
 SHOW_PLANS = "just show me plans"
+SHOW_PLANS_TOKEN = "__show_plans__"  # the web app's "show me plans" button
+SWIPE_CHIP = "Swipe to find my style"  # the app's swipe_service.SWIPE_CHIP
 RETRIES, RETRY_WAIT = 3, 30
 DEFAULT_DAYS = 4  # the app's draft_service.DEFAULT_DAYS
 DRAFT_COUNT = 3  # the app's travel_planner_workflow.DRAFT_COUNT; fewer means a draft was silently dropped
@@ -28,11 +30,12 @@ class Api:
     def __init__(self, base_url: str, timeout: float):
         self.base, self.timeout, self.token = base_url.rstrip("/"), timeout, None
 
-    def post(self, path: str, body: dict) -> dict:
+    def post(self, path: str, body: dict | None, method: str = "POST") -> dict:
         headers = {"Content-Type": "application/json"}
         if self.token:
             headers["Authorization"] = f"Bearer {self.token}"
-        req = urllib.request.Request(self.base + path, json.dumps(body).encode(), headers, method="POST")
+        data = None if body is None else json.dumps(body).encode()
+        req = urllib.request.Request(self.base + path, data, headers, method=method)
         for attempt in range(RETRIES + 1):
             try:
                 with urllib.request.urlopen(req, timeout=self.timeout) as resp:
@@ -57,6 +60,16 @@ def pick_reply(persona: dict, question: str, chips: list[str], used: set[int]) -
     return SHOW_PLANS, {}
 
 
+def swipe_deck(api: Api, trip_id: str, likes: dict[str, str]) -> tuple[list[str], dict]:
+    """Plays the swipe deck: each card the persona has a feeling about, "not sure" for the rest. Returns the cards
+    seen and the trip after the deck's summary."""
+    seen, deck = [], api.post(f"/trips/{trip_id}/swipes", None, "GET")
+    while deck["card"]:
+        seen.append(deck["card"]["id"])
+        deck = api.post(f"/trips/{trip_id}/swipes", {"card_id": seen[-1], "answer": likes.get(seen[-1], "skip")})
+    return seen, api.post(f"/trips/{trip_id}/swipes/finish", {})
+
+
 def converse(api: Api, persona: dict, answer=None) -> dict:
     """Plays one persona until drafts appear (or it gives up). Returns the transcript and timings.
     answer(resp, used) -> (reply, facts it states); defaults to the scripted pick_reply (the AI agent passes its own)."""
@@ -68,7 +81,7 @@ def converse(api: Api, persona: dict, answer=None) -> dict:
     trip_id = trip["id"]
     facts = {k: list(v) for k, v in persona["facts"].items()}
     message, used = persona["opening"], set()
-    turns, questions, plans_turn, vibe_due, show_plans_turn = [], 0, None, None, None
+    turns, questions, plans_turn, vibe_due, show_plans_turn, swiped = [], 0, None, None, None, None
     for n in range(1, MAX_TURNS + 1):
         start = time.time()
         resp = api.post(f"/trips/{trip_id}/messages", {"message": message})
@@ -82,6 +95,16 @@ def converse(api: Api, persona: dict, answer=None) -> dict:
         trip = resp["trip"]
         if resp["drafts"] or resp.get("options"):
             plans_turn = plans_turn or n
+        if persona.get("swipes") and swiped is None and SWIPE_CHIP in (resp.get("answer_options") or []):
+            seen, trip = swipe_deck(api, trip_id, persona["swipes"])
+            swiped = {"cards": seen, "summary": trip["messages"][-1]["content"], "traits": trip["personality"]["traits"]}
+            message = SHOW_PLANS_TOKEN  # what the web app sends after the deck
+            continue
+        ideas = ((resp.get("options") or {}).get("ideas") or []) if not trip["profile"].get("destination") else []
+        if ideas and persona.get("pick_idea"):
+            message = f"Let's go to {ideas[0]['destination']}"  # the destination is then the persona's own choice
+            facts.setdefault("destination", []).append(ideas[0]["destination"])
+            continue
         if resp["drafts"] or not resp["next_question"]:
             break
         if plans_turn is None:
@@ -90,7 +113,7 @@ def converse(api: Api, persona: dict, answer=None) -> dict:
         for k, v in new_facts.items():
             facts.setdefault(k, []).extend(v)
     return {"trip": trip, "turns": turns, "facts": facts, "questions": questions, "plans_turn": plans_turn,
-            "vibe_due": vibe_due, "show_plans_turn": show_plans_turn}
+            "vibe_due": vibe_due, "show_plans_turn": show_plans_turn, "swiped": swiped}
 
 
 def invented_facts(profile: dict, facts: dict) -> list[str]:
@@ -158,6 +181,12 @@ def check(persona: dict, run: dict) -> list[tuple[str, bool | None, str]]:
         rules.append(("picks fit the traveler", not bad, "; ".join(bad) or f"{len(pick_texts(trip)[0])} items checked"))
     else:
         rules.append(("picks fit the traveler", None, "no drafts to check"))
+    if persona.get("swipes"):
+        swiped = run.get("swiped")
+        traits = " | ".join(swiped["traits"]) if swiped else ""
+        ok = bool(swiped) and len(swiped["cards"]) <= 12 and all(t in traits for t in persona["expect_style"])
+        rules.append(("style found by swiping", ok, f"{len(swiped['cards'])} cards; {swiped['summary']}; card: {traits}"
+                      if swiped else "the deck was never offered"))
     n = len(trip["drafts"])
     rules.append(("all drafts arrived", n == DRAFT_COUNT if has_drafts else None, f"{n} of {DRAFT_COUNT}"))
     return rules
