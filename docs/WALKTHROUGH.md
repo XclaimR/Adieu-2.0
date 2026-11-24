@@ -128,6 +128,19 @@ only on a clear yes while that is the current question. A no brings back the que
 
 Events the browser handles: `progress` (step list), `reply`, `note`, `options`, `draft`, `done`, `error` (shown with a **Try again** button if the message wasn't saved).
 
+### Swipe deck ("Not sure? Swipe to find your style")
+For travelers who can't describe their trip. Home's "Not sure? Swipe…" button, or the "Swipe to find my style" chip,
+opens `components/SwipeDeck.tsx` (own `SwipeDeck.css`; a full-screen sheet on phones). No LLM calls:
+`GET /trips/{id}/swipes` → next card, `POST /trips/{id}/swipes` {card_id, answer: right/left/skip} → saves the answer
+in `trip.state["swipes"]` and the scales, `POST /trips/{id}/swipes/finish` → says "You lean: …" in the chat and sets the
+trip's mood from the cards swiped right if none was said; the client then sends "show me plans" as usual (`api/swipes.py`).
+- `services/swipe_service.py`: 15 cards with fixed, tested effects on the six scales. Left counts half of right;
+  disagreeing swipes cancel out (lower confidence, never a flip). Swiped scales (source `swiped`) top out at 0.6, below
+  anything said, and only fill scales nothing surer set. Next card = the one touching the least-known scales; 12 at most.
+- Offered (`swipe_service.offer`) when the model says the traveler is stuck, they say "not sure" / "surprise me" and the
+  like, or the mood question is asked a second time; on every new trip's first question too; never once used or with a plan.
+- Photos: Wikimedia Commons, openly licensed, stored in `travel-ai-web/public/swipe/`, credited on the card.
+
 ### Picking a plan, likes and edits
 | UI | Endpoint | Workflow method |
 |---|---|---|
@@ -157,8 +170,8 @@ Credits for all sources are under "Data credits" at the bottom of every page.
 - `tests/v1/` — the live code: API flows with a fake LLM and fake open data (`conftest.py`), grounding, ranking, parsing and merging the open data (`test_open_data.py`).
   Run: `docker compose exec api python -m pytest -q --ignore=tests/evals`
 - `tests/evals/` — real-model conversation checks: `docker compose exec api python -m tests.evals.run_turn_evals`
-- `tests/personas/` — six test travelers (bachelor group to Japan, Lisbon food couple, family beach, solo hiker,
-  budget backpacker, luxury weekend) chat with the **running** app over HTTP and get pass/fail per rule: no invented
+- `tests/personas/` — seven test travelers (bachelor group to Japan, Lisbon food couple, family beach, solo hiker,
+  budget backpacker, luxury weekend, and "unsure", who plays the swipe deck and picks the first idea) chat with the **running** app over HTTP and get pass/fail per rule: no invented
   profile facts, at most 8 questions before plans, drafts once destination/mood/party are known, picks fit the
   traveler. Personas and their scripted answers live in `personas.py`; the checks in `run.py`. Needs
   `ALLOW_DEV_LOGIN=true`; uses whatever model the server is configured with (local qwen3:8b takes a few minutes per
