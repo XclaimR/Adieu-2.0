@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
 import type { User, Vibe } from "../types";
+import Credits from "../components/Credits";
 
 type Props = { initial: string[]; onDone: (u: User) => void; onSkip: () => void };
 
@@ -53,9 +54,10 @@ export default function VibePicker({ initial, onDone, onSkip }: Props) {
           Skip for now
         </button>
         <button className="primary" disabled={saving || chosen.size === 0} onClick={save}>
-          {saving ? "Saving…" : `Save ${chosen.size || ""} vibes`}
+          {saving ? "Saving…" : chosen.size ? `Save ${chosen.size} ${chosen.size === 1 ? "vibe" : "vibes"}` : "Save vibes"}
         </button>
       </div>
+      <Credits />
     </main>
   );
 }

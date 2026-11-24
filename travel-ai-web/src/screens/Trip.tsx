@@ -7,6 +7,7 @@ import DraftCard, { DraftSkeleton } from "../components/DraftCard";
 import OptionsPanel from "../components/OptionsPanel";
 import ItineraryView from "../components/ItineraryView";
 import NoteList from "../components/NoteList";
+import Credits from "../components/Credits";
 
 const DRAFT_COUNT = 3;
 const SHOW_PLANS = "__show_plans__";
@@ -41,15 +42,16 @@ function PersonalityCard({ personality }: { personality: Personality }) {
   const moments = tripNotes.filter(isMoment).map((n) => n.text);
   const sentence = traits.map((t, i) => (i ? t.toLowerCase() : t)).join(", ");
   return (
-    <div className="personality" title="This trip's personality">
-      <span className="personality-label">Trip personality</span>
-      <span>{sentence || "Still getting to know this trip"}</span>
+    <details className="personality">
+      <summary>
+        <span className="personality-label">Trip personality</span> {sentence || "Still getting to know this trip"}
+      </summary>
       {traits.length > 0 && unknown.length > 0 && (
         <span className="small muted">Not sure yet: {unknown.join(", ").toLowerCase()}</span>
       )}
       <NoteList notes={tripNotes.filter((n) => !isMoment(n))} target="trip" />
       {moments.length > 0 && <span className="small">To fit in: {moments.join(", ")}</span>}
-    </div>
+    </details>
   );
 }
 
@@ -310,6 +312,7 @@ export default function TripScreen({ tripId, firstMessage }: { tripId: string; f
             onSwap={(d, i) => activity(d, i, "swap")}
             onRemove={(d, i) => activity(d, i, "remove")}
           />
+          <Credits />
         </section>
       )}
 
@@ -406,6 +409,7 @@ export default function TripScreen({ tripId, firstMessage }: { tripId: string; f
 
       <OptionsPanel open={panelOpen && !!panel} title={panelTitle} onClose={() => setPanelOpen(false)}>
         {panelBody}
+        <Credits />
       </OptionsPanel>
     </main>
   );

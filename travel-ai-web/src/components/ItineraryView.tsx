@@ -63,7 +63,7 @@ export default function ItineraryView({ itinerary, notes, busy, onSwap, onRemove
                       <Photo name={a.photo_name} fallback="📍" />
                     </span>
                     <span className="activity-text">
-                      {a.time_of_day && <span className="tod">{a.time_of_day}</span>}
+                      {a.time_of_day && a.time_of_day !== day.activities[i - 1]?.time_of_day && <span className="tod">{a.time_of_day}</span>}
                       <strong>{a.name}</strong>
                       {a.description && <span className="small muted">{a.description}</span>}
                       {a.for_note && <span className="trait">For: {a.for_note}</span>}
