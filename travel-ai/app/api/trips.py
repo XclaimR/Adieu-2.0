@@ -25,6 +25,7 @@ from app.schemas.api import (
 from app.schemas.trip_profile import TripProfile
 from app.services.llm_client import LLMOutputError
 from app.services.places_service import PlacesService, PlacesUnavailableError
+from app.services.swipe_service import SWIPE_CHIP
 from app.services.turn_service import VIBE_QUESTIONS
 from app.workflows.travel_planner_workflow import TravelPlannerWorkflow, TripActionError
 
@@ -53,7 +54,7 @@ def create_trip(request: CreateTripRequest, user: UserModel = Depends(current_us
     trip = repo.create(user.id, request.title or "New trip", profile)
     question, chips = VIBE_QUESTIONS["destination"]
     trip.next_question = question
-    trip.state = {"answer_options": chips}
+    trip.state = {"answer_options": [*chips, SWIPE_CHIP]}  # "Just chat" starts here: offer the deck
     repo.add_message(trip.id, "assistant", question)
     db.commit()
     return repo.to_out(trip)

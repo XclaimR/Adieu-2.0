@@ -7,6 +7,7 @@ from openai import APIConnectionError, APIStatusError, APITimeoutError
 
 from app.api.auth import router as auth_router
 from app.api.me import router as me_router
+from app.api.swipes import router as swipes_router
 from app.api.trips import router as trips_router
 from app.core.config import settings
 from app.services.llm_client import LLMOutputError
@@ -27,6 +28,7 @@ app.add_middleware(
 app.include_router(auth_router)
 app.include_router(me_router)
 app.include_router(trips_router)
+app.include_router(swipes_router)
 
 
 @app.get("/health")
