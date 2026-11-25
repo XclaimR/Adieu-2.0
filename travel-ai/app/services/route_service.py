@@ -107,6 +107,28 @@ def one_way(found: list[dict], start: dict, n: int) -> list[dict]:
     return chosen
 
 
+def find_town(library: dict, name: str) -> dict | None:
+    """A town the traveler named, from the library's towns (a district is part of a town, not a base)."""
+    want = name.casefold().strip()
+    hubs = [{"name": h["name"], "lat": p[0], "lng": p[1]} for h in library["hubs"]
+            if not h["district"] and h.get("point") and (p := valid_point(*h["point"]))]
+    return next((h for h in hubs if h["name"].casefold() == want), None) or next(
+        (h for h in hubs if want and (h["name"].casefold().startswith(want) or want.startswith(h["name"].casefold()))),
+        None)
+
+
+def insert_at(route: list[City], town: dict, last: bool = True) -> int:
+    """Where a new city adds the least distance, never before the first city (where the trip starts):
+    the route keeps going one way as far as it can. `last` False keeps it off the end."""
+    points = [(c.lat, c.lng) for c in route]
+    new = (town["lat"], town["lng"])
+    def added(i: int) -> float:
+        before = distance_km(points[i - 1], new)
+        return before + (distance_km(new, points[i]) - distance_km(points[i - 1], points[i]) if i < len(points) else 0)
+    spots = range(1, len(points) + 1 if last or len(points) < 2 else len(points))
+    return min(spots, key=added)
+
+
 def share_days(days: int, ordered: list[dict], ranked: list[str]) -> list[int]:
     """Equal shares; the days left over go to the most important cities."""
     base, extra = divmod(days, len(ordered))

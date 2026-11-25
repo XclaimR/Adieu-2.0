@@ -176,6 +176,8 @@ class TravelPlannerWorkflow:
         self.trips.save_personality(trip, personality)
 
         progressed = new_profile != profile or personality.notes != before.notes
+        if not (itinerary and itinerary.route):
+            decision.route_changes = []  # one city has no route to change; the plain edit reads the message
         plan = TurnService.plan(
             decision, new_profile,
             message=message,
@@ -198,6 +200,11 @@ class TravelPlannerWorkflow:
             # The model talks as if the plans exist ("I've put together a few"), so its words wait for the first draft.
             reply_with_plans = f"{reply.rstrip()} {PLANS_READY}"
             reply = f"{not_reset}Let me put some plans together for {new_profile.destination}.{note}"
+        # The model talks as if the change were made; for a route, the code says what it really did, afterwards.
+        route_edit = plan.action == TurnAction.EDIT_ITINERARY and bool(
+            itinerary and itinerary.route and decision.route_changes)
+        if route_edit:
+            reply = f"{not_reset}Let me rework your route.{note}"
         yield _reply(reply, plan.next_question, plan.answer_options)
 
         # Save the exchange before the slow work (drafts take minutes), so anything the user does
@@ -216,6 +223,20 @@ class TravelPlannerWorkflow:
                 yield from self._show_options(trip, new_profile, plan.options_request, personality)
             elif plan.action == TurnAction.OFFER_DRAFTS:
                 yield from self._offer_drafts(trip, new_profile, personality, answer, reply_with_plans)
+            elif route_edit:
+                yield _progress("Changing your route…")
+                done = self.drafter.edit_route(itinerary, decision.route_changes, decision.edit_request or shown_message,
+                                               new_profile, self._viewport(trip), self._skipped(trip), personality)
+                if done.plan != itinerary:
+                    trip.itinerary = done.plan.model_dump(mode="json")
+                    trip.profile = {**trip.profile, "duration_days": len(done.plan.days)}
+                    self._keep_notes_attached(trip, personality, itinerary, done.plan, done.day_ids)
+                extras = [f"Worth a look: {w.rstrip('.')}." for w in done.warnings] + ([] if done.checked else [UNCHECKED])
+                if TurnService.to_change(decision):  # the route edit makes only the route changes
+                    extras.insert(0, "I only changed the route this time; ask me again for the other changes.")
+                reply = " ".join([not_reset.strip(), *done.said, *extras]).strip()
+                answer.content = reply + (f"\n\n{plan.next_question}" if plan.next_question else "")
+                yield _reply(reply, plan.next_question, plan.answer_options)  # replaces the one shown while we worked
             elif plan.action == TurnAction.EDIT_ITINERARY:
                 yield _progress("Updating your plan…")
                 changing = TurnService.to_change(decision)
@@ -271,12 +292,20 @@ class TravelPlannerWorkflow:
                      + PersonalityService.plan_view(itinerary, personality))
         return "\n".join(lines)
 
-    def _keep_notes_attached(self, trip: TripModel, personality: Personality, old: Itinerary, new: Itinerary) -> None:
-        """A removed stop's notes move up to its day; a removed day's to the trip."""
+    def _keep_notes_attached(self, trip: TripModel, personality: Personality, old: Itinerary, new: Itinerary,
+                             day_ids: dict[str, str] | None = None) -> None:
+        """A removed stop's notes move up to its day; a removed day's to the trip. `day_ids` says where each old
+        day went when days were renumbered (a city added or removed)."""
         here = set(new.target_ids())
-        day_of = {a.id: d.id for d in old.days for a in d.activities if d.id in here}
-        moved = [n if n.target in {"trip", *here} else
-                 n.model_copy(update={"target": day_of.get(n.target, "trip")}) for n in personality.notes]
+        days = day_ids if day_ids is not None else {d.id: d.id for d in old.days if d.id in here}
+        day_of = {a.id: d.id for d in old.days for a in d.activities}
+
+        def where(target: str) -> str:
+            if target in {d.id for d in old.days}:
+                return days.get(target, "trip")
+            return target if target in {"trip", *here} else days.get(day_of.get(target, ""), "trip")
+        moved = [n if where(n.target) == n.target else n.model_copy(update={"target": where(n.target)})
+                 for n in personality.notes]
         if moved != personality.notes:
             self.trips.save_personality(trip, personality.model_copy(update={"notes": moved}))
 
