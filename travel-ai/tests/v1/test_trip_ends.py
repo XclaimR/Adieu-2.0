@@ -29,7 +29,7 @@ def _names(cities):
 
 
 def _plan_with(monkeypatch, picks, airports, home=DELHI, back=DELHI, days=12):
-    monkeypatch.setattr(RouteService, "_ask", staticmethod(lambda *a: (picks, {}, None, airports)))
+    monkeypatch.setattr(RouteService, "_ask", staticmethod(lambda *a: (picks, {}, None, airports, {})))
     route, _, ends = RouteService.plan({"kind": "country", "code": "JP"}, _library(), days,
                                        TripProfile(destination="Japan", origin="Delhi"), Personality(), home, back)
     return route, ends

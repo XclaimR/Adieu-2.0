@@ -125,6 +125,13 @@ class TripRepository:
         ))
         return Pick.model_validate(row.pick) if row else None
 
+    @staticmethod
+    def conflict(trip: TripModel) -> dict | None:
+        """The held conflict while its two answers are still the ones offered (choosing a plan replaces them)."""
+        state = trip.state or {}
+        held = state.get("conflict")
+        return held if held and state.get("answer_options") == [held["keep"], held["go"]] else None
+
     def to_out(self, trip: TripModel) -> TripOut:
         personality = self.personality(trip)
         itinerary = self.itinerary(trip)
@@ -146,6 +153,7 @@ class TripRepository:
             skipped_place_ids=[p.place_id for p in self.feedback(trip.id, "skipped")],
             next_question=trip.next_question,
             answer_options=(trip.state or {}).get("answer_options", []),
+            conflict=self.conflict(trip),
             itinerary=itinerary,
             messages=[
                 MessageOut(role=m.role, content=m.content, created_at=m.created_at)

@@ -18,7 +18,7 @@ from app.schemas.itinerary import Itinerary, city_of
 from app.schemas.personality import NoteChange, Personality
 from app.schemas.place import OptionSet, Pick, PickCategory, SwapTarget
 from app.schemas.trip_profile import TripProfile
-from app.schemas.turn import OptionsKind, OptionsRequest, TurnAction
+from app.schemas.turn import OptionsKind, OptionsRequest, TurnAction, TurnDecision
 from app.services.draft_service import DEFAULT_DAYS, DraftService, NotEnoughPlacesError, NoUsableDraftError
 from app.services.options_service import OptionsService
 from app.services import swipe_service
@@ -38,6 +38,9 @@ _RESET_ANSWERS = ["Yes, start from scratch", "No, keep my trip"]
 _CONFIRM_RESET = re.compile(r"[^\w?]*((yes|yeah|yep|yup)(\W+(please|i\W?m sure|start over|start from scratch|reset))?"
                             r"|sure|i\W?m sure|confirm)[^\w?]*", re.I)
 _DECLINE_RESET = re.compile(r"\W*(no(\W+(thanks|keep my trip))?|nope|nah|cancel|never ?mind|don\W?t)\W*", re.I)
+# Ticket #87: a message that goes against an earlier wish waits for the traveler's answer.
+CONFLICT_TEXT = "I haven't changed anything yet."
+CONFLICT_QUESTION = "These two don't fit together. Which should I go with?"
 DRAFT_COUNT = 3
 MISSING_PLAN = "One plan couldn't be drafted right now — ask for more plans to try again."
 PLANS_READY = f"Here are {DRAFT_COUNT} ways your trip could look — pick the one that feels right."
@@ -50,6 +53,25 @@ Event = dict
 
 def _same_place(a: str | None, b: str | None) -> bool:
     return (a or "").strip().lower() == (b or "").strip().lower()
+
+
+def _choice(message: str, held: dict) -> str | None:
+    """'keep' or 'go' when the reply to a clash picks one: a tap, or a short typed answer that names one side
+    ("yes, Ubud", "keep the beach"). Anything else is a new message, and the held one is dropped."""
+    said = message.strip(" .!").casefold()
+    if said in (held["keep"].casefold(), held["go"].casefold()):
+        return "keep" if said == held["keep"].casefold() else "go"
+    if len(said.split()) > 6:
+        return None
+    new = held["go"].removeprefix("Go with ").casefold()
+    keep = re.search(r"\b(keep|no|not|nope|never|don'?t)\b", said) or held["earlier"].casefold() in said or held["keep_words"].casefold() in said
+    go = new in said
+    return None if bool(keep) == go else "keep" if keep else "go"
+
+
+def _plain_words(text: str | None, limit: int) -> str:
+    """A model-written label shown on a button: one line, short, no markup."""
+    return re.sub(r"[\s<>*_`]+", " ", text or "").strip(" .")[:limit]
 
 
 def _progress(text: str) -> Event:
@@ -133,6 +155,17 @@ class TravelPlannerWorkflow:
             yield from self._answer(trip, message, "I haven't deleted anything yet.", _RESET_QUESTION, _RESET_ANSWERS)
             return
         not_reset = "I didn't start over. " if confirming else ""
+        pending = self.trips.conflict(trip)
+        state.pop("conflict", None)  # any other answer moves on: the held message is dropped
+        choice = pending and _choice(message, pending)
+        if choice == "keep":
+            trip.state = state
+            yield from self._answer(trip, message, f"Okay, I kept {pending['keep_words']}. Nothing changed.", None, [])
+            return
+        approved = pending if choice == "go" else None
+        typed = shown_message  # what the traveler sent this turn; on approval the held message is what's done
+        if approved:
+            shown_message = message = approved["message"]
 
         yield _progress("Thinking…")
         profile = self.trips.profile(trip)
@@ -143,11 +176,22 @@ class TravelPlannerWorkflow:
         if not_reset:
             # Or the model reads "ok" as a yes to the question above and talks, or edits, as if it had reset.
             history.append({"role": "assistant", "content": not_reset.strip()})
-        decision = TurnService.decide(
-            shown_message, history, profile, self._context(trip, itinerary, before),
-            itinerary,
-        )
+        if approved:  # the held decision, so the answer doesn't depend on a second reading
+            decision = TurnDecision.model_validate(approved["decision"])
+        else:
+            decision = TurnService.decide(
+                shown_message, history, profile, self._context(trip, itinerary, before),
+                itinerary,
+            )
         decision.note_changes = check_changes(decision.note_changes, shown_message, before, itinerary)
+        clash = decision.conflict and next(
+            (n for n in before.notes if n.id == decision.conflict.note and n.source == "stated"), None)
+        if clash and not approved and not (pending and pending["note"] == clash.id):
+            yield from self._ask_conflict(trip, state, shown_message, decision, clash.text)
+            return
+        if clash or approved:  # they chose the new ask (or said it again after being asked): forget the old wish
+            gone = clash.id if clash else approved["note"]
+            decision.note_changes.append(NoteChange(op="remove", id=gone, text="taken back", quote=""))
         if any(c.target != "trip" for c in decision.note_changes):
             decision.profile_updates.budget_level = None  # "a cheaper hotel" is not a cheaper trip
 
@@ -240,7 +284,7 @@ class TravelPlannerWorkflow:
         trip.state = {**state, "asked_fields": asked, "questions_streak": streak, "answer_options": plan.answer_options,
                       "no_plans": None, "last_asked": plan.asked_field, "questions": questions}
         trip.next_question = plan.next_question
-        self.trips.add_message(trip.id, "user", shown_message)
+        self.trips.add_message(trip.id, "user", typed)
         answer = self.trips.add_message(trip.id, "assistant", reply if not plan.next_question else f"{reply}\n\n{plan.next_question}")
         self.db.commit()
 
@@ -308,6 +352,18 @@ class TravelPlannerWorkflow:
         self.db.commit()
         yield _reply(text, question, chips)
         yield {"type": "done", "trip": self.trips.to_out(trip).model_dump(mode="json")}
+
+    def _ask_conflict(self, trip: TripModel, state: dict, message: str, decision: TurnDecision,
+                      earlier: str) -> Iterator[Event]:
+        """Holds the message and asks which wish wins, with one-tap answers. Nothing changes until they answer."""
+        c = decision.conflict
+        keep, new = _plain_words(c.keep, 40) or earlier, _plain_words(c.new, 40) or "the change"
+        now = c.now if c.now and c.now.casefold() in message.casefold() else message[:80]
+        chips = [f"Keep {keep}", f"Go with {new}"]
+        trip.state = {**state, "conflict": {
+            "message": message, "decision": decision.model_dump(mode="json"), "note": c.note,
+            "earlier": earlier, "now": now, "keep": chips[0], "go": chips[1], "keep_words": keep}}
+        yield from self._answer(trip, message, CONFLICT_TEXT, CONFLICT_QUESTION, chips)
 
     def _context(self, trip: TripModel, itinerary: Itinerary | None, personality: Personality) -> str:
         liked = [p.name for p in self.trips.feedback(trip.id, "liked")]

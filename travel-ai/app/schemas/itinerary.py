@@ -37,6 +37,7 @@ class City(BaseModel):
     nights: int = 0  # the days there, one fewer in the last city: the trip ends on its last day
     stay: Pick | None = None
     leg: Leg | None = None  # how to get here; None for the first city
+    unmet: str | None = None  # a stated wish about the kind of place this base doesn't fit (Ticket #87)
 
 
 def city_of(route: list[City], thing) -> str | None:

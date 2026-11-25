@@ -863,9 +863,12 @@ Rules:
             logger.exception("Couldn't review a draft")
             plan, warnings, checked = draft.itinerary, [], False
         moments = PersonalityService.moments(personality)
+        # Ticket #87: said plainly, not left for the critic to find
+        unmet = [f"I couldn't find a town with enough to do that fits “{c.unmet}”, so {c.name} stands in."
+                 for c in plan.route if c.unmet]
         return draft.model_copy(update={
             "itinerary": plan,
-            "warnings": warnings + ([] if checked else [UNREVIEWED]),
+            "warnings": unmet + warnings + ([] if checked else [UNREVIEWED]),
             "photo_name": next((a.photo_name for d in plan.days for a in d.activities if a.photo_name), None),
             "unplanned": [m for m in moments if m not in fulfilled(plan)],
         })

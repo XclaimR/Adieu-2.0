@@ -151,6 +151,8 @@ export type Trip = {
   skipped_place_ids: string[];
   next_question: string | null;
   answer_options: string[];
+  // Ticket #87: a held message that goes against an earlier wish, while its two answers are offered.
+  conflict: { earlier: string; now: string } | null;
   itinerary: Itinerary | null;
   messages: Message[];
 };
