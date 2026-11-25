@@ -55,3 +55,11 @@ def test_party_size_must_be_stated_or_implied(message, guess, kept):
     updates = ProfileUpdates(destination="Japan", party=Party.FRIENDS if "friends" in message else Party.COUPLE,
                              party_size=guess)
     assert ground_updates(updates, message).party_size == kept
+
+
+@pytest.mark.parametrize("message,party", [
+    ("Bali with my sister", Party.FAMILY), ("my brother and I want Japan", Party.FAMILY),
+    ("my mom recommended Bali", None), ("Bali, no kids", None),
+])
+def test_a_relative_coming_along_is_family(message, party):
+    assert ground_updates(ProfileUpdates(destination="Bali"), message).party == party

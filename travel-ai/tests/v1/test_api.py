@@ -547,3 +547,16 @@ def test_the_reply_shown_while_drafting_also_says_nothing_was_reset(client, auth
 
     assert len(replies) == 2  # while drafting, then once the plans exist
     assert all(text.startswith("I didn't start over.") for text in replies)
+
+
+@pytest.mark.parametrize("party", [None, Party.FAMILY])
+def test_with_my_sister_is_not_asked_who_is_coming(client, auth, fake_llm, party):
+    trip = new_trip(client, auth)
+    fake_llm.decisions.append(decision(destination="Bali", notes=[mood("relaxed", "a relaxed trip")], party=party,
+                                       origin="Delhi", return_to="Delhi"))
+
+    turn = say(client, auth, trip["id"], "Bali for 10 days with my sister, a relaxed trip. We want to stay in a "
+                                         "small beach town, from Delhi and back")
+
+    assert turn["trip"]["profile"]["party"] == "family"
+    assert turn["next_question"] != "Who's coming along?"
