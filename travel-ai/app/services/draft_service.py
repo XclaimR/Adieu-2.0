@@ -659,6 +659,7 @@ Rules:
             plan.days += [DayPlan(day_number=n, activities=[]) for n in range(len(plan.days) + 1, days + 1)]
             plan.sync_route()
         visits = dict(critique.visit_minutes)
+        ratings = dict(critique.ratings)
         issues = ItineraryCritiqueService.counted(plan, places, days, scope, visits) + critique.issues
 
         fixed = plan
@@ -671,6 +672,7 @@ Rules:
                     # chase each other, and every round is another 3-50 s.
                     again = ItineraryCritiqueService.critique(fixed, profile, personality, places, redo, request)
                     visits |= again.visit_minutes
+                    ratings |= again.ratings
                     if again.issues or len(ItineraryCritiqueService.counted(fixed, places, days, scope, visits)) > \
                             len(ItineraryCritiqueService.counted(plan, places, days, scope, visits)):
                         logger.warning("Repair undone, its re-check found: %s", [x.problem for x in again.issues])
@@ -690,6 +692,7 @@ Rules:
             fixed, places, days, scope and scope | changed, visits)]
         for stop in (a for d in fixed.days for a in d.activities):
             stop.minutes = visits.get(stop.place_id, stop.minutes)  # the critic's estimate is what the traveler sees
+            stop.energy, stop.cost = ratings.get(stop.place_id, (stop.energy, stop.cost))
         return fixed, list(dict.fromkeys(counted + unfixed)), checked
 
     @staticmethod

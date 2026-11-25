@@ -42,6 +42,8 @@ MISFIT = {"problem": "i2 is a sandwich shop, not a big night out", "where": ["[i
 def stop(id, place_id, when="morning", **kw):
     p = next(p for p in PLACES if p.place_id == place_id)
     kw.setdefault("minutes", 60)  # what the fake critic estimates, so a plan that passes comes back unchanged
+    kw.setdefault("energy", 0)
+    kw.setdefault("cost", 1)
     return Activity(id=id, name=p.name, category=p.category.value, time_of_day=when, place_id=place_id, **kw)
 
 

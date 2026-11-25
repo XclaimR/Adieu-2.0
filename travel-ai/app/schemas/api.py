@@ -2,7 +2,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
-from app.schemas.draft import Draft, NoPlans
+from app.schemas.draft import Draft, NoPlans, PlanScales
 from app.schemas.itinerary import Itinerary
 from app.schemas.personality import Personality
 from app.schemas.place import OptionSet
@@ -61,6 +61,8 @@ class TripOut(BaseModel):
     title: str
     profile: TripProfile
     personality: Personality
+    # The chosen plan (or, before one, only what they asked) on the six scales and the $ badge (Ticket #83).
+    scales: PlanScales | None = None
     destination_name: str | None
     panel: OptionSet | None
     drafts: list[Draft]

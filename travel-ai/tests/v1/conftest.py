@@ -63,6 +63,7 @@ class FakeLLM:
         self.fixes: list[dict] = []
         self.errors: dict[str, Exception] = {}
         self.minutes: dict[str, int] = {}  # visit minutes by item id on a first review; 60 otherwise
+        self.ratings: dict[str, dict] = {}  # {"energy", "cost"} by item id; calm and cheap otherwise
 
     def __call__(self, prompt, schema, history=None, system=None, model=None, timeout=None):
         self.prompts.append((schema.__name__, prompt))
@@ -73,7 +74,8 @@ class FakeLLM:
             minutes = {} if "Only these parts changed" in prompt else self.minutes
             fails = self.fails if isinstance(self.fails, dict) else self.fails.pop(0) if self.fails else {}
             return schema.model_validate({
-                name: {item: minutes.get(item, 60) for item in f.annotation.model_fields}
+                name: {item: {"minutes": minutes.get(item, 60), **self.ratings.get(item, {"energy": 0, "cost": 1})}
+                       for item in f.annotation.model_fields}
                 if name == "visit_minutes" else fails.get(name, {"passed": True})
                 for name, f in schema.model_fields.items()})
         if schema.__name__ == "PlanFixes":

@@ -8,6 +8,7 @@ from app.schemas.personality import Note, Personality
 from app.schemas.itinerary import Itinerary
 from app.schemas.place import OptionSet, Pick
 from app.schemas.trip_profile import TripProfile
+from app.services import plan_scales
 from app.services.personality_service import PersonalityService
 
 
@@ -125,20 +126,25 @@ class TripRepository:
         return Pick.model_validate(row.pick) if row else None
 
     def to_out(self, trip: TripModel) -> TripOut:
+        personality = self.personality(trip)
+        itinerary = self.itinerary(trip)
+        drafts = [d.model_copy(update={"scales": plan_scales.read(d.itinerary, personality)}) for d in self.drafts(trip)]
+        plan_scales.mark_closest([d.scales for d in drafts])
         return TripOut(
             id=trip.id,
             title=trip.title,
             profile=self.profile(trip),
-            personality=PersonalityService.card(self.personality(trip)),
+            personality=PersonalityService.card(personality),
+            scales=plan_scales.read(itinerary, personality),
             destination_name=(trip.destination_area or {}).get("name"),
             panel=self.panel(trip),
-            drafts=self.drafts(trip),
+            drafts=drafts,
             no_plans=(trip.state or {}).get("no_plans"),
             liked_place_ids=[p.place_id for p in self.feedback(trip.id, "liked")],
             skipped_place_ids=[p.place_id for p in self.feedback(trip.id, "skipped")],
             next_question=trip.next_question,
             answer_options=(trip.state or {}).get("answer_options", []),
-            itinerary=self.itinerary(trip),
+            itinerary=itinerary,
             messages=[
                 MessageOut(role=m.role, content=m.content, created_at=m.created_at)
                 for m in self.messages(trip.id)
