@@ -8,8 +8,10 @@ from app.schemas.trip_profile import BudgetLevel, Party, TripProfile
 # name: (card label, left pole, right pole, middle) in plain words.
 SCALES: dict[str, tuple[str, str, str, str]] = {
     "pace": ("Pace", "Slow pace", "Packed days", "Steady pace"),
-    # Two budgets (Ticket #21): what to spend on experiences, and on stays (the key stays "comfort" for saved trips).
-    "money": ("Experiences", "Cheap experiences", "Splurge on experiences", "Some paid experiences"),
+    # Ticket #83: staying in (hotel or resort time) vs out doing unique experiences.
+    "experiences": ("Experiences", "Hotel time", "Out exploring", "Some of each"),
+    # What to spend on activities (Ticket #21). Not a card scale since Ticket #83: it is the $ badge's ghost.
+    "money": ("Spending", "Cheap experiences", "Splurge on experiences", "Some paid experiences"),
     "energy": ("Energy", "Chill evenings", "Nightlife", "Some nights out"),
     "crowds": ("Crowds", "Avoids crowds", "Wants the icons", "Mix of icons and hidden gems"),
     "food": ("Food", "Food is just fuel", "Food is the point", "Good food matters"),
@@ -24,7 +26,8 @@ CHAT_CONFIDENCE = 0.7
 KEPT = {"said", "asked", "swiped"}
 # pole -> (scale, direction)
 POLES = {
-    "slow": ("pace", -1), "packed": ("pace", 1), "cheap_experiences": ("money", -1), "splurge_experiences": ("money", 1),
+    "slow": ("pace", -1), "packed": ("pace", 1), "hotel_time": ("experiences", -1), "out_exploring": ("experiences", 1),
+    "cheap_experiences": ("money", -1), "splurge_experiences": ("money", 1),
     "chill": ("energy", -1), "nightlife": ("energy", 1), "hidden_gems": ("crowds", -1), "icons": ("crowds", 1),
     "food_as_fuel": ("food", -1), "food_focus": ("food", 1), "backpacker": ("comfort", -1), "luxury": ("comfort", 1),
 }

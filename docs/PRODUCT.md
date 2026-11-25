@@ -10,11 +10,16 @@ Agreed 2026-11-21. Adieu is a one-stop travel planner that understands the trave
   | Scale | From ↔ to |
   |---|---|
   | Pace | slow ↔ packed |
-  | Experiences | cheap ↔ splurge |
+  | Experiences | hotel or resort time ↔ out doing unique experiences |
   | Energy | chill ↔ nightlife |
   | Crowds | hidden gems ↔ the icons |
   | Food | fuel ↔ the reason for the trip |
   | Comfort | cheap ↔ splurge stays |
+
+- Money is a separate **$ to $$$$$** badge for the whole trip (stay tier, paid activities, fine dining).
+- Once a plan is picked, each scale shows **that plan's marker next to what the traveler asked** (a ghost marker,
+  only from what they stated). Draft cards show a one-line summary ("Packed · Icons · $$$"), all scales on hover,
+  focus or tap, and "Closest to what you asked" once 3 or more scales are stated. A plan never changes the wishes.
 
 - Words like "fun" are never mapped to a scale automatically. The app **asks**, adaptively, the question that removes the most uncertainty for this trip, and stops when confident (usually 4–6 questions, at most 8). "Show me plans" is always one tap away, and it keeps learning with questions about the plan itself.
 - Questions are mostly concrete scenarios with tap answers, mixed with photo this-or-that. Free text is always accepted, with a "something else…" option.

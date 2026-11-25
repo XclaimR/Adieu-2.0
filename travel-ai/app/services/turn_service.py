@@ -60,7 +60,8 @@ Return:
   mood: set it on the point that says what kind of trip this is (an activity trip counts). Never from a place name
   alone or vague praise like "fun" or "nice" (mood null), and never for something they want to avoid.
   toward: null for most points. Only when a whole-trip point itself says that pole: slow/packed is the pace of
-  the days, chill/nightlife is the evenings, hidden_gems/icons is crowds, food_focus/food_as_fuel is how much food
+  the days, hotel_time/out_exploring is time at the hotel or resort vs out doing unique experiences,
+  chill/nightlife is the evenings, hidden_gems/icons is crowds, food_focus/food_as_fuel is how much food
   matters, backpacker/luxury is how much to spend on stays, cheap_experiences/splurge_experiences is how much to
   spend on activities and experiences ("a cheap hotel, but I'll pay for scuba" is backpacker + splurge_experiences). An activity
   (hiking, beach), avoiding a place, diet or group size says no pole.

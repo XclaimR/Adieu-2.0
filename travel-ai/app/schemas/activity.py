@@ -33,6 +33,9 @@ class Activity(BaseModel):
     for_note: str | None = None
     # How long the stop takes: the critic's estimate, else a default for its category.
     minutes: int | None = None
+    # The critic's ratings (Ticket #83): 0 calm, 1 lively, 2 nightlife; per person 0 free to 3 pricey. None: not rated.
+    energy: int | None = None
+    cost: int | None = None
 
     @model_validator(mode="after")
     def _default_minutes(self):
