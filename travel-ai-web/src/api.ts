@@ -66,6 +66,7 @@ export const api = {
   starterIdeas: () => request<StarterIdea[]>("GET", "/starter-ideas"),
   createTrip: () => request<Trip>("POST", "/trips", {}),
   trip: (id: string) => request<Trip>("GET", `/trips/${id}`),
+  removeNote: (id: string, noteId: string) => request<Trip>("DELETE", `/trips/${id}/notes/${encodeURIComponent(noteId)}`),
   chooseDraft: (id: string, draftId: string) => request<Trip>("POST", `/trips/${id}/drafts/${draftId}/choose`),
   pickAction: (id: string, placeId: string, action: PickAction) =>
     request<TripUpdate>("POST", `/trips/${id}/picks/${encodeURIComponent(placeId)}`, { action }),

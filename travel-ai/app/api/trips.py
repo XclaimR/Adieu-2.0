@@ -139,6 +139,16 @@ def pick_action(
     return TripUpdateResponse(trip=TripRepository(db).to_out(trip), options=options)
 
 
+@router.delete("/trips/{trip_id}/notes/{note_id}", response_model=TripOut)
+def remove_note(trip_id: str, note_id: str, user: UserModel = Depends(current_user), db: Session = Depends(get_db)):
+    trip = _trip_or_404(trip_id, user, db)
+    try:
+        TravelPlannerWorkflow(db).remove_note(trip, note_id)
+    except TripActionError as e:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(e))
+    return TripRepository(db).to_out(trip)
+
+
 @router.post("/trips/{trip_id}/itinerary/days/{day_number}/activities/{index}", response_model=TripUpdateResponse)
 def activity_action(
     trip_id: str,
