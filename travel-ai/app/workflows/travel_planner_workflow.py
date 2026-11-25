@@ -176,6 +176,8 @@ class TravelPlannerWorkflow:
         self.trips.save_personality(trip, personality)
 
         progressed = new_profile != profile or personality.notes != before.notes
+        if not (itinerary and itinerary.route):
+            decision.route_changes = []  # one city has no route to change; the plain edit reads the message
         plan = TurnService.plan(
             decision, new_profile,
             message=message,
@@ -230,6 +232,8 @@ class TravelPlannerWorkflow:
                     trip.profile = {**trip.profile, "duration_days": len(done.plan.days)}
                     self._keep_notes_attached(trip, personality, itinerary, done.plan, done.day_ids)
                 extras = [f"Worth a look: {w.rstrip('.')}." for w in done.warnings] + ([] if done.checked else [UNCHECKED])
+                if TurnService.to_change(decision):  # the route edit makes only the route changes
+                    extras.insert(0, "I only changed the route this time; ask me again for the other changes.")
                 reply = " ".join([not_reset.strip(), *done.said, *extras]).strip()
                 answer.content = reply + (f"\n\n{plan.next_question}" if plan.next_question else "")
                 yield _reply(reply, plan.next_question, plan.answer_options)  # replaces the one shown while we worked

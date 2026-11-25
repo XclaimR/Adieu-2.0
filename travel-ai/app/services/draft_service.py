@@ -494,7 +494,7 @@ Rules:
             fresh.extend((d, place) for d in made)
             return made
 
-        def add_city(name: str, k: int) -> City | None:
+        def add_city(name: str, k: int, at: int | None = None) -> City | None:
             town = find_town(library, name)
             if town is None:
                 failed.append(f"I couldn't add {name}: I don't have places there.")
@@ -503,7 +503,8 @@ Rules:
                 failed.append(f"{town['name']} is already on your route.")
                 return None
             city = City(name=town["name"], lat=town["lat"], lng=town["lng"])
-            plan.route.insert(insert_at(plan.route, town, last=k > 1), city)  # one day last would be 0 nights
+            # one day last would be 0 nights
+            plan.route.insert(insert_at(plan.route, town, last=k > 1) if at is None else at, city)
             by_city[city.name] = new_days(city.name, k)
             added.append(city.name)
             return city
@@ -523,9 +524,10 @@ Rules:
                     if not (town := find_town(library, change.city or "")) or town["name"] in by_city:
                         add_city(change.city or "", 1)  # says why it can't come
                         continue
+                    first = plan.route[0].name == leaving  # the new city is where the trip starts, as the old was
                     gone = by_city.pop(leaving)
                     plan.route = [c for c in plan.route if c.name != leaving]
-                    add_city(town["name"], len(gone))
+                    add_city(town["name"], len(gone), 0 if first else None)
                     said.append(f"{town['name']} replaces {leaving}.")
                     continue
                 # A removed city's days go to the city before it (the next one if it was first), to fill anew.

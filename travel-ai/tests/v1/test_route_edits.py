@@ -86,7 +86,7 @@ def _trip():
     return Itinerary(destination="Japan", route=route, days=days)
 
 
-def _edit(trip, *changes, **kw):
+def _edit(trip, *changes):
     service = DraftService(_Places(_places()))
     return service.edit_route(trip, list(changes), "edit", TripProfile(destination="Japan", duration_days=11),
                               None, set(), Personality())
@@ -175,7 +175,7 @@ def test_a_new_city_goes_where_it_adds_the_least_distance_never_before_the_start
     assert insert_at(route[:1], nara) == 1
 
 
-def test_a_plain_edit_never_empties_a_day(llm, monkeypatch):
+def test_a_plain_edit_never_empties_a_day(llm):
     llm.fill = False
     trip = _trip()
     gone = trip.days[3].activities[0].id
@@ -249,3 +249,43 @@ def test_swap_a_day_in_a_city_off_the_route_borrows_the_day(llm):
     done = _edit(_trip(), RouteChange(op="swap_day", city="Osaka", place="Universal Studios Japan"))
     assert len(done.plan.days) == 11 and "Universal Studios Japan" in _stops(done.plan, "Osaka")
     assert "Kyoto gave a day to Osaka." in done.said
+
+
+def test_replacing_the_first_city_starts_the_trip_in_the_new_one(llm):
+    done = _edit(_trip(), RouteChange(op="swap", city="Osaka", leaving="Kyoto"))
+    assert [c.name for c in done.plan.route][0] == "Osaka" and done.plan.route[0].leg is None
+    assert done.plan.route[1].leg is not None  # Osaka to Hiroshima is a new leg
+
+
+def _route_turn(client, auth, fake_llm, db_session, itinerary, decision, message):
+    from app.database.models import TripModel
+    from test_api import ready_trip, say
+    trip = ready_trip(client, auth, fake_llm)
+    row = db_session.get(TripModel, trip["id"])
+    row.itinerary = itinerary.model_dump(mode="json")
+    db_session.commit()
+    fake_llm.decisions.append(decision)
+    return say(client, auth, trip["id"], message)
+
+
+def test_a_one_city_trip_ignores_route_changes(client, auth, fake_llm, db_session, monkeypatch):
+    from app.schemas.turn import TurnAction, TurnDecision
+    monkeypatch.setattr(DraftService, "edit_route", lambda *a: pytest.fail("no route to change"))
+    lisbon = Itinerary(destination="Lisbon", days=[{"day_number": 1, "activities": [
+        Activity(name="Belem", category="do")]}])
+    turn = _route_turn(client, auth, fake_llm, db_session, lisbon, TurnDecision(
+        action=TurnAction.CHAT, reply="Nice.", route_changes=[RouteChange(op="add", city="Porto")]), "add Porto")
+    assert turn["reply"].startswith("Nice.") and not any(n == "PlanEdits" for n, _ in fake_llm.prompts)
+
+
+def test_a_route_edit_says_when_other_changes_in_the_message_wait(client, auth, fake_llm, db_session, monkeypatch):
+    from app.schemas.personality import NoteChange
+    from app.schemas.turn import TurnAction, TurnDecision
+    from app.services.draft_service import RouteEdit
+    monkeypatch.setattr(DraftService, "edit_route", lambda self, it, *a: RouteEdit(plan=it, said=["Your route is ..."]))
+    sushi = NoteChange(op="do", target="d2", text="a sushi place", quote="add a sushi place", then="change")
+    turn = _route_turn(client, auth, fake_llm, db_session, _trip(), TurnDecision(
+        action=TurnAction.EDIT_ITINERARY, reply="Done!", note_changes=[sushi],
+        route_changes=[RouteChange(op="swap", city="Osaka", leaving="Hiroshima")]),
+        "Swap Hiroshima for Osaka and add a sushi place on day 2")
+    assert "ask me again for the other changes" in turn["reply"]
