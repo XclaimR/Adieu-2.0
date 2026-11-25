@@ -512,7 +512,7 @@ Rules:
             return next((c for c in by_city if name and c.casefold() == name.casefold().strip()), None)
 
         for change in changes:
-            k = max(1, min(change.days or (1 if change.op == "add_day" else CITY_DAYS), MAX_DAYS))
+            k = max(1, min(change.days or (1 if change.op in ("add_day", "swap_day") else CITY_DAYS), MAX_DAYS))
             leaving = route_city(change.leaving)
             if change.op in ("swap", "remove"):
                 if leaving is None or len(by_city) < 2 and change.op == "remove":
@@ -535,10 +535,16 @@ Rules:
                 host = names[names.index(leaving) - 1] if names.index(leaving) else names[1]
                 by_city[host] += new_days(host, len(gone))
                 said.append(f"I took {leaving} off your route; its days are now in {host}.")
-            elif change.op == "add" or (change.op == "add_day" and route_city(change.city) is None and change.city):
+            elif change.op == "swap_day" and (host := route_city(change.city)
+                                              or (None if change.city else list(by_city)[-1])):
+                taken = by_city[host].pop()  # the city's last day: its stops give way to the place
+                by_city[host] += new_days(host, 1, change.place)
+                said.append(f"One of your days in {host} is now for {change.place or 'something new'}"
+                            + (", in place of its old stops." if taken.activities else "."))
+            elif change.op == "add" or (change.city and route_city(change.city) is None):  # a day in a new city
                 if not (city := add_city(change.city or "", k)):
                     continue
-                if change.op == "add_day":
+                if change.op != "add":
                     fresh[-k:] = [(d, change.place) for d, _ in fresh[-k:]]
                 if change.longer or change.op == "add_day":
                     longer += k

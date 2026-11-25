@@ -230,3 +230,22 @@ def test_skip_hiroshima_and_add_osaka_in_one_message(llm):
     done = _edit(_trip(), RouteChange(op="remove", leaving="Hiroshima"), RouteChange(op="add", city="Osaka"))
     assert [c.name for c in done.plan.route] == ["Kyoto", "Osaka", "Tokyo", "Sapporo"]
     assert len(done.plan.days) == 11 and all(d.activities for d in done.plan.days)
+
+
+def test_swap_a_day_for_universal_studios_keeps_the_trip_length(llm):
+    trip = _edit(_trip(), RouteChange(op="swap", city="Osaka", leaving="Hiroshima")).plan
+    done = _edit(trip, RouteChange(op="swap_day", city="Osaka", place="Universal Studios Japan"))
+    plan = done.plan
+    assert len(plan.days) == 11 and plan.route[1].days == 3
+    last = [d for d in plan.days if d.city == "Osaka"][-1]
+    assert "Universal Studios Japan" in [a.name for a in last.activities]
+    assert [d.activities for d in plan.days if d.city == "Osaka"][:2] == [
+        d.activities for d in trip.days if d.city == "Osaka"][:2]  # the other Osaka days keep their stops
+    assert done.said[0] == "Your route is now Kyoto → Osaka → Tokyo → Sapporo."  # no "now N days"
+    assert "One of your days in Osaka is now for Universal Studios Japan, in place of its old stops." in done.said
+
+
+def test_swap_a_day_in_a_city_off_the_route_borrows_the_day(llm):
+    done = _edit(_trip(), RouteChange(op="swap_day", city="Osaka", place="Universal Studios Japan"))
+    assert len(done.plan.days) == 11 and "Universal Studios Japan" in _stops(done.plan, "Osaka")
+    assert "Kyoto gave a day to Osaka." in done.said

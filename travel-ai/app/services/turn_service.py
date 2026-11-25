@@ -78,6 +78,7 @@ Return:
   cities, or add days. swap = a new city takes the place of one on the route; remove = drop a city;
   add = a new city as well (longer true only if they want the trip longer); add_day = more days in one city,
   with place = what the day is for and city = the city that place is in, even if it isn't on the route.
+  swap_day = the same, but instead of one of the trip's days ("swap a day for X"): the trip keeps its length.
   Use the cities' usual English names. Don't also add note_changes for the stops of a city that is leaving.
   chat           - a general question or comment that needs nothing else
 - reply: 1-2 short sentences reacting to the user. No questions in the reply. Same language as the user. Don't promise suggestions or plans ("let me suggest…") and never say a change is done — the app makes it afterwards.
@@ -111,6 +112,8 @@ Examples (non-null parts only):
 - "replace Hiroshima with Osaka" -> action edit_itinerary, route_changes [{op swap, city "Osaka", leaving "Hiroshima"}]
 - "add a day for Universal Studios" -> action edit_itinerary,
   route_changes [{op add_day, city "Osaka", place "Universal Studios Japan"}]
+- "swap a day with Universal Studios" -> action edit_itinerary,
+  route_changes [{op swap_day, city "Osaka", place "Universal Studios Japan"}]
 - "make day 2 more relaxed" -> action edit_itinerary, edit_request "make day 2 more relaxed",
   note add d2 want "more relaxed" category "pace" then change
 """

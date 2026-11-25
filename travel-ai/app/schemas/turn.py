@@ -30,11 +30,12 @@ class OptionsRequest(BaseModel):
 
 class RouteChange(BaseModel):
     """A change to the cities of a multi-city trip, or its length. Code makes it; the model only names it."""
-    op: Literal["swap", "add", "remove", "add_day"]
+    op: Literal["swap", "add", "remove", "add_day", "swap_day"]
     city: str | None = Field(default=None, description="swap/add: the city coming in; add_day: the city the day is "
                                                        "in (where the place is)")
     leaving: str | None = Field(default=None, description="swap/remove: the route city going away")
-    place: str | None = Field(default=None, description="add_day: what the day is for, e.g. 'Universal Studios Japan'")
+    place: str | None = Field(default=None, description="add_day/swap_day: what the day is for, "
+                                                                     "e.g. 'Universal Studios Japan'")
     days: int | None = Field(default=None, description="add/add_day: how many days, if they said")
     longer: bool = Field(default=False, description="add: true if the trip gets longer, false if other cities give "
                                                     "up days")
