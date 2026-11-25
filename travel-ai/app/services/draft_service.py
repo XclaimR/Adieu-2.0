@@ -21,7 +21,8 @@ from app.services.itinerary_critique_service import (MOVING_DAY_STOPS, REVIEW_TI
 from app.services.llm_client import LLMClient
 from app.services.personality_service import PersonalityService
 from app.services.places_service import FACTS_RULE, PlacesService, tier_rank, traveler_fit, unclaimed
-from app.services.route_service import RouteService
+from app.schemas.turn import RouteChange
+from app.services.route_service import RouteService, checked_leg, find_town, insert_at, rough_leg
 
 logger = logging.getLogger(__name__)
 
@@ -260,6 +261,21 @@ def _changed(before: Itinerary, after: Itinerary) -> set[str]:
 
 
 UNREVIEWED = "I couldn't double-check this plan."
+CITY_DAYS = 2  # a city added without a number of days: one night, and the day after
+
+
+def _span(days: list[DayPlan]) -> str:
+    first, last = days[0].day_number, days[-1].day_number
+    return f"day {first}" if first == last else f"days {first}–{last}"
+
+
+class RouteEdit(BaseModel):
+    """What a route edit did, for the reply: every sentence is about the saved plan."""
+    plan: Itinerary
+    said: list[str] = []
+    warnings: list[str] = []
+    checked: bool = True
+    day_ids: dict[str, str] = {}  # old day id -> new day id, for the notes on days that moved
 
 
 class DraftService:
@@ -441,6 +457,10 @@ Rules:
 """
         result = LLMClient.generate_structured(prompt, schema, model=settings.LLM_MODEL_PLAN)
         self._apply_edits(plan, result.edits, places, editable, add_to, move_to)
+        was = {d.id: d for d in itinerary.days}
+        for day in plan.days:  # an edit never leaves a day with nothing to do: it keeps its old stops
+            if not day.activities and (old := was.get(day.id)) and old.activities and old.city == day.city:
+                day.activities = [a.model_copy() for a in old.activities]
 
         # Only what this edit changed is reviewed; the rest of the plan is the traveler's.
         new_ids = {d.id for d in new_days}
@@ -456,6 +476,143 @@ Rules:
         plan.days = [d for d in plan.days if d.activities or d.id not in new_ids]
         plan.sync_route()
         return plan, warnings, checked
+
+    def edit_route(self, itinerary: Itinerary, changes: list[RouteChange], request: str, profile: TripProfile,
+                   viewport: dict | None, exclude_ids: set[str], personality: Personality) -> RouteEdit:
+        """Swap, add or remove cities, or add days, then fill only the new days with the usual edit.
+        Other cities keep their stops. All or nothing: if a new day can't be filled, the plan stays as it was."""
+        area = self.places.area_for(profile.destination, viewport)
+        library = self.places.library(area) if area else {"hubs": []}
+        plan = itinerary.model_copy(deep=True)
+        old_ids = {id(d): d.id for d in plan.days}
+        by_city = {c.name: [d for d in plan.days if d.city == c.name] for c in plan.route}
+        fresh: list[tuple[DayPlan, str | None]] = []  # new days, and the place each is for
+        said, failed, longer, added = [], [], 0, []
+
+        def new_days(city: str, k: int, place: str | None = None) -> list[DayPlan]:
+            made = [DayPlan(day_number=0, city=city, activities=[]) for _ in range(k)]
+            fresh.extend((d, place) for d in made)
+            return made
+
+        def add_city(name: str, k: int) -> City | None:
+            town = find_town(library, name)
+            if town is None:
+                failed.append(f"I couldn't add {name}: I don't have places there.")
+                return None
+            if town["name"] in by_city:
+                failed.append(f"{town['name']} is already on your route.")
+                return None
+            city = City(name=town["name"], lat=town["lat"], lng=town["lng"])
+            plan.route.insert(insert_at(plan.route, town, last=k > 1), city)  # one day last would be 0 nights
+            by_city[city.name] = new_days(city.name, k)
+            added.append(city.name)
+            return city
+
+        def route_city(name: str | None) -> str | None:
+            return next((c for c in by_city if name and c.casefold() == name.casefold().strip()), None)
+
+        for change in changes:
+            k = max(1, min(change.days or (1 if change.op == "add_day" else CITY_DAYS), MAX_DAYS))
+            leaving = route_city(change.leaving)
+            if change.op in ("swap", "remove"):
+                if leaving is None or len(by_city) < 2 and change.op == "remove":
+                    failed.append(f"I couldn't remove {change.leaving or 'that city'}: "
+                                  + ("it isn't on your route." if leaving is None else "it's your only city."))
+                    continue
+                if change.op == "swap" and route_city(change.city) is None:
+                    if not (town := find_town(library, change.city or "")) or town["name"] in by_city:
+                        add_city(change.city or "", 1)  # says why it can't come
+                        continue
+                    gone = by_city.pop(leaving)
+                    plan.route = [c for c in plan.route if c.name != leaving]
+                    add_city(town["name"], len(gone))
+                    said.append(f"{town['name']} replaces {leaving}.")
+                    continue
+                # A removed city's days go to the city before it (the next one if it was first), to fill anew.
+                names = list(by_city)
+                gone = by_city.pop(leaving)
+                plan.route = [c for c in plan.route if c.name != leaving]
+                host = names[names.index(leaving) - 1] if names.index(leaving) else names[1]
+                by_city[host] += new_days(host, len(gone))
+                said.append(f"I took {leaving} off your route; its days are now in {host}.")
+            elif change.op == "add" or (change.op == "add_day" and route_city(change.city) is None and change.city):
+                if not (city := add_city(change.city or "", k)):
+                    continue
+                if change.op == "add_day":
+                    fresh[-k:] = [(d, change.place) for d, _ in fresh[-k:]]
+                if change.longer or change.op == "add_day":
+                    longer += k
+                    said.append(f"I added {city.name} for {k} {'day' if k == 1 else 'days'}.")
+                    continue
+                # Days come from the cities with the most, from their end; a city keeps two.
+                for _ in range(k):
+                    giver = max((c for c in by_city if c != city.name), key=lambda c: len(by_city[c]))
+                    if len(by_city[giver]) <= CITY_DAYS:
+                        longer += 1
+                        continue
+                    by_city[giver].pop()
+                    said.append(f"{giver} gave a day to {city.name}.")
+                said.append(f"I added {city.name} for {k} {'day' if k == 1 else 'days'}.")
+            else:  # add_day in a route city, or the last one when none was named
+                host = route_city(change.city) or list(by_city)[-1]
+                by_city[host] += new_days(host, k, change.place)
+                longer += k
+                said.append(f"I added {k} {'day' if k == 1 else 'days'} in {host}"
+                            + (f" for {change.place}." if change.place else "."))
+
+        if not fresh:
+            return RouteEdit(plan=itinerary, said=failed or ["I left your route as it is."])
+        plan.days = [d for c in plan.route for d in by_city.get(c.name, [])]
+        if len(plan.days) > MAX_DAYS:
+            return RouteEdit(plan=itinerary, said=[f"I can't plan more than {MAX_DAYS} days, so I left your "
+                                                   "route as it is."] + failed)
+        for number, day in enumerate(plan.days, 1):
+            day.day_number = number
+        fresh = [(d, p) for d, p in fresh if d.day_number]  # a new day a later change took back isn't in the plan
+        before = {c.name: p.name for p, c in zip(itinerary.route, itinerary.route[1:])}
+        plan.sync_route()
+        self._legs(plan, before, area)
+        for city in plan.route:
+            if city.name in added:
+                city.stay = self._stay(plan, city.name, profile, viewport, personality)
+
+        # The usual edit fills the new days, and only them: each is a change it must make.
+        asks = [NoteChange(op="do", target=d.id, text=f"plan this day in {d.city}" + (f" around {p}" if p else ""),
+                           quote=request, then="change", search=p) for d, p in fresh]
+        sized = profile.model_copy(update={"duration_days": len(plan.days)})
+        filled, warnings, checked = self.edit(plan, asks, request, sized, viewport, exclude_ids, personality)
+        new_ids = {d.id for d, _ in fresh}
+        empty = [d for d in filled.days if d.id in new_ids and not d.activities]
+        if empty or len(filled.days) != len(plan.days):
+            return RouteEdit(plan=itinerary, said=[
+                f"I couldn't find enough to do for {_span(empty or filled.days[-1:])} in "
+                f"{(empty or filled.days[-1:])[0].city}, so I left your route as it is."] + failed)
+        for d, place in fresh:
+            day = next(x for x in filled.days if x.id == d.id)
+            if place and not any(_same(_norm(place), _norm(a.name)) for a in day.activities):
+                failed.append(f"I couldn't find {place} in the places I know, so {_span([day])} has other stops.")
+        route = " → ".join(c.name for c in filled.route)
+        length = f", now {len(filled.days)} days" if longer else ""
+        said = [f"Your route is now {route}{length}."] + said + failed
+        ids = {old_ids[id(d)]: d.id for d in plan.days if id(d) in old_ids}
+        return RouteEdit(plan=filled, said=said, warnings=warnings, checked=checked, day_ids=ids)
+
+    def _legs(self, plan: Itinerary, before: dict[str, str], area: dict | None) -> None:
+        """A new leg wherever a city now comes after another one than before."""
+        plan.route[0].leg = None
+        for prev, city in zip(plan.route, plan.route[1:]):
+            if before.get(city.name) != prev.name or city.leg is None:
+                city.leg = checked_leg(rough_leg(prev, city, (area or {}).get("code")), prev, city)
+
+    def _stay(self, plan: Itinerary, city: str, profile: TripProfile, viewport: dict | None,
+              personality: Personality) -> Pick | None:
+        """A new city's stay: the best-ranked one there in the trip's budget, as a draft would choose."""
+        found = self.places.candidates(profile.destination, PickCategory.STAY, profile, viewport,
+                                       query=f"near {city}", personality=personality, limit=4)
+        if profile.budget_level:
+            found = [c for c in found if tier_rank(c.tier) <= tier_rank(profile.budget_level.value)] or found
+        stay = next((p for p in found if city_of(plan.route, p) == city), None)
+        return Pick(**stay.model_dump()) if stay else None
 
     def review(self, draft: Draft, places: list[PlaceCandidate], profile: TripProfile,
                personality: Personality | None = None) -> Draft:
@@ -621,6 +778,7 @@ Rules:
         # "Similar but cheaper" must not inherit the trip's "luxury" search hint.
         neutral = profile.model_copy(update={"budget_level": None})
         found: list[PlaceCandidate] = []
+        named: set[str] = set()  # places the traveler asked for by name
         for change in changes:
             if not change.search:
                 continue
@@ -629,8 +787,10 @@ Rules:
             category = (PickCategory.STAY if change.target in stays or change.category == "stay" else
                         PickCategory.EAT if change.category in ("eat", "diet") else category or PickCategory.DO)
             for where in near:
-                found += self.places.candidates(profile.destination, category, neutral, viewport,
-                                                change.search + where, personality, limit=limit)
+                hits = self.places.candidates(profile.destination, category, neutral, viewport,
+                                              change.search + where, personality, limit=limit)
+                named |= {p.place_id for p in hits if _same(_norm(change.search), _norm(p.name))}
+                found += hits
         for category in [c for c in PickCategory if c in wanted]:
             for where in near:
                 found += self.places.candidates(profile.destination, category, neutral, viewport,
@@ -638,6 +798,12 @@ Rules:
         used = {a.place_id for d in plan.days for a in d.activities} | exclude_ids
         used |= {stay.place_id for _, stay, _ in plan.stay_slots() if stay}
         if plan.route:
+            # shortcut: a place asked for by name that the guide lists in a city without coordinates (Universal
+            # Studios Japan) sits at that city's centre, so travel times to it are rough; fine until guides geocode.
+            centre = {c.name.casefold(): (c.lat, c.lng) for c in plan.route if c.name in cities}
+            found = [p.model_copy(update=dict(zip(("lat", "lng"), centre[town])))
+                     if p.lat is None and p.place_id in named and (town := (p.address or "").split(",")[-1].strip()
+                                                                    .casefold()) in centre else p for p in found]
             found = [p for p in found if city_of(plan.route, p) in cities]
         fresh = list({p.place_id: p for p in found if p.place_id not in used}.values())
         return {f"c{i}": p for i, p in enumerate(fresh)}

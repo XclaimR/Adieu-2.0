@@ -74,6 +74,11 @@ Return:
                    fill options_request {kind, query}
   offer_drafts   - you know enough (destination, mood, who's going) or the user wants you to decide
   edit_itinerary - an itinerary exists and the user wants to change it; put the change in edit_request
+- route_changes: only when the trip has several cities (days say "in <city>") and they want to change which
+  cities, or add days. swap = a new city takes the place of one on the route; remove = drop a city;
+  add = a new city as well (longer true only if they want the trip longer); add_day = more days in one city,
+  with place = what the day is for and city = the city that place is in, even if it isn't on the route.
+  Use the cities' usual English names. Don't also add note_changes for the stops of a city that is leaving.
   chat           - a general question or comment that needs nothing else
 - reply: 1-2 short sentences reacting to the user. No questions in the reply. Same language as the user. Don't promise suggestions or plans ("let me suggest…") and never say a change is done — the app makes it afterwards.
 - next_question: ONE short question that matters most now, or null. Never ask what's already known.
@@ -103,6 +108,9 @@ Examples (non-null parts only):
 - "actually the beach is fine" -> action chat, note remove <id of the beach note> then none
 - "hmm not sure, you decide" -> user_stuck true
 - "show me cafés near Alfama" -> action show_options, options_request {kind "eat", query "cafés near Alfama"}
+- "replace Hiroshima with Osaka" -> action edit_itinerary, route_changes [{op swap, city "Osaka", leaving "Hiroshima"}]
+- "add a day for Universal Studios" -> action edit_itinerary,
+  route_changes [{op add_day, city "Osaka", place "Universal Studios Japan"}]
 - "make day 2 more relaxed" -> action edit_itinerary, edit_request "make day 2 more relaxed",
   note add d2 want "more relaxed" category "pace" then change
 """
@@ -226,7 +234,7 @@ Latest user message:
             # Refining: every turn ends with one change question.
             q, chips = (q, chips) if q else CHANGE_QUESTION
             # An edit with no entries ("add a day") works on the whole trip; only taking a note back edits nothing.
-            if changing or (decision.action == TurnAction.EDIT_ITINERARY and decision.edit_request
+            if changing or decision.route_changes or (decision.action == TurnAction.EDIT_ITINERARY and decision.edit_request
                             and not decision.note_changes):
                 return TurnPlan(TurnAction.EDIT_ITINERARY, q, chips)
             if decision.action == TurnAction.SHOW_OPTIONS and request:
