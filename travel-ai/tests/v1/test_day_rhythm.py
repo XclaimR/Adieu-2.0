@@ -195,3 +195,61 @@ def test_rest_and_day_trip_days_are_named_by_code_and_a_day_trips_town_is_allowe
     assert [(d.theme, [a.name for a in d.activities]) for d in days] == [
         ("Gold", ["Kinkaku-ji"]), ("Day trip to Nara", ["Tōdai-ji"]), ("Rest day", [])]
     assert "Tōdai-ji" in pool.listing().split("Nara, a day trip from Kyoto:")[1]
+
+
+# ---------- review fixes ----------
+
+def test_a_wikidata_outage_marks_the_library_partial_so_it_is_retried_soon(monkeypatch):
+    from app.services import open_data, overture, place_library
+    item = {"id": "wv-1", "name": "Kinkaku-ji", "alt": "", "category": "do", "kind": "Sight", "text": "Gold.",
+            "lat": 35.04, "lng": 135.73, "area": "Kyoto", "town": "Kyoto", "guide": "Kyoto", "tier": None,
+            "wikidata": "Q1", "tip": None, "image": None}
+    monkeypatch.setattr(wikivoyage, "load", lambda area: {"items": [dict(item, id=f"wv-{i}", name=f"Sight {i}")
+                                                                    for i in range(10)], "hubs": []})
+    monkeypatch.setattr(overture, "load", lambda *a: [])
+
+    def down(qids):
+        raise open_data.OpenDataError("wikidata down")
+    monkeypatch.setattr(wikivoyage, "fame", down)
+    library = place_library.build({"name": "Kyoto"}, lambda: {"release": "r", "files": []})
+    assert "wikidata" in library["partial"] and {p["fame"] for p in library["places"]} == {0}
+
+
+def test_a_rest_day_the_traveler_filled_is_renamed_not_faulted(monkeypatch):
+    from app.schemas.itinerary_critique import ItineraryCritique
+    monkeypatch.setattr(ItineraryCritiqueService, "critique", staticmethod(lambda *a, **k: ItineraryCritique()))
+    museum = place("m", "Osaka Science Museum", address="Nakanoshima, Osaka")
+    it = plan(("Rest day", [stop("Osaka Science Museum", place_id="m"), stop("Lunch", "eat", "morning")], None))
+    fixed, warnings, _ = DraftService(None)._check_and_fix(it, [museum], TripProfile(destination="Osaka"), None,
+                                                           scope={it.days[0].activities[0].id})
+    assert fixed.days[0].theme == "Osaka Science Museum and Nakanoshima" and warnings == []
+
+
+def test_a_museum_with_gardens_in_its_description_is_no_rest_day_place():
+    gardens = place("n", "Nijō Castle", type_label="Sight", summary="Fine gardens and old halls.")
+    assert not day_rhythm.lingers(stop("Nijō Castle", place_id="n"), gardens)
+    assert day_rhythm.lingers(stop("Shinjuku Gyoen National Garden"), None)
+    assert not day_rhythm.lingers(stop("Liverpool Street parking"), None)
+
+
+def test_a_wish_exempts_only_its_own_dish():
+    it = plan(("Hanoi", [stop("Pho 10", "eat", "afternoon", description="pho"), stop("Pho Thin", "eat", "evening",
+                                                                                   description="pho")], None))
+    assert day_rhythm.repeats(it, {}, "photography spots")  # "pho" is not inside "photography"
+    assert not day_rhythm.repeats(it, {}, "pho every day")
+
+
+def test_day_trips_count_a_middle_citys_days_as_its_nights(monkeypatch):
+    """The live bug: nights aren't set while drafting, so Kyoto's 3 days looked like 0 nights and Nara was lost."""
+    kyoto = City(name="Kyoto", lat=35.01, lng=135.77, days=3)
+    osaka = City(name="Osaka", lat=34.69, lng=135.50, days=2)
+    famous = {"Kyoto": [place("k", "Kinkaku-ji", town="Kyoto", lat=35.039, lng=135.729, fame=58),
+                        place("t", "Tōdai-ji", town="Nara", lat=34.689, lng=135.84, fame=44)],
+              "Osaka": [place("t", "Tōdai-ji", town="Nara", lat=34.689, lng=135.84, fame=44)]}
+
+    class Places:
+        def famous(self, destination, viewport, near):
+            return famous["Kyoto" if near == (kyoto.lat, kyoto.lng) else "Osaka"]
+    must, trips = DraftService(Places())._must_sees(TripProfile(destination="Japan", duration_days=5), None, set(),
+                                                    [kyoto, osaka])
+    assert trips == {"Kyoto": "Nara"} and {p.name for p in must} == {"Kinkaku-ji", "Tōdai-ji"}

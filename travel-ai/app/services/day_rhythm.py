@@ -16,9 +16,10 @@ PACE = {1: (3, 3.5), 2: (3, 5), 3: (4, 7), 4: (4, None), 5: (5, None)}
 REST_STOPS = 2  # calm places on a rest day, besides lunch and dinner
 # Where a rest day may go: places to linger. The critic's calm rating proved too noisy for this (live, 2026-11-25:
 # a science museum rated calm, a snorkelling bay lively), so the kind of place decides.
-LINGER = re.compile(r"beach|bay|cove|coral|reef|snorkel|spa\b|massage|onsen|sent[oō]|bath|hot spring|health resort|"
-                    r"wellness|yoga|garden|park|grove|lake|pond|river|waterfront|promenade|island|cafe|café|tea house|"
-                    r"teahouse|pool|meadow|forest", re.I)
+# Name and type only: a guide's description mentions gardens at castles and museums too.
+LINGER = re.compile(r"\b(beach(es)?|bay|cove|coral|reef|snorkel\w*|spa|massage|onsen|sent[oō]|baths?|hot springs?|"
+                    r"health resort|wellness|yoga|gardens?|park|grove|lake|pond|river|waterfront|promenade|island|"
+                    r"caf[eé]|tea ?house|pool|meadow|forest)\b", re.I)
 REST_SEARCH = "spa garden park beach onsen lake"
 DAY_TRIP_NIGHTS = 3  # a city needs this many nights before one of its days goes elsewhere
 DAY_TRIP_KM = 15  # a must-see this far from the city's centre is in another town: Nara from Kyoto
@@ -123,6 +124,11 @@ def text_of(stop: Activity, place: PlaceCandidate | None) -> str:
     return " ".join(filter(None, [stop.name, stop.description, place and place.type_label, place and place.summary]))
 
 
+def lingers(stop: Activity, place: PlaceCandidate | None) -> bool:
+    """A place to spend a rest day at: a beach, spa, garden, park or café, by its name or type."""
+    return bool(LINGER.search(" ".join(filter(None, [stop.name, place and place.type_label]))))
+
+
 def kind_of(stop: Activity, place: PlaceCandidate | None) -> str | None:
     """The dish (for a meal) or the kind of sight, or None when nothing says."""
     text = text_of(stop, place)
@@ -142,7 +148,7 @@ def repeats(plan: Itinerary, known: dict[str, PlaceCandidate], wants: str, days:
         bad: dict[str, list[Activity]] = {}
         for stop in day.activities:
             kind = kind_of(stop, known.get(stop.place_id))
-            if not kind or kind in asked:
+            if not kind or re.search(rf"\b{re.escape(kind)}\b", asked):
                 continue
             if stop.category == "eat":
                 if today.get(f"eat:{kind}"):

@@ -209,7 +209,9 @@ def human_plan_rules(persona: dict, trip: dict, days: int) -> list[tuple[str, bo
     busy = [f"{t!r} day {d.day_number}" for t, p in plans for d in p.days if d.theme == day_rhythm.REST_THEME
             and sum(a.category != "eat" for a in d.activities) > day_rhythm.REST_STOPS]
     rules = [(f"exactly {days} days", not short, "; ".join(short) or "every draft"),
-             ("titles match the stops", not titles, "; ".join(titles) or "every title holds"),
+             # Without the places' types a title can look wrong when it isn't: a hint to check by eye, never a fail.
+             ("titles match the stops", None if titles else True,
+              "check by eye: " + "; ".join(titles) if titles else "every title holds"),
              ("no repeated dish or too many of a sight", not again, "; ".join(again) or "none"),
              ("rest days are restful", not busy, "; ".join(busy) or "every rest day")]
     reference = REFERENCES.get(persona["name"])

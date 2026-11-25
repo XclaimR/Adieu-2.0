@@ -143,8 +143,9 @@ only on a clear yes while that is the current question. A no brings back the que
      shows it as a line under its note. Pace sets stops a day (slow 3 .. packed 5; drafting asks for at most 4,
      the review adds a fifth) and rest days (`day_rhythm.roles`: slow every 3-4 days, middle once a week on 7+
      days, none when packed), named "Rest day" by code: at most 2 places to linger (a beach, spa, garden, park or
-     café by name, type or description; the critic's calm rating proved too noisy), meals aside, no night out. Each
-     city's pool gets 3 such places. Code also flags a dish twice a day or more than max(2, days/4) times a trip and 3 sights of a kind
+     café by name or type; the critic's calm rating proved too noisy), meals aside, no night out. Each city's pool
+     gets 3 such places. A rest day the traveler edits into a busier one is renamed, not faulted. A Wikidata outage
+     marks the library partial, so it is retried within the hour. Code also flags a dish twice a day or more than max(2, days/4) times a trip and 3 sights of a kind
      a day, unless asked for; a title that promises a beach or a club the day lacks becomes "main stop and area";
      a day nothing could fill stays, reported as empty, so the trip keeps its length. A rest day needs one calm
      place, not only cafés or bars. A sunrise tip is an early start. Junk listings ("in front of Amed

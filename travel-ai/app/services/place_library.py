@@ -127,6 +127,7 @@ def build(area: dict, releases: Callable[[], dict]) -> dict:
     except OpenDataError as e:  # the plan still works, it just can't tell the icons apart
         logger.warning("Wikidata fame failed for %s: %s", area["name"], e)
         known = {}
+        failed.append("wikidata")  # partial: retried within the hour, not kept without fame for 90 days
     for place in places:
         place["fame"] = known.get(place.pop("wikidata", None) or "", 0)
         place["score"] += 0.5 * math.log2(1 + place["fame"])  # 39 Wikipedias (Fushimi Inari) add 2.7, 8 add 1.6

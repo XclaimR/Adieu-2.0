@@ -155,10 +155,10 @@ def _meal_only(day: DayPlan, known: dict[str, PlaceCandidate], scope: set[str] |
     return issues
 
 
-def _rest_day(day: DayPlan, known: dict[str, PlaceCandidate]) -> list[Issue]:
+def rest_day_issues(day: DayPlan, known: dict[str, PlaceCandidate]) -> list[Issue]:
     """Ticket #67: a rest day has at most two calm places (meals aside) and no night out."""
     calm_stops = [a for a in day.activities if not is_meal(a, known.get(a.place_id))]
-    lively = [a for a in calm_stops if not day_rhythm.LINGER.search(day_rhythm.text_of(a, known.get(a.place_id)))]
+    lively = [a for a in calm_stops if not day_rhythm.lingers(a, known.get(a.place_id))]
     issues = []
     if day.activities and not calm_stops:
         issues.append(Issue(problem=f"Day {day.day_number} is a rest day with only meals and drinks",
@@ -226,7 +226,7 @@ class ItineraryCritiqueService:
                                     suggestion=f"add a thing to do or a meal nearby, to make {fewest}",
                                     where=[day.id]))
             if day.id in touched:
-                issues += _rest_day(day, known) if rest else _meal_only(day, known, scope)
+                issues += rest_day_issues(day, known) if rest else _meal_only(day, known, scope)
                 issues += _route_issues(plan, day)
                 if issue := _timing(plan, day, known, visits or {}):
                     issues.append(issue)

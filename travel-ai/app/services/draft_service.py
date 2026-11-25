@@ -17,7 +17,7 @@ from app.schemas.personality import Note, NoteChange, Personality
 from app.schemas.place import Pick, PickCategory, PlaceCandidate
 from app.schemas.trip_profile import TripProfile
 from app.services.itinerary_critique_service import (MOVING_DAY_STOPS, REVIEW_TIMEOUT, ItineraryCritiqueService,
-                                                      plan_facts)
+                                                      plan_facts, rest_day_issues)
 from app.services import day_rhythm
 from app.services.day_rhythm import REST_THEME
 from app.services.llm_client import LLMClient
@@ -141,7 +141,7 @@ def _rhythm_rules(pool: "PlacePool", days: int, personality: Personality | None)
     """Ticket #67: the day shape a person who knows the place would plan, at this traveler's pace."""
     # Drafting can't ask for 5 stops (Gemini refuses a longer nested list); the review adds the fifth on packed days.
     fewest = min(day_rhythm.min_stops(personality), 4)
-    lines = [f"- Every full day has {fewest}-4 stops: a main sight in the morning, an area to explore with lunch in "
+    lines = [f"- Every full day has {fewest if fewest == 4 else f'{fewest}-4'} stops: a main sight in the morning, an area to explore with lunch in "
              "the afternoon, and dinner beside a thing to do in the evening."]
     for number, role in sorted(pool.roles.items()):
         if role == "rest":
@@ -884,6 +884,11 @@ Rules:
         if days:
             plan.days += [DayPlan(day_number=n, activities=[]) for n in range(len(plan.days) + 1, days + 1)]
             plan.sync_route()
+        known = {p.place_id: p for p in places}
+        if scope is not None:  # they edited a rest day into a busier one: name it for what it is, don't fault it
+            for day in plan.days:
+                if day.theme == REST_THEME and day.activities and rest_day_issues(day, known):
+                    day.theme = day_rhythm.honest_theme(day, known)
         visits = dict(critique.visit_minutes)
         ratings = dict(critique.ratings)
         # Ticket #67: the pace's stops a day, and what they asked for may repeat.
@@ -913,7 +918,6 @@ Rules:
         changed = _changed(plan, fixed)
         added = {a.id for d in fixed.days for a in d.activities} - {a.id for d in plan.days for a in d.activities}
         unfixed = [x.problem for x in critique.issues if not (changed & set(x.where) if x.where else added)]
-        known = {p.place_id: p for p in places}
         for day in fixed.days:  # an empty day stays and is reported: the trip keeps its length
             if day.theme != REST_THEME and day_rhythm.promise_broken(day, known):
                 day.theme = day_rhythm.honest_theme(day, known)  # "Swimming Beach Day" with no beach
