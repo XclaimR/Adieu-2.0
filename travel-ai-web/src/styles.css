@@ -153,7 +153,11 @@ input:focus-visible, button:focus-visible, a:focus-visible, summary:focus-visibl
 
 /* Home */
 /* Shoreline: the hero is the sea from the logo, and its bottom edge is a wave. */
-.hero { position: relative; background: var(--band); color: var(--band-ink); margin: -16px -16px 48px; padding: 32px 24px 64px; border-radius: 20px 20px 0 0; }
+/* Home: the hero runs edge to edge; everything else sits in a 1280px column (4 trips a row on big screens). */
+.page.home { max-width: none; padding-inline: 0; }
+.page.home > section:not(.hero) { max-width: 1280px; margin-inline: auto; padding-inline: 16px; }
+/* Side padding lines the hero's content up with that column. */
+.hero { position: relative; background: var(--band); color: var(--band-ink); margin: -32px 0 48px; padding: 40px max(16px, calc((100% - 1248px) / 2)) 64px; }
 .hero .muted, .hero .small { color: var(--band-muted); }
 .hero .sentence { color: var(--band-ink); }
 .hero .blank { color: var(--accent); }
