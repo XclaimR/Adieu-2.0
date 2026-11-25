@@ -63,7 +63,7 @@ def _choice(message: str, held: dict) -> str | None:
     if len(said.split()) > 6:
         return None
     new = held["go"].removeprefix("Go with ").casefold()
-    keep = re.search(r"\bkeep\b", said) or held["earlier"].casefold() in said or held["keep_words"].casefold() in said
+    keep = re.search(r"\b(keep|no|not|nope|never|don'?t)\b", said) or held["earlier"].casefold() in said or held["keep_words"].casefold() in said
     go = new in said
     return None if bool(keep) == go else "keep" if keep else "go"
 

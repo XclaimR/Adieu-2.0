@@ -168,4 +168,6 @@ def test_a_typed_answer_naming_both_sides_is_a_new_message():
     held = {"keep": "Keep the beach town", "go": "Go with Kyoto", "earlier": "small beach town",
             "keep_words": "the beach town"}
     assert _choice("keep Kyoto in mind", held) is None
+    for refusal in ("no Kyoto", "not Kyoto please", "no, not Kyoto", "Kyoto? no way"):
+        assert _choice(refusal, held) != "go"
     assert _choice("Kyoto sounds nice but I also want to add a few days somewhere else", held) is None
