@@ -153,3 +153,19 @@ def test_saying_it_again_after_being_asked_is_the_answer(client, auth, fake_llm,
     turn = say("No really, Kyoto")
     assert [c.city for c in edits[0]] == ["Kyoto"] and "small beach town" not in _notes(turn)
     assert turn["trip"]["conflict"] is None
+
+
+@pytest.mark.parametrize("reply, kept", [("yes, Kyoto", False), ("Kyoto please", False), ("keep the beach", True),
+                                         ("the small beach town", True), ("no, keep it", True)])
+def test_a_short_typed_answer_counts_like_a_tap(client, auth, fake_llm, db_session, monkeypatch, reply, kept):
+    _, _, edits, say = _held(client, auth, fake_llm, db_session, monkeypatch)
+    turn = say(reply)
+    assert (edits == []) == kept and ("small beach town" in _notes(turn)) == kept
+
+
+def test_a_typed_answer_naming_both_sides_is_a_new_message():
+    from app.workflows.travel_planner_workflow import _choice
+    held = {"keep": "Keep the beach town", "go": "Go with Kyoto", "earlier": "small beach town",
+            "keep_words": "the beach town"}
+    assert _choice("keep Kyoto in mind", held) is None
+    assert _choice("Kyoto sounds nice but I also want to add a few days somewhere else", held) is None

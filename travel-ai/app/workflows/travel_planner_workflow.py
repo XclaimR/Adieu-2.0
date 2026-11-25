@@ -54,8 +54,18 @@ def _same_place(a: str | None, b: str | None) -> bool:
     return (a or "").strip().lower() == (b or "").strip().lower()
 
 
-def _same_answer(message: str, chip: str) -> bool:
-    return message.strip(" .!").casefold() == chip.casefold()
+def _choice(message: str, held: dict) -> str | None:
+    """'keep' or 'go' when the reply to a clash picks one: a tap, or a short typed answer that names one side
+    ("yes, Ubud", "keep the beach"). Anything else is a new message, and the held one is dropped."""
+    said = message.strip(" .!").casefold()
+    if said in (held["keep"].casefold(), held["go"].casefold()):
+        return "keep" if said == held["keep"].casefold() else "go"
+    if len(said.split()) > 6:
+        return None
+    new = held["go"].removeprefix("Go with ").casefold()
+    keep = re.search(r"\bkeep\b", said) or held["earlier"].casefold() in said or held["keep_words"].casefold() in said
+    go = new in said
+    return None if bool(keep) == go else "keep" if keep else "go"
 
 
 def _plain_words(text: str | None, limit: int) -> str:
@@ -146,11 +156,12 @@ class TravelPlannerWorkflow:
         not_reset = "I didn't start over. " if confirming else ""
         pending = self.trips.conflict(trip)
         state.pop("conflict", None)  # any other answer moves on: the held message is dropped
-        if pending and _same_answer(message, pending["keep"]):
+        choice = pending and _choice(message, pending)
+        if choice == "keep":
             trip.state = state
             yield from self._answer(trip, message, f"Okay, I kept {pending['keep_words']}. Nothing changed.", None, [])
             return
-        approved = pending if pending and _same_answer(message, pending["go"]) else None
+        approved = pending if choice == "go" else None
         typed = shown_message  # what the traveler sent this turn; on approval the held message is what's done
         if approved:
             shown_message = message = approved["message"]
