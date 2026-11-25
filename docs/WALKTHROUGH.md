@@ -80,7 +80,14 @@ only on a clear yes while that is the current question. A no brings back the que
 3. New destination? `PlacesService.resolve_destination` checks it's a real place (not a business) and stores its map
    area, with the area's id inside the saved box. Its places are loaded the first time plans or options need them (15-30 s).
    Then `PersonalityService.update` refreshes the trip's **personality** (`trips.personality`). It is about this
-   trip only: lasting taste is not read or written during a trip (it still feeds the Home ideas).
+   trip only: lasting taste is not read or written during a trip (it still feeds the Home ideas), except the home
+   city below.
+   - **Where the trip starts and ends** (Ticket #81): after the vibe, `TurnService` asks once "Which city are you
+     starting from?", then "Flying back to <it> at the end, or a different city?". The answer is saved as lasting
+     taste (`Taste.home`), so later trips ask only "Starting from <home> and flying back there?" with one-tap chips.
+     `read_ends` reads the chips and short typed answers in code; the model reads longer ones into
+     `profile.origin` / `return_to`, and the gazetteer checks them. Skipped, they default to the home city and back.
+     These questions count toward the cap of 8 questions before plans (`MAX_QUESTIONS`).
    - **Notes** are everything the traveler said beyond the core facts. Each is stored once and points at what it
      is about: `trip`, a day (`d2`), the stay (`s1`) or an activity's id. It has a kind (must / avoid / want), a
      category, and is stated or inferred. The model does the understanding (`TurnDecision.note_changes`: add,
@@ -102,6 +109,11 @@ only on a clear yes while that is the current question. A no brings back the que
      reach of a better-known one is a day trip, not a base), decides how many cities fit the days and the pace (about
      3 days a city; slow 4, packed 2), orders them as the shortest one-way route counted from the main city, where
      flights usually land, and shares the days so they add up to the trip. Nights are strict: the days less one.
+     With a home city (Ticket #81) the model also names the listed cities with international flights, and the route
+     runs from one of them to another, counting the flights from home and back at a quarter of a ground km each:
+     open-jaw (land in Tokyo, leave from Osaka) whatever order the model listed. `route_service.flights` adds rough
+     fly-in and fly-out legs (`Itinerary.fly_in` / `fly_out`, kept for booking links); day 1 and the last day are
+     light, in the prompt and the review. The card shows home at both ends of the line, the flights dashed.
      One model call picks which towns suit this traveler and estimates each leg (mode, rough fare, a pass tip); then
      Transitous (api.transitous.org, an open, free public-transport router; light non-commercial use) gives the real
      journey time where it has timetables and the ride is under 8 hours. Without them, code uses the best-known towns

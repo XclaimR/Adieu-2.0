@@ -33,6 +33,7 @@ FLIGHT_KM = 600.0
 HIGH_SPEED_RAIL = {"JP", "CN", "KR", "TW", "FR", "ES", "IT", "DE", "AT", "BE", "NL", "TR", "MA", "UZ", "SA"}
 RAIL_FLIGHT_KM = 800.0  # with fast trains, Tokyo to Hiroshima (680 km) is a train ride and Tokyo to Sapporo a flight
 RAIL_KMH = 175.0  # straight-line speed of a fast train, stops included: Kyoto to Hiroshima ~1h45, Tokyo to Hiroshima ~3h50
+LONG_HAUL_KMH = 800.0  # a jet's average speed over a long flight, taxiing aside
 AIR_WEIGHT = 0.25  # a km flown home or out costs about a quarter of a km on the ground, in time
 DETOUR = 1.5  # without the model, a route may be this much longer than the straight line between its ends
 # Free for open-source, non-commercial, light use; a route makes at most MAX_CITIES - 1 calls.
@@ -107,7 +108,10 @@ def flights(route: list[City], home: dict | None, back: dict | None,
         return None, None
     def leg(a: dict | City, b: dict | City) -> Flight:
         a, b = (x if isinstance(x, City) else City(name=x["name"], lat=x["lat"], lng=x["lng"]) for x in (a, b))
-        return Flight(**rough_leg(a, b, country).model_dump(), frm=a.name, to=b.name)
+        rough = rough_leg(a, b, country)
+        if rough.mode == "flight":  # the flight time airlines quote, as people compare them: Delhi to Tokyo ~8h
+            rough.minutes = round(30 + distance_km((a.lat, a.lng), (b.lat, b.lng)) / LONG_HAUL_KMH * 60)
+        return Flight(**rough.model_dump(), frm=a.name, to=b.name)
     return leg(home, route[0]), leg(route[-1], back)
 
 

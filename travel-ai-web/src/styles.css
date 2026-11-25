@@ -357,6 +357,10 @@ input:focus-visible, button:focus-visible, a:focus-visible, summary:focus-visibl
 .route-card .hotel a { color: inherit; }
 .route-card .none { font-style: italic; }
 .route-note { margin: 10px 0 0; }
+/* Ticket #81: home at both ends, an outlined dot; the flights to and from it are dashed. */
+.route-card li.home .dot { background: var(--panel); border: 2px solid var(--primary); }
+.route-card .home-city { font-family: var(--display); font-weight: 700; font-size: 15px; line-height: 1.2; color: var(--primary); }
+.route-card li.home.in::after, .route-card li.before-home::after { border-top: 2px dashed var(--primary); }
 .stay-card { display: flex; gap: 12px; align-items: center; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 10px; }
 .stay-card img { width: 84px; height: 64px; object-fit: cover; border-radius: 10px; }
 .stay-card div { display: flex; flex-direction: column; }
@@ -388,6 +392,7 @@ input:focus-visible, button:focus-visible, a:focus-visible, summary:focus-visibl
   .route-card li { padding: 0 0 12px 24px; }
   .route-card li::after { top: 16px; left: 5px; right: auto; bottom: -2px; border-top: 0; border-left: 2px solid var(--line); }
   .route-card .dot { top: 4px; }
+  .route-card li.home.in::after, .route-card li.before-home::after { border-top: 0; border-left: 2px dashed var(--primary); }
   .board-body { padding: 14px 16px 24px; }
   .draft-list { display: flex; overflow-x: auto; scroll-snap-type: x mandatory; margin-inline: -16px; padding: 0 16px 6px; }
   .draft-list > * { flex: 0 0 86%; scroll-snap-align: center; }
