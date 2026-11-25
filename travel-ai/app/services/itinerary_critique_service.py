@@ -12,6 +12,8 @@ from app.schemas.itinerary_critique import Issue, ItineraryCritique
 from app.schemas.personality import Personality
 from app.schemas.place import PickCategory, PlaceCandidate
 from app.schemas.trip_profile import TripProfile
+from app.services import day_rhythm
+from app.services.day_rhythm import REST_STOPS, REST_THEME
 from app.services.llm_client import LLMClient
 from app.services.personality_service import PersonalityService, describe_note
 from app.services.places_service import traveler_fit
@@ -153,11 +155,31 @@ def _meal_only(day: DayPlan, known: dict[str, PlaceCandidate], scope: set[str] |
     return issues
 
 
+def _rest_day(day: DayPlan, known: dict[str, PlaceCandidate], ratings: dict[str, tuple[int, int]]) -> list[Issue]:
+    """Ticket #67: a rest day has at most two calm places (meals aside) and no night out."""
+    calm_stops = [a for a in day.activities if not is_meal(a, known.get(a.place_id))]
+    lively = [a for a in calm_stops if ratings.get(a.place_id, (a.energy or 0, 0))[0] > 0]
+    issues = []
+    if day.activities and not calm_stops:
+        issues.append(Issue(problem=f"Day {day.day_number} is a rest day with only meals and drinks",
+                            suggestion="add a calm place to linger: a beach, spa, garden or park", where=[day.id]))
+    if len(calm_stops) > REST_STOPS:
+        issues.append(Issue(problem=f"Day {day.day_number} is a rest day with {len(calm_stops)} things to do",
+                            suggestion=f"keep {REST_STOPS} calm places to linger, besides lunch and dinner",
+                            where=[a.id for a in calm_stops[REST_STOPS:]]))
+    if lively:
+        issues.append(Issue(problem=f"Day {day.day_number} is a rest day, but {lively[0].name} isn't restful",
+                            suggestion="a calm place to linger nearby: a beach, spa, garden, park or café",
+                            where=[a.id for a in lively]))
+    return issues
+
+
 def _route_issues(plan: Itinerary, day: DayPlan) -> list[Issue]:
     """On a route: every stop in the day's city, and a moving day kept light."""
     issues = [Issue(problem=f"{a.name} is outside {day.city}, where day {day.day_number} is spent",
                     suggestion=f"a place in {day.city} instead", where=[a.id])
-              for a in day.activities if plan.route and (a.lat is not None and city_of(plan.route, a) != day.city)]
+              for a in day.activities if plan.route and (a.lat is not None and city_of(plan.route, a) != day.city)
+              and not (day.theme or "").startswith("Day trip to ")]  # a day trip's town is near, not the city
     if (arriving := plan.moving_day(day)) and len(day.activities) > MOVING_DAY_STOPS:
         issues.append(Issue(problem=f"Day {day.day_number} is a moving day to {arriving.name} with "
                                     f"{len(day.activities)} stops", where=[day.id],
@@ -183,23 +205,34 @@ class ItineraryCritiqueService:
 
     @staticmethod
     def counted(plan: Itinerary, places: list[PlaceCandidate], days: int | None = None,
-                scope: set[str] | None = None, visits: dict[str, int] | None = None) -> list[Issue]:
-        """Errors code can count. `days` is set for drafts; after an edit, only the days in `scope` are checked."""
+                scope: set[str] | None = None, visits: dict[str, int] | None = None, *, fewest: int | None = None,
+                ratings: dict[str, tuple[int, int]] | None = None, wants: str = "") -> list[Issue]:
+        """Errors code can count. `days` is set for drafts; after an edit, only the days in `scope` are checked.
+        `fewest` is the pace's stops on a full day; `wants` is what the traveler asked for, which may repeat."""
         known = {p.place_id: p for p in places}
         touched = _touched_days(plan, scope)
         issues = []
         if days and len(plan.days) != days:
             issues.append(Issue(problem=f"This plan has {len(plan.days)} of the {days} days"))
         for day in plan.days:
+            rest = day.theme == REST_THEME
+            light = plan.moving_day(day) or plan.light_day(day)
             if not day.activities and (scope is None or day.id in scope):
                 issues.append(Issue(problem=f"Day {day.day_number} has nothing planned", where=[day.id]))
-            elif days and len(day.activities) == 1:
+            elif days and len(day.activities) == 1 and not rest:
                 issues.append(Issue(problem=f"Day {day.day_number} has only one stop", where=[day.id]))
+            elif days and fewest and not rest and not light and 1 < len(day.activities) < fewest:
+                issues.append(Issue(problem=f"Day {day.day_number} has only {len(day.activities)} stops",
+                                    suggestion=f"add a thing to do or a meal nearby, to make {fewest}",
+                                    where=[day.id]))
             if day.id in touched:
-                issues += _meal_only(day, known, scope)
+                issues += _rest_day(day, known, ratings or {}) if rest else _meal_only(day, known, scope)
                 issues += _route_issues(plan, day)
                 if issue := _timing(plan, day, known, visits or {}):
                     issues.append(issue)
+        for day, stops, why in day_rhythm.repeats(plan, known, wants, None if scope is None else touched):
+            issues.append(Issue(problem=f"The plan has {why}", where=[a.id for a in stops],
+                                suggestion="a different dish or kind of place"))
         nights = {c.name: c.nights for c in plan.route}
         for sid, stay, city in plan.stay_slots():
             if stay or not days or (days < 2 and not city) or nights.get(city) == 0:  # a day trip needs no hotel

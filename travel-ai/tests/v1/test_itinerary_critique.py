@@ -57,6 +57,13 @@ def draft(**kw):
     return Draft(id="a", flavor="easy", title="Rome", summary="Nice", itinerary=kw.get("plan", plan))
 
 
+@pytest.fixture(autouse=True)
+def few_stops_are_fine(monkeypatch):
+    """These plans predate Ticket #67's stops by pace; test_day_rhythm checks that rule."""
+    from app.services import day_rhythm
+    monkeypatch.setattr(day_rhythm, "min_stops", lambda personality: 1)
+
+
 @pytest.fixture
 def drafter(monkeypatch):
     service = DraftService(places=None)
@@ -214,9 +221,11 @@ def test_missing_days_are_counted_by_code_and_filled(drafter, fake_llm):
     assert "nothing planned" not in calls(fake_llm, "PlanReview")[0]  # it would parrot the result
 
 
-def test_days_nobody_could_fill_are_not_shown_empty(drafter, fake_llm):
+def test_days_nobody_could_fill_stay_and_are_reported_so_the_trip_keeps_its_length(drafter, fake_llm):
+    """Ticket #67: a 4-day trip is 4 days, even when the repair can't fill two of them; the gap is said, not hidden."""
     [short] = review(drafter, profile=PROFILE.model_copy(update={"duration_days": 4}))
-    assert len(short.itinerary.days) == 2 and short.warnings == ["This plan has 2 of the 4 days"]
+    assert len(short.itinerary.days) == 4
+    assert short.warnings == ["Day 3 has nothing planned", "Day 4 has nothing planned"]
 
 
 def test_extra_days_are_dropped_without_a_repair_call(drafter, fake_llm):

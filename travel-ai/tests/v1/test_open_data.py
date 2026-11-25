@@ -192,7 +192,7 @@ def test_candidates_follow_the_traveler_and_the_place_they_name(db_session, fake
     fake_places.library = {"hubs": [{"name": "Belém", "point": [1.0, 1.0], "district": True}], "places": [
         place("a", "Big Museum", lat=1.5, lng=1.5, area="Centre"),
         place("b", "River Beach", lat=1.5, lng=1.6, area="Centre", text="Sandy beach."),
-        place("c", "Monastery", lat=1.0, lng=1.0, area="Belém")], "release": "t", "partial": []}
+        place("c", "Monastery", lat=1.0, lng=1.0, area="Belém")], "release": "t", "partial": [], "version": 2}
     service = PlacesService(db_session)
     beachless = Personality(notes=[Note(id="n", text="beach", kind="avoid")])
 
@@ -207,7 +207,7 @@ def test_descriptions_and_areas_reach_the_draft_prompt(client, auth, fake_llm, f
             enumerate(["Castle", "Museum", "Viewpoint"])]
     rows += [place(f"eat-{i}", n, "eat", lat=1.5, lng=1.5, area="Baixa") for i, (n, _) in
              enumerate(FAKE_PLACES["eat"])]
-    fake_places.library = {"places": rows, "hubs": [], "release": "t", "partial": []}
+    fake_places.library = {"places": rows, "hubs": [], "release": "t", "partial": [], "version": 2}
     trip = ready_trip(client, auth, fake_llm)
     say(client, auth, trip["id"], "not sure")
 

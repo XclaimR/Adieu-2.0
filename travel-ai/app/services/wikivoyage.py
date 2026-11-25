@@ -8,7 +8,7 @@ import re
 from urllib.parse import quote, unquote, urlsplit
 
 from app.services.open_data import (
-    COMMONS, WIKIVOYAGE, box_reach_km, distance_km, normalize, safe_text, valid_point, wikimedia,
+    COMMONS, WIKIDATA, WIKIVOYAGE, box_reach_km, distance_km, normalize, safe_text, valid_point, wikimedia,
 )
 
 logger = logging.getLogger(__name__)
@@ -39,6 +39,16 @@ _CLOSED = re.compile(r"\b(permanently closed|closed (down|permanently)|no longer
 _NOT_A_TOWN = re.compile(r"\b(airport|station|port|terminal|itinerar(y|ies)|phrasebook)\b", re.I)
 _EVENT = re.compile(r"\b(festival|matsuri|carnival|parade|fireworks|marathon|fair|feast)\b|^\(?\s*(\w+\s)?"
                     r"(january|february|march|april|may|june|july|august|september|october|november|december)\b", re.I)
+# Listings that are a piece of a sentence ("in front of Amed Cafe", "small wooden shipwreck"), not a place.
+_FRAGMENT = re.compile(r"^(in front of|next to|near|behind|opposite|across from|beside|around)\b|^[a-z]")
+_QID = re.compile(r"^Q\d{1,12}$")
+# A practical tip in the guide's own words: book ahead, go early, at sunset, a closing day. Ticket #67.
+_TIP = re.compile(r"\b(reservations?|reserve|book(ing)? (ahead|in advance|early)|advance booking|sell(s)? out|"
+                  r"arrive early|go early|get there early|come early|early (morning|start)|before the crowds|"
+                  r"crowds|queues?|sunset|sunrise|closed on \w+days?|closed (mon|tues|wednes|thurs|fri|satur|sun)day)\b",
+                  re.I)
+_PRICE = re.compile(r"[€$£¥₹₩฿]\s?\d|\d\s?(€|USD|EUR|GBP|INR|JPY|IDR)\b", re.I)
+TIP_LIMIT = 110
 _OPEN_LICENCE = re.compile(r"^(cc0|cc[ -]by(-sa)?([ -]\d|$)|public domain|pdm|pd\b)", re.I)
 
 
@@ -62,6 +72,14 @@ def _description(text: str) -> str | None:
     sentences = re.split(r"(?<=[.!?])\s+", safe_text(_plain(text[:5000]), 1200).lstrip("-–—:;,. "))
     kept = " ".join(s for s in sentences if not _STALE.search(s))
     return safe_text(kept, TEXT_LIMIT) if len(kept) >= 8 else None
+
+
+def _tip(text: str) -> str | None:
+    """The guide's first sentence that is a practical tip, without prices (they go stale)."""
+    for sentence in re.split(r"(?<=[.!?])\s+", safe_text(_plain(text[:5000]), 1200)):
+        if _TIP.search(sentence) and not _PRICE.search(sentence) and len(sentence) <= TIP_LIMIT:
+            return sentence.strip()
+    return None
 
 
 def _templates(text: str):
@@ -106,7 +124,7 @@ def _item(title: str, category: str, kind: str, heading: str, name: str, text: s
           fields: dict | None = None) -> dict | None:
     fields = fields or {}
     name = safe_text(_plain(name), NAME_LIMIT)
-    if len(name) < 2 or not normalize(name) or _CLOSED.search(text):
+    if len(name) < 2 or not normalize(name) or _CLOSED.search(text) or _FRAGMENT.search(name):
         return None
     if category == "do" and (_EVENT.search(name) or _EVENT.match(_plain(text).strip())):
         return None
@@ -119,6 +137,8 @@ def _item(title: str, category: str, kind: str, heading: str, name: str, text: s
             "name": name, "alt": safe_text(_plain(fields.get("alt", "")), NAME_LIMIT), "category": category,
             "kind": kind, "text": _description(text), "lat": point and point[0], "lng": point and point[1],
             "area": title.rsplit("/", 1)[-1], "town": title.split("/")[0], "guide": title, "tier": tier,
+            "wikidata": qid if _QID.match(qid := fields.get("wikidata", "").strip()) else None,
+            "tip": _tip(text) if category != "stay" else None,
             "image": image if image and len(image) < 200 and not re.search(r"[|\[\]{}<>\n]", image) else None}
 
 
@@ -271,6 +291,22 @@ def load(area: dict) -> dict:
             if item := _item(main["title"], "do", "Place to explore", "", hub["name"], hub["text"], fields):
                 items.append(item | {"area": hub["name"], "town": hub["name"]})
     return {"items": items, "hubs": hubs}
+
+
+def fame(qids: list[str]) -> dict[str, int]:
+    """How many Wikipedias have an article on each place: the open stand-in for how famous it is (Ticket #67).
+    Fushimi Inari has 39, Kinkaku-ji 58, the Osaka Science Museum 8."""
+    counts: dict[str, int] = {}
+    qids = list(dict.fromkeys(q for q in qids if q and _QID.match(q)))
+    for start in range(0, len(qids), 50):
+        data = wikimedia(WIKIDATA, action="wbgetentities", ids="|".join(qids[start:start + 50]), props="sitelinks")
+        for qid, entity in (data.get("entities") or {}).items():
+            links = entity.get("sitelinks") or {}
+            counts[qid] = sum(1 for site in links if _WIKIPEDIA.match(site))
+    return counts
+
+
+_WIKIPEDIA = re.compile(r"^(?!commons|species|meta|wikidata|mediawiki|sources|outreach|wikimania)[a-z_]+wiki$")
 
 
 def open_photos(files: list[str]) -> dict[str, dict]:

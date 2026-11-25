@@ -19,7 +19,7 @@ def library_of(*places):
     return {"places": [{"id": pid, "name": name, "category": category, "kind": "", "text": None, "lat": 1.5,
                         "lng": 1.5, "area": None, "guide": None, "tier": None, "score": 1.0}
                        for pid, name, category in places], "hubs": [], "release": "test",
-            "partial": ["few places"]}  # as place_library.build marks it
+            "partial": ["few places"], "version": 2}  # as place_library.build marks it
 
 
 def plan_turn(client, auth, trip_id, message="not sure"):

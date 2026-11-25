@@ -1,6 +1,7 @@
 """Builds one destination's library: Wikivoyage's described places, topped up and located with Overture's."""
 import hashlib
 import logging
+import math
 import time
 from collections.abc import Callable
 
@@ -10,6 +11,8 @@ from app.services.open_data import OpenDataError, distance_km, normalize, valid_
 logger = logging.getLogger(__name__)
 
 KEEP = {"do": 450, "eat": 300, "stay": 170}
+# Bump when a library gains something old ones lack, so they are rebuilt (2: fame and tips, Ticket #67).
+VERSION = 2
 ENOUGH_FROM_ONE_SOURCE = 8
 SAME_PLACE_KM = 1.0
 SAME_TOWN_KM = 12
@@ -44,7 +47,11 @@ def merge(described: list[dict], mapped: list[dict], hubs: list[dict], destinati
         seen.setdefault(key, []).append(place)
         merged.append(place)
 
+    # A town or the destination itself isn't a stop ("Amed" as a thing to do in Amed), from either source.
+    not_places = {normalize(destination), *map(normalize, towns)}
     for item in described:
+        if normalize(item["name"]) in not_places:
+            continue
         point = _point(item)
         around, limit = (point, SAME_PLACE_KM) if point else (towns.get(item["area"]), SAME_TOWN_KM)
         matches = by_name.get(normalize(item["name"]), []) + by_name.get(normalize(item["alt"]), [])
@@ -64,8 +71,6 @@ def merge(described: list[dict], mapped: list[dict], hubs: list[dict], destinati
                 place["kind"] = match["kind"]
         add(place)
 
-    # Social check-ins named after the town itself aren't places to send someone.
-    not_places = {normalize(destination), *map(normalize, towns)}
     for place in mapped:
         if place["id"] not in used and normalize(place["name"]) not in not_places:
             add(place)
@@ -116,7 +121,16 @@ def build(area: dict, releases: Callable[[], dict]) -> dict:
         logger.warning("Overture failed for %s: %s", area["name"], e)
         failed.append("overture")
 
-    places = _cap(merge(guide["items"], mapped, guide["hubs"], area["name"]))
+    places = merge(guide["items"], mapped, guide["hubs"], area["name"])
+    try:
+        known = wikivoyage.fame([p["wikidata"] for p in places if p.get("wikidata")])
+    except OpenDataError as e:  # the plan still works, it just can't tell the icons apart
+        logger.warning("Wikidata fame failed for %s: %s", area["name"], e)
+        known = {}
+    for place in places:
+        place["fame"] = known.get(place.pop("wikidata", None) or "", 0)
+        place["score"] += 0.5 * math.log2(1 + place["fame"])  # 39 Wikipedias (Fushimi Inari) add 2.7, 8 add 1.6
+    places = _cap(places)
     if failed and len(places) < ENOUGH_FROM_ONE_SOURCE:
         raise OpenDataError(f"Couldn't load places for {area['name']}: {', '.join(failed)} unavailable")
 
@@ -139,4 +153,5 @@ def build(area: dict, releases: Callable[[], dict]) -> dict:
         place.pop("image", None)
         place.pop("alt", None)
     logger.info("Loaded %d places for %s in %.1fs", len(places), area["name"], time.monotonic() - started)
-    return {"places": places, "hubs": guide["hubs"], "photos": photos, "release": release, "partial": failed}
+    return {"places": places, "hubs": guide["hubs"], "photos": photos, "release": release, "partial": failed,
+            "version": VERSION}

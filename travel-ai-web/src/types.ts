@@ -72,6 +72,10 @@ export type Activity = {
   for_note: string | null;
   /** How long the stop takes: the critic's estimate, else a default for its category. */
   minutes: number;
+  /** Ticket #67: one practical tip, what kind it is, and the must-see this stop stands in for. */
+  tip?: string | null;
+  tip_kind?: "early" | "sunset" | "book" | "time" | null;
+  instead_of?: string | null;
 };
 
 /** Getting to a city from the one before it: rough estimates. */

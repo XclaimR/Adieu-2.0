@@ -130,7 +130,7 @@ class FakePlaces:
              "score": 1.0 - i / 10 - (tag == "gem") / 2}
             for tag, rows in FAKE_PLACES.items() for i, (name, label) in enumerate(rows)
         ]
-        return {"places": places, "hubs": [], "photos": {}, "release": "test", "partial": []}
+        return {"places": places, "hubs": [], "photos": {}, "release": "test", "partial": [], "version": 2}
 
 
 @pytest.fixture

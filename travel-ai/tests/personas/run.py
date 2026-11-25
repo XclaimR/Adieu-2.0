@@ -14,6 +14,7 @@ import urllib.error
 import urllib.request
 
 from tests.personas.personas import PERSONAS
+from tests.personas.references import REFERENCES
 
 MAX_TURNS = 12
 MAX_QUESTIONS = 8
@@ -191,6 +192,83 @@ def route_gaps(trip: dict) -> list[str]:
     return gaps
 
 
+def human_plan_rules(persona: dict, trip: dict, days: int) -> list[tuple[str, bool | None, str]]:
+    """Ticket #67: day count, titles against stops, repeats, rest days and the human plan's must-sees. Code only;
+    it uses the app's own rules, so it runs where the app's code is (docker compose exec api ...)."""
+    try:
+        from app.schemas.itinerary import Itinerary
+        from app.services import day_rhythm
+    except ImportError:
+        return [("plans read like a human's", None, "run inside the api container to check these")]
+    plans = [(d["title"], Itinerary.model_validate({"destination": "", **d["itinerary"]})) for d in trip["drafts"]]
+    wants = " ".join([persona.get("opening", ""), *(a[1] for a in persona.get("answers", []))])
+    short = [f"{t!r} has {len(p.days)}" for t, p in plans if len(p.days) != days]
+    titles = [f"{t!r} day {d.day_number} {d.theme!r}" for t, p in plans for d in p.days
+              if d.theme != day_rhythm.REST_THEME and day_rhythm.promise_broken(d, {})]
+    again = [f"{t!r}: {why}" for t, p in plans for _, _, why in day_rhythm.repeats(p, {}, wants)]
+    busy = [f"{t!r} day {d.day_number}" for t, p in plans for d in p.days if d.theme == day_rhythm.REST_THEME
+            and sum(a.category != "eat" for a in d.activities) > day_rhythm.REST_STOPS]
+    rules = [(f"exactly {days} days", not short, "; ".join(short) or "every draft"),
+             ("titles match the stops", not titles, "; ".join(titles) or "every title holds"),
+             ("no repeated dish or too many of a sight", not again, "; ".join(again) or "none"),
+             ("rest days are restful", not busy, "; ".join(busy) or "every rest day")]
+    reference = REFERENCES.get(persona["name"])
+    if reference and plans:
+        def found(plan: Itinerary) -> list[str]:
+            names = " ".join(f"{a.name} {a.description or ''}" for d in plan.days for a in d.activities).lower()
+            return [m for m in reference["must_sees"] if re.search(m, names)]
+        title, best = max(plans, key=lambda tp: len(found(tp[1])))
+        hits = found(best)
+        rules.append(("has the human plan's must-sees", len(hits) * 2 >= len(reference["must_sees"]),
+                      f"{len(hits)} of {len(reference['must_sees'])} in {title!r}"))
+    return rules
+
+
+def judge(persona: dict, trip: dict) -> tuple[str, bool | None, str]:
+    """One model call: each plan scored 1-5 against the persona's human itinerary, with a reason per score."""
+    reference = REFERENCES.get(persona["name"])
+    if not reference or not trip["drafts"]:
+        return ("judged against a human plan", None, "no reference or no drafts")
+    from pydantic import BaseModel, Field
+
+    from app.core.config import settings
+    from app.schemas.itinerary import Itinerary
+    from app.services.llm_client import LLMClient
+    from app.services.personality_service import PersonalityService
+
+    class Score(BaseModel):
+        reason: str = Field(description="one line, naming a stop or a day")
+        score: int = Field(description="1 poor .. 5 as good as the human plan")
+
+    class Verdict(BaseModel):
+        rhythm: Score
+        variety: Score
+        practical_tips: Score
+        reads_like_a_local: Score
+
+    best = trip["drafts"][0]
+    plan = Itinerary.model_validate(best["itinerary"])
+    view = PersonalityService.plan_view(plan, None) + "\n" + "\n".join(
+        f"  tip at {a.name}: {a.tip}" for d in plan.days for a in d.activities if a.tip)
+    prompt = f"""Score a trip plan against a popular itinerary a person wrote for a similar trip.
+The traveler: {persona['opening']}
+The human plan ({reference['days']} days): {'; '.join(f'day {i}: {x}' for i, x in enumerate(reference['outline'], 1))}
+Its must-sees match: {', '.join(reference['must_sees'])}. Its tips: {'; '.join(reference['tips'])}.
+
+The plan to score:
+{view}
+
+Score each from 1 (poor) to 5 (as good as the human plan): rhythm (a main sight, an area, good meals, rest where
+the pace needs it), variety (no repeated dishes or same-kind sights), practical_tips (when to go, what to book),
+reads_like_a_local (the places someone who knows the destination would pick). The plan is shorter or longer
+than the human one when the traveler asked so; never mark it down for that."""
+    verdict = LLMClient.generate_structured(prompt, Verdict, model=settings.LLM_MODEL_PLAN)
+    scores = {k: getattr(verdict, k) for k in Verdict.model_fields}
+    mean = sum(s.score for s in scores.values()) / len(scores)
+    return ("judged against a human plan", mean >= 3,
+            f"{mean:.1f}/5 for {best['title']!r}: " + "; ".join(f"{k} {s.score} ({s.reason})" for k, s in scores.items()))
+
+
 def check(persona: dict, run: dict) -> list[tuple[str, bool | None, str]]:
     """(rule, passed or None if it couldn't be checked, detail)."""
     trip, has_drafts = run["trip"], bool(run["trip"]["drafts"])
@@ -220,6 +298,7 @@ def check(persona: dict, run: dict) -> list[tuple[str, bool | None, str]]:
         rules.append(("picks fit the traveler", not bad, "; ".join(bad) or f"{len(pick_texts(trip)[0])} items checked"))
         lonely = meal_only_slots(trip)
         rules.append(("no meal-only slots", not lonely, "; ".join(lonely) or "every meal shares its slot"))
+        rules += human_plan_rules(persona, trip, min(profile.get("duration_days") or DEFAULT_DAYS, 21))
     else:
         rules.append(("picks fit the traveler", None, "no drafts to check"))
         rules.append(("no meal-only slots", None, "no drafts to check"))
@@ -246,6 +325,8 @@ def main(argv=None) -> int:
     parser.add_argument("--persona", action="append", choices=[p["name"] for p in PERSONAS],
                         help="run only this persona (repeatable)")
     parser.add_argument("--timeout", type=float, default=600, help="seconds per HTTP turn (default 600)")
+    parser.add_argument("--judge", action="store_true",
+                        help="also score each persona's first plan against its human itinerary (one model call each)")
     args = parser.parse_args(argv)
 
     api = Api(args.base_url, args.timeout)
@@ -263,7 +344,8 @@ def main(argv=None) -> int:
         for i, t in enumerate(run["turns"], 1):
             got = f"{t['drafts']} drafts" if t["drafts"] else ("options" if t["options"] else f"asks {t['question']!r}")
             print(f"  turn {i} ({t['seconds']}s) said {t['said']!r} -> {got}")
-        for rule, ok, detail in check(persona, run):
+        rules = check(persona, run) + ([judge(persona, run["trip"])] if args.judge else [])
+        for rule, ok, detail in rules:
             failed += ok is False
             print(f"  {'PASS' if ok else 'FAIL' if ok is False else 'SKIP'}  {rule}: {detail}")
         card = run["trip"].get("personality") or {}
