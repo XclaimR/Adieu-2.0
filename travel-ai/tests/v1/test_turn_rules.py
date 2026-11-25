@@ -4,7 +4,8 @@ from app.schemas.trip_profile import Party, TripProfile
 from app.schemas.turn import OptionsKind, OptionsRequest, TurnAction, TurnDecision
 from app.services.turn_service import SHOW_PLANS, TurnService, missing_vibe
 
-READY = TripProfile(destination="Lisbon", mood=["relaxed"], party=Party.COUPLE, duration_days=4)
+READY = TripProfile(destination="Lisbon", mood=["relaxed"], party=Party.COUPLE, duration_days=4, origin="Delhi",
+                    return_to="Delhi")
 
 
 def decide(action=TurnAction.ASK, **kwargs):
@@ -21,7 +22,10 @@ def plan(d, profile, message="hi", asked=(), streak=0, has_drafts=False, has_iti
     (TripProfile(destination="Lisbon"), [], "mood"),
     (TripProfile(destination="Lisbon", mood=["relaxed"]), [], "party"),
     (TripProfile(destination="Lisbon", mood=["relaxed"], party=Party.SOLO), [], "duration"),
-    (TripProfile(destination="Lisbon", mood=["relaxed"], party=Party.SOLO), ["duration"], None),
+    (TripProfile(destination="Lisbon", mood=["relaxed"], party=Party.SOLO), ["duration"], "origin"),
+    (READY.model_copy(update={"origin": None, "return_to": None}), [], "origin"),
+    (READY.model_copy(update={"return_to": None}), ["origin"], "return"),
+    (READY.model_copy(update={"origin": None, "return_to": None}), ["origin"], None),  # skipped: from home, or unknown
     (READY, [], None),
 ])
 def test_missing_vibe_order(profile, asked, expected):

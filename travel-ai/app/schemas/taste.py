@@ -6,6 +6,7 @@ class Taste(BaseModel):
     vibes: list[str] = Field(default_factory=list)
     likes: list[str] = Field(default_factory=list)
     dislikes: list[str] = Field(default_factory=list)
+    home: str | None = None  # Ticket #81: where their trips start, asked once and then only confirmed
 
 
 class Vibe(BaseModel):

@@ -67,9 +67,10 @@ def test_picking_a_suggested_country_leads_to_plans_of_that_country(client, auth
     trip = new_trip(client, auth)
     [idea] = say(client, auth, trip["id"], "surprise me")["options"]["ideas"]
     fake_llm.decisions.append(decision(destination=idea["destination"], notes=[mood("relaxed", "relaxed")],
-                                       party=Party.COUPLE, duration_days=4))
+                                       party=Party.COUPLE, duration_days=4, origin="Paris", return_to="Paris"))
 
-    turn = say(client, auth, trip["id"], f"Let's go to {idea['destination']}, relaxed, with my partner, 4 days")
+    turn = say(client, auth, trip["id"], f"Let's go to {idea['destination']}, relaxed, with my partner, 4 days, "
+                                         "from Paris and back")
 
     assert turn["trip"]["destination_name"] == country
     assert len(turn["drafts"]) == 3

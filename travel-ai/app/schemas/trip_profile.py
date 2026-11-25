@@ -33,6 +33,8 @@ class TripProfile(BaseModel):
     party_size: int | None = None
     kids: bool | None = None
     budget_level: BudgetLevel | None = None
+    origin: str | None = None  # where the trip starts (Ticket #81)
+    return_to: str | None = None  # where it ends; the origin unless they said otherwise
     preferences: list[Preference] = Field(default_factory=list)
 
 
@@ -47,3 +49,5 @@ class ProfileUpdates(BaseModel):
     party_size: int | None = None
     kids: bool | None = None
     budget_level: BudgetLevel | None = None
+    origin: str | None = Field(default=None, description="the city or country the trip starts from")
+    return_to: str | None = Field(default=None, description="where they fly back to at the end, only if they said")

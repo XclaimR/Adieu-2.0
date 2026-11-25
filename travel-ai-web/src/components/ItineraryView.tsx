@@ -46,7 +46,7 @@ export default function ItineraryView({ itinerary, notes, busy, onSwap, onRemove
 
   return (
     <div className="timeline">
-      {itinerary.route?.length > 0 && (
+      {(itinerary.route?.length > 0 || itinerary.fly_in) && (
         <RouteCard
           itinerary={itinerary}
           notes={notes}

@@ -9,6 +9,8 @@ _CORE_FIELDS = (
     "party_size",
     "kids",
     "budget_level",
+    "origin",
+    "return_to",
 )
 
 

@@ -1,4 +1,4 @@
-export type Taste = { vibes: string[]; likes: string[]; dislikes: string[] };
+export type Taste = { vibes: string[]; likes: string[]; dislikes: string[]; home?: string | null };
 
 export type User = {
   id: string;
@@ -78,6 +78,9 @@ export type Activity = {
 export type Leg = { mode: string; minutes: number; cost: string | null; note: string | null };
 
 /** One base on a multi-city route; its nights are the days spent there. */
+/** Ticket #81: home to the first city, or the last city home. */
+export type Flight = Leg & { frm: string; to: string; transfer?: Leg | null };
+
 export type City = { name: string; days: number; nights: number; stay: Pick | null; leg: Leg | null };
 
 export type Itinerary = {
@@ -87,6 +90,8 @@ export type Itinerary = {
   stay: Pick | null;
   route: City[];
   route_tip: string | null;
+  fly_in?: Flight | null;
+  fly_out?: Flight | null;
   days: { day_number: number; theme: string | null; city: string | null; activities: Activity[] }[];
 };
 

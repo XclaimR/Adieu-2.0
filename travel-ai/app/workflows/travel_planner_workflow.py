@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.database.models.trip import MessageModel, TripModel
 from app.database.models.user import UserModel
 from app.repositories.trip_repository import TripRepository
+from app.repositories.user_repository import UserRepository
 from app.schemas.activity import default_minutes
 from app.schemas.api import TurnResponse
 from app.schemas.draft import NoPlans
@@ -24,7 +25,7 @@ from app.services import swipe_service
 from app.services.personality_service import PersonalityService, check_changes, describe_note
 from app.services.places_service import PlacesService, PlacesUnavailableError, tier_rank
 from app.services.trip_profile_service import TripProfileService
-from app.services.turn_service import SHOW_PLANS, SHOW_PLANS_TEXT, VIBE_QUESTIONS, TurnService
+from app.services.turn_service import ENDS, SHOW_PLANS, SHOW_PLANS_TEXT, VIBE_QUESTIONS, TurnService, read_ends
 
 logger = logging.getLogger(__name__)
 
@@ -154,7 +155,15 @@ class TravelPlannerWorkflow:
         if surprise:
             decision.profile_updates.destination = None
 
-        new_profile = TripProfileService.merge(profile, decision.profile_updates, message=shown_message)
+        last_asked = state.get("last_asked")
+        updates = decision.profile_updates
+        if last_asked in ENDS and updates.destination and not (updates.origin or updates.return_to):
+            # "Delhi", answering "which city are you starting from?", is where they start, not where they go
+            setattr(updates, "origin" if last_asked.startswith("origin") else "return_to", updates.destination)
+            updates.destination = None
+        new_profile = TripProfileService.merge(profile, updates, message=shown_message)
+        home = UserRepository.taste(user).home
+        new_profile = read_ends(new_profile, shown_message, last_asked, home, decision.user_stuck)
         new_profile.preferences = []  # `before` already holds them as notes
         personality = PersonalityService.update(before, new_profile, decision.note_changes)
         new_profile.mood = PersonalityService.moods(profile.mood, before, personality)
@@ -173,6 +182,16 @@ class TravelPlannerWorkflow:
                 itinerary = None
                 personality = PersonalityService.detach(personality)
 
+        for field in ("origin", "return_to"):
+            name = getattr(new_profile, field)
+            if name and name != getattr(profile, field) and name != home:
+                area = self._resolve(name)
+                setattr(new_profile, field, area and area["name"])
+                if area is None:
+                    note += f" I couldn't find “{name}” on the map — could you name the city?"
+        if new_profile.origin and new_profile.origin != profile.origin and new_profile.origin != home:
+            user.taste = {**(user.taste or {}), "home": new_profile.origin}  # later trips only confirm it
+
         self.trips.save_personality(trip, personality)
 
         progressed = new_profile != profile or personality.notes != before.notes
@@ -186,6 +205,8 @@ class TravelPlannerWorkflow:
             has_drafts=bool(trip.drafts),
             has_itinerary=itinerary is not None,
             surprise=surprise,
+            questions=state.get("questions", 0),
+            home=home,
         )
 
         mood_again = plan.asked_field == "mood" and "mood" in state.get("asked_fields", [])
@@ -193,6 +214,9 @@ class TravelPlannerWorkflow:
             plan.answer_options = [*plan.answer_options[:4], swipe_service.SWIPE_CHIP]
         if plan.action == TurnAction.OFFER_DRAFTS and not new_profile.duration_days:
             new_profile.duration_days = DEFAULT_DAYS
+        if plan.action == TurnAction.OFFER_DRAFTS:  # unasked: from home, and back to where they started
+            new_profile.origin = new_profile.origin or home
+            new_profile.return_to = new_profile.return_to or new_profile.origin
         trip.profile = new_profile.model_dump(mode="json")
 
         reply = not_reset + TurnService.strip_questions(decision.reply, plan.next_question) + note
@@ -211,8 +235,9 @@ class TravelPlannerWorkflow:
         # meanwhile, like choosing the first draft, lands after it in the conversation.
         asked = list(dict.fromkeys(state.get("asked_fields", []) + ([plan.asked_field] if plan.asked_field else [])))
         streak = state.get("questions_streak", 0) + 1 if plan.action == TurnAction.ASK and not progressed else 0
+        questions = state.get("questions", 0) + (plan.action == TurnAction.ASK and not trip.drafts and itinerary is None)
         trip.state = {**state, "asked_fields": asked, "questions_streak": streak, "answer_options": plan.answer_options,
-                      "no_plans": None}
+                      "no_plans": None, "last_asked": plan.asked_field, "questions": questions}
         trip.next_question = plan.next_question
         self.trips.add_message(trip.id, "user", shown_message)
         answer = self.trips.add_message(trip.id, "assistant", reply if not plan.next_question else f"{reply}\n\n{plan.next_question}")

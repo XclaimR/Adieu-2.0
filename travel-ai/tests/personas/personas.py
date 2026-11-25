@@ -18,6 +18,12 @@ WHEN = ("when", "dates", "month")
 
 NOT_SURE_DATES = (WHEN, "Not sure about dates yet.", {})
 
+
+def trip_ends(home: str) -> list[tuple]:
+    """Ticket #81: where the trip starts (asked once, after the vibe) and the one-tap return to the same place."""
+    return [(("starting from",), f"From {home}.", {"origin": [home], "return_to": [home]}),
+            (("flying back to",), f"Back to {home}", {})]
+
 PERSONAS = [
     {
         "name": "bachelor",
@@ -32,6 +38,7 @@ PERSONAS = [
             (HOW_LONG, "About 6 days.", {"duration_days": [6]}),
             (BUDGET, "Mid-range is fine.", {"budget_level": ["mid"]}),
             NOT_SURE_DATES,
+            *trip_ends("Mumbai"),
         ],
         "chips": ["friends", "adventur", "nightlife"],
         "banned": ["romantic", "couples", "honeymoon", "kids", "family-friendly"],
@@ -47,6 +54,7 @@ PERSONAS = [
         "answers": [
             (BUDGET, "Mid-range.", {"budget_level": ["mid"]}),
             NOT_SURE_DATES,
+            *trip_ends("London"),
         ],
         "chips": ["partner", "foodie", "relax"],
         "banned": ["bar crawl", "pub crawl", "nightclub", "kids", "playground"],
@@ -63,6 +71,7 @@ PERSONAS = [
             (WHERE, "Somewhere in the Algarve, Portugal.", {"destination": ["Algarve"]}),
             (HOW_LONG, "A week.", {"duration_days": [7]}),
             NOT_SURE_DATES,
+            *trip_ends("Manchester"),
         ],
         "chips": ["family", "kids", "warm", "relax"],
         "banned": ["nightlife", "nightclub", "bar crawl", "pub crawl", "casino", "romantic", "adults only",
@@ -76,7 +85,7 @@ PERSONAS = [
             "destination": ["Dolomites"], "party": ["solo"], "party_size": [1], "kids": [False], "duration_days": [5],
             "mood": ["hik", "nature", "adventur", "outdoor", "active", "mountain", "trek"],
         },
-        "answers": [NOT_SURE_DATES],
+        "answers": [NOT_SURE_DATES, *trip_ends("Berlin")],
         "chips": ["just me", "adventur", "mountain"],
         "banned": ["romantic", "couples", "honeymoon", "kids", "family-friendly"],
         "banned_tiers": [],
@@ -94,6 +103,7 @@ PERSONAS = [
             (WHO, "Just me.", {"party": ["solo"], "party_size": [1], "kids": [False]}),
             (HOW_LONG, "Two weeks.", {"duration_days": [14]}),
             NOT_SURE_DATES,
+            *trip_ends("Melbourne"),
         ],
         "chips": ["just me", "adventur"],
         "banned": ["luxury", "five-star", "5-star", "michelin"],
@@ -112,6 +122,7 @@ PERSONAS = [
             (MOOD, "Romantic and indulgent: fine dining and a nice spa.",
              {"mood": ["luxur", "romantic", "indulg", "relax", "fine", "elegant", "pamper", "upscale"]}),
             NOT_SURE_DATES,
+            *trip_ends("New York"),
         ],
         "chips": ["partner", "romantic"],
         "banned": ["hostel", "backpacker", "budget-friendly"],
@@ -137,6 +148,7 @@ PERSONAS = [
             (HOW_LONG, "A week.", {}),
             (BUDGET, "Mid-range is fine.", {"budget_level": ["mid"]}),
             NOT_SURE_DATES,
+            *trip_ends("Toronto"),
         ],
         "chips": ["just me", "relax"],
         "banned": ["nightclub", "bar crawl", "pub crawl", "party hostel"],

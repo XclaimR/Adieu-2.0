@@ -93,14 +93,15 @@ def test_a_town_within_reach_of_a_base_is_a_day_trip_not_a_base():
 
 def test_the_plan_falls_back_to_the_map_when_the_model_fails(fake_llm):
     fake_llm.errors["RouteChoice"] = RuntimeError("quota")
-    route, tip = RouteService.plan({"kind": "country"}, _library(), 10, TripProfile(destination="Japan"), _pace(0))
+    route, tip, _ = RouteService.plan({"kind": "country"}, _library(), 10, TripProfile(destination="Japan"), _pace(0))
     assert sum(c.days for c in route) == 10
     assert route[0].leg is None and all(c.leg and c.leg.minutes > 0 for c in route[1:])
     assert tip is None
 
 
 def test_a_city_trip_has_no_route():
-    assert RouteService.plan({"kind": "city"}, _library(), 10, TripProfile(destination="Tokyo"), None) == ([], None)
+    assert RouteService.plan({"kind": "city"}, _library(), 10, TripProfile(destination="Tokyo"), None) == (
+        [], None, (None, None))
 
 
 ROUTE = [City(name="Tokyo", lat=35.69, lng=139.69, days=2),
@@ -329,7 +330,7 @@ def _city(name):
 def test_the_owner_s_trip_without_the_model_or_router_goes_one_way_from_tokyo(fake_llm):
     fake_llm.errors["RouteChoice"] = RuntimeError("503")
     profile = TripProfile(destination="Japan", duration_days=14, party="solo")
-    route, _ = RouteService.plan({"kind": "country", "code": "JP"}, _owner_library(), 14, profile, Personality())
+    route, *_ = RouteService.plan({"kind": "country", "code": "JP"}, _owner_library(), 14, profile, Personality())
     # Was Kyoto, Hiroshima, Tokyo, Sendai, Sapporo: west, back east, then north.
     assert [c.name for c in route] == ["Tokyo", "Kyoto", "Osaka", "Hiroshima", "Nagasaki"]
     assert sum(c.days for c in route) == 14
@@ -406,6 +407,6 @@ def test_the_model_s_picks_also_go_one_way(monkeypatch):
     # The model picked Sapporo too: a flight back north after Hiroshima. It gives way to the next town on the line.
     picks = ["Tokyo", "Kyoto", "Hiroshima", "Sapporo"]
     monkeypatch.setattr(RouteService, "_ask", staticmethod(lambda *a: (picks, {}, None)))
-    route, _ = RouteService.plan({"kind": "country", "code": "JP"}, _owner_library(), 12,
+    route, *_ = RouteService.plan({"kind": "country", "code": "JP"}, _owner_library(), 12,
                                  TripProfile(destination="Japan"), Personality())
     assert [c.name for c in route] == ["Tokyo", "Kyoto", "Osaka", "Hiroshima"]
