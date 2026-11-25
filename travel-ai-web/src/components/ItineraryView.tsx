@@ -43,12 +43,18 @@ type Props = {
 export default function ItineraryView({ itinerary, notes, busy, onSwap, onRemove, onAsk }: Props) {
   const [selected, setSelected] = useState<string | null>(null);
   const [current, setCurrent] = useState(0);
+  const [picked, setPicked] = useState<number | null>(null); // the day the user chose, outlined until another is chosen
   const daysRef = useRef<HTMLDivElement>(null);
 
   const goTo = (i: number) => {
     const el = daysRef.current?.children[i] as HTMLElement | undefined;
-    daysRef.current?.scrollTo({ left: el ? el.offsetLeft - daysRef.current.offsetLeft : 0, behavior: "smooth" });
+    const calm = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    el?.scrollIntoView({ inline: "nearest", block: "nearest", behavior: calm ? "auto" : "smooth" });
+    const head = el?.querySelector("h3") as HTMLElement | null;
+    head?.focus({ preventScroll: true });
+    if (!calm) head?.animate([{ backgroundColor: "var(--accent-soft)" }, { backgroundColor: "transparent" }], 900);
     setCurrent(i);
+    setPicked(i);
   };
   const onScroll = () => {
     const box = daysRef.current;
@@ -106,10 +112,10 @@ export default function ItineraryView({ itinerary, notes, busy, onSwap, onRemove
       </nav>
 
       <div className="days" ref={daysRef} onScroll={onScroll}>
-        {itinerary.days.map((day) => (
-          <section key={day.day_number} className="day" aria-label={`Day ${day.day_number}`}>
+        {itinerary.days.map((day, i) => (
+          <section key={day.day_number} className={i === picked ? "day picked" : "day"} aria-label={`Day ${day.day_number}`}>
             <div className="day-head">
-              <h3>
+              <h3 tabIndex={-1}>
                 Day {day.day_number}
                 {day.city && <span className="muted"> · {day.city}</span>}
                 {day.theme && <span className="muted"> · {day.theme}</span>}
