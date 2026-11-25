@@ -97,7 +97,7 @@ export default function Home({ user, openTrip }: Props) {
   );
 
   return (
-    <main className="page">
+    <main className="page home">
       <section className="hero">
         <p className="muted">
           Hi{user.name ? ` ${user.name.split(" ")[0]}` : ""}. Finish the sentence and I'll plan the rest.
