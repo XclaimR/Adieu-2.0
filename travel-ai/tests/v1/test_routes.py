@@ -35,6 +35,8 @@ def _library():
 def no_transitous(monkeypatch):
     """Tests never call the real router; one that needs it sets its own answer."""
     monkeypatch.setattr(route_service, "transit", lambda a, b: None)
+    monkeypatch.setattr(route_service, "_routed", {})
+    monkeypatch.setattr(route_service, "_paused_until", 0.0)
 
 
 def _pace(value):
@@ -302,3 +304,108 @@ def test_a_car_estimate_takes_the_train_s_name_with_its_time(monkeypatch):
     monkeypatch.setattr(route_service, "transit", lambda a, b: Leg(mode="train", minutes=180))
     assert checked_leg(Leg(mode="car", minutes=240, cost="~$60"), tokyo, kyoto).mode == "train"
     assert route_service._kind("flight + airport bus") == "flight"
+
+
+# Ticket #78: the owner's Japan trip (107ba016), as towns() found it: name, point, listed places. The library lists
+# towns longest travel guide first (Tokyo first); towns() ranks them by places (Kyoto first).
+OWNER_TOWNS = [
+    ("Tokyo", 35.6895, 139.6917, 110), ("Hiroshima", 34.3853, 132.4553, 73), ("Kanazawa", 36.566, 136.65, 22),
+    ("Kyoto", 35.0117, 135.7683, 127), ("Osaka", 34.6939, 135.5022, 23), ("Sapporo", 43.0614, 141.3544, 34),
+    ("Sendai", 38.2683, 140.8694, 25), ("Nagasaki", 32.7833, 129.8667, 23), ("Yakushima", 30.3586, 130.5286, 14),
+    ("Naoshima", 34.4667, 134.0, 12), ("Mount Koya", 34.2125, 135.5864, 17),
+]
+
+
+def _owner_library():
+    return {"hubs": [{"name": n, "point": [lat, lng], "district": False} for n, lat, lng, _ in OWNER_TOWNS],
+            "places": [{"category": "do", "lat": lat, "lng": lng} for _, lat, lng, k in OWNER_TOWNS for _ in range(k)]}
+
+
+def _city(name):
+    return next(City(name=n, lat=lat, lng=lng) for n, lat, lng, _ in OWNER_TOWNS + [("Sapporo", 43.06, 141.35, 0)]
+                if n == name)
+
+
+def test_the_owner_s_trip_without_the_model_or_router_goes_one_way_from_tokyo(fake_llm):
+    fake_llm.errors["RouteChoice"] = RuntimeError("503")
+    profile = TripProfile(destination="Japan", duration_days=14, party="solo")
+    route, _ = RouteService.plan({"kind": "country", "code": "JP"}, _owner_library(), 14, profile, Personality())
+    # Was Kyoto, Hiroshima, Tokyo, Sendai, Sapporo: west, back east, then north.
+    assert [c.name for c in route] == ["Tokyo", "Kyoto", "Osaka", "Hiroshima", "Nagasaki"]
+    assert sum(c.days for c in route) == 14
+    assert [c.leg.mode for c in route[1:]] == ["high-speed train", "train", "high-speed train", "high-speed train"]
+    assert all(c.leg.cost is None for c in route[1:])  # no fares to show: the card then doesn't mention them
+
+
+def test_without_the_model_a_town_that_means_doubling_back_is_left_out():
+    found = towns(_owner_library())
+    assert found[0]["name"] == "Kyoto" and route_service.gateway(_owner_library(), found)["name"] == "Tokyo"
+    north = [t for t in found if t["name"] in ("Tokyo", "Sendai", "Sapporo")]
+    assert [t["name"] for t in route_service.one_way(north, north[0], 3)] == ["Tokyo", "Sapporo", "Sendai"]
+    assert [t["name"] for t in order(route_service.one_way(north, north[0], 3))] == ["Tokyo", "Sendai", "Sapporo"]
+
+
+@pytest.mark.parametrize("a, b, mode, low, high", [
+    ("Kyoto", "Hiroshima", "high-speed train", 95, 115),  # the bullet train: ~1h40
+    ("Hiroshima", "Tokyo", "high-speed train", 220, 250),  # ~4h, not a flight
+    ("Tokyo", "Sapporo", "flight", 180, 240),  # 830 km: flying is the usual way
+    ("Kyoto", "Osaka", "train", 30, 30),
+])
+def test_rough_legs_in_japan_take_the_bullet_train_and_fly_only_far(a, b, mode, low, high):
+    leg = route_service.rough_leg(_city(a), _city(b), "JP")
+    assert leg.mode == mode and low <= leg.minutes <= high
+
+
+def test_rough_legs_without_fast_trains_fly_sooner():
+    assert route_service.rough_leg(_city("Hiroshima"), _city("Tokyo"), "VN").mode == "flight"
+    assert route_service.rough_leg(_city("Kyoto"), _city("Hiroshima"), None).mode == "train or bus"
+
+
+class _Reply:
+    def __init__(self, status, body=None, headers=None):
+        self.status_code, self.body, self.headers = status, body or {}, headers or {}
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise RuntimeError(self.status_code)
+
+    def json(self):
+        return self.body
+
+
+def _real_transit(monkeypatch, replies):
+    calls = []
+    monkeypatch.setattr(route_service, "transit", TRANSIT)
+    monkeypatch.setattr(route_service.httpx, "get", lambda *a, **k: calls.append(1) or replies.pop(0))
+    return calls
+
+
+TRANSIT = route_service.transit
+TRIP = {"itineraries": [{"duration": 8340, "legs": [
+    {"mode": "WALK", "duration": 840}, {"mode": "REGIONAL_RAIL", "duration": 300},
+    {"mode": "HIGHSPEED_RAIL", "duration": 5760}, {"mode": "WALK", "duration": 360}, {"mode": "BUS", "duration": 720}]}]}
+
+
+def test_transitous_gives_the_time_on_board_and_is_asked_once_per_pair(monkeypatch):
+    calls = _real_transit(monkeypatch, [_Reply(200, TRIP)])
+    kyoto, hiroshima = _city("Kyoto"), _city("Hiroshima")
+    first = route_service.transit(kyoto, hiroshima)
+    assert (first.mode, first.minutes) == ("high-speed train", 113)  # 2h19 door to door, but 1h53 on board
+    assert route_service.transit(kyoto, hiroshima) == first and len(calls) == 1  # the next draft reads the cache
+
+
+def test_transitous_too_many_requests_pauses_every_call(monkeypatch):
+    calls = _real_transit(monkeypatch, [_Reply(429, headers={"Retry-After": "120"}), _Reply(200, TRIP)])
+    assert route_service.transit(_city("Kyoto"), _city("Hiroshima")) is None
+    assert route_service.transit(_city("Tokyo"), _city("Kyoto")) is None and len(calls) == 1  # paused, not asked
+    monkeypatch.setattr(route_service, "_paused_until", 0.0)  # two minutes later
+    assert route_service.transit(_city("Kyoto"), _city("Hiroshima")).minutes == 113  # the 429 wasn't kept
+
+
+def test_the_model_s_picks_also_go_one_way(monkeypatch):
+    # The model picked Sapporo too: a flight back north after Hiroshima. It gives way to the next town on the line.
+    picks = ["Tokyo", "Kyoto", "Hiroshima", "Sapporo"]
+    monkeypatch.setattr(RouteService, "_ask", staticmethod(lambda *a: (picks, {}, None)))
+    route, _ = RouteService.plan({"kind": "country", "code": "JP"}, _owner_library(), 12,
+                                 TripProfile(destination="Japan"), Personality())
+    assert [c.name for c in route] == ["Tokyo", "Kyoto", "Osaka", "Hiroshima"]

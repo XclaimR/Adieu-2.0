@@ -32,6 +32,8 @@ type Props = { itinerary: Itinerary; notes: Note[]; onCity: (city: City) => void
 /** Ticket #27: the cities in order with their nights and hotel, and how to get from one to the next. */
 export default function RouteCard({ itinerary, notes, onCity }: Props) {
   const nights = itinerary.route.reduce((sum, c) => sum + c.nights, 0);
+  const legs = itinerary.route.flatMap((c) => (c.leg ? [c.leg] : []));
+  const fares = legs.length > 0 && legs.every((leg) => leg.cost); // without the model, legs have no fare
   return (
     <section className="route-card" aria-label="Your route">
       <h3>
@@ -77,7 +79,7 @@ export default function RouteCard({ itinerary, notes, onCity }: Props) {
       </ol>
       <p className="small muted route-note">
         {itinerary.route_tip && <>🎫 {itinerary.route_tip} </>}
-        Times and fares are rough estimates.
+        {fares ? "Times and fares are rough estimates." : "Times are rough estimates."}
       </p>
     </section>
   );

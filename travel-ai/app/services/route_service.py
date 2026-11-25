@@ -4,6 +4,7 @@ legs (mode, fare), which it knows and open data doesn't. Transitous, an open pub
 real journey time where it covers the trip. Without the model, code does the rest, roughly."""
 import logging
 import re
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from itertools import permutations
@@ -28,9 +29,17 @@ NIGHTS_PER_CITY = 3.0  # at a steady pace; slow adds a night, packed takes one a
 MAX_CITIES = 6  # also keeps the order search (6! = 720 routes) instant
 MIN_CITY_PLACES = 8  # things to do and eat within reach, enough to fill a city's days
 FLIGHT_KM = 600.0
+# shortcut: countries with a high-speed rail network between their main cities; add one when a trip there shows a flight.
+HIGH_SPEED_RAIL = {"JP", "CN", "KR", "TW", "FR", "ES", "IT", "DE", "AT", "BE", "NL", "TR", "MA", "UZ", "SA"}
+RAIL_FLIGHT_KM = 800.0  # with fast trains, Tokyo to Hiroshima (680 km) is a train ride and Tokyo to Sapporo a flight
+RAIL_KMH = 175.0  # straight-line speed of a fast train, stops included: Kyoto to Hiroshima ~1h45, Tokyo to Hiroshima ~3h50
+DETOUR = 1.5  # without the model, a route may be this much longer than the straight line between its ends
 # Free for open-source, non-commercial, light use; a route makes at most MAX_CITIES - 1 calls.
 TRANSITOUS = "https://api.transitous.org/api/v5/plan"
 MAX_GROUND_MINUTES = 8 * 60  # a longer train or bus ride usually loses to a flight
+PAUSE_SECONDS = 300  # after Transitous says "too many requests" or is down, unless it says how long
+_routed: dict[tuple, "Leg | None"] = {}  # answers by the two points, kept while the app runs: timetables change slowly
+_paused_until = 0.0
 _RIDES = {"HIGHSPEED_RAIL": "high-speed train", "BUS": "bus", "COACH": "bus", "FERRY": "ferry"}  # else "train"
 _FLIGHT = re.compile(r"fl(y|ight)|plane|air", re.I)
 
@@ -67,13 +76,35 @@ def _length(route: tuple[dict, ...]) -> float:
 def order(cities: list[dict]) -> list[dict]:
     """The shortest one-way route (no zig-zag), counting the trip from the main city, where flights usually land,
     to the first stop. So it starts in the main city unless starting elsewhere still saves distance.
-    shortcut: the main city is the model's first pick; without the model it is the town with the most listed places
-    (Kyoto, not Tokyo); add a gateway airport per country if that fallback is used often."""
+    The main city is the model's first pick, or without the model the gateway()."""
     main = cities[0]
     def cost(route: tuple[dict, ...]) -> tuple:
         arrive = distance_km((main["lat"], main["lng"]), (route[0]["lat"], route[0]["lng"]))
         return round(arrive + _length(route)), route.index(main)
     return list(min(permutations(cities), key=cost)) if cities else []
+
+
+def gateway(library: dict, found: list[dict]) -> dict:
+    """Where flights land, without the model: the town with the longest travel guide (Tokyo, not Kyoto, which has
+    more listed places). The library lists its towns longest guide first."""
+    by_name = {t["name"]: t for t in found}
+    return next((by_name[h["name"]] for h in library["hubs"] if h["name"] in by_name), found[0])
+
+
+def one_way(found: list[dict], start: dict, n: int) -> list[dict]:
+    """The start and the best-known towns that keep the trip going one way from it. A town that
+    would mean doubling back (Sapporo on a Tokyo, Kyoto, Hiroshima trip) is left out, even if that means fewer."""
+    chosen = [start]
+    for town in found:
+        if len(chosen) == n:
+            break
+        if town is start:
+            continue
+        route = order([*chosen, town])
+        ends = distance_km((route[0]["lat"], route[0]["lng"]), (route[-1]["lat"], route[-1]["lng"]))
+        if start in (route[0], route[-1]) and _length(tuple(route)) <= DETOUR * ends:
+            chosen.append(town)
+    return chosen
 
 
 def share_days(days: int, ordered: list[dict], ranked: list[str]) -> list[int]:
@@ -90,22 +121,50 @@ def _morning(lng: float) -> str:
     return (datetime(day.year, day.month, day.day, 8, tzinfo=UTC) - timedelta(hours=lng / 15)).isoformat()
 
 
+def _journey(a: City, b: City) -> Leg | None:
+    """The quickest journey's time on board (walks and waits left out, as people quote train times)."""
+    response = httpx.get(TRANSITOUS, params={"fromPlace": f"{a.lat},{a.lng}", "toPlace": f"{b.lat},{b.lng}",
+                                             "time": _morning(a.lng), "numItineraries": 3},
+                         headers={"User-Agent": USER_AGENT}, timeout=10)
+    if response.status_code == 429 or response.status_code >= 500:
+        wait = response.headers.get("Retry-After", "")
+        raise _Busy(int(wait) if wait.isdigit() else PAUSE_SECONDS)
+    response.raise_for_status()
+    best = min(response.json().get("itineraries") or [], key=lambda t: t["duration"], default=None)
+    rides = [leg for leg in best["legs"] if leg["mode"] != "WALK"] if best else []
+    if not rides:
+        return None
+    main = max(rides, key=lambda leg: leg.get("duration", 0))["mode"]
+    return Leg(mode=_RIDES.get(main, "train"), minutes=round(sum(leg.get("duration", 0) for leg in rides) / 60))
+
+
+class _Busy(Exception):
+    def __init__(self, seconds: int):
+        self.seconds = seconds
+
+
 def transit(a: City, b: City) -> Leg | None:
-    """The quickest public-transport journey from Transitous, or None where it has no timetables or is down."""
+    """The quickest public-transport journey from Transitous, or None where it has no timetables or is down.
+    Answers are kept, and after a "too many requests" no call goes out for a while, so drafts don't add to it."""
+    global _paused_until
+    key = (round(a.lat, 3), round(a.lng, 3), round(b.lat, 3), round(b.lng, 3))
+    if key in _routed:
+        return _routed[key] and _routed[key].model_copy()
+    if time.monotonic() < _paused_until:
+        return None
     try:
-        response = httpx.get(TRANSITOUS, params={"fromPlace": f"{a.lat},{a.lng}", "toPlace": f"{b.lat},{b.lng}",
-                                                 "time": _morning(a.lng), "numItineraries": 3},
-                             headers={"User-Agent": USER_AGENT}, timeout=10)
-        response.raise_for_status()
-        best = min(response.json().get("itineraries") or [], key=lambda t: t["duration"], default=None)
-        rides = [leg for leg in best["legs"] if leg["mode"] != "WALK"] if best else []
-        if not rides:
-            return None
-        main = max(rides, key=lambda leg: leg.get("duration", 0))["mode"]
-        return Leg(mode=_RIDES.get(main, "train"), minutes=round(best["duration"] / 60))
+        found = _journey(a, b)
+    except _Busy as busy:
+        _paused_until = time.monotonic() + busy.seconds
+        logger.warning("Transitous is busy; no calls for %d s", busy.seconds)
+        return None
     except Exception:  # the time is a bonus: an outage or a new answer format must never cost the plans
         logger.warning("Transitous couldn't route %s to %s", a.name, b.name, exc_info=True)
         return None
+    if len(_routed) > 2000:  # shortcut: a whole-cache reset bounds memory; an LRU if routes get busy
+        _routed.clear()
+    _routed[key] = found
+    return found and found.model_copy()
 
 
 def _kind(mode: str) -> str:
@@ -126,11 +185,15 @@ def checked_leg(estimate: Leg, a: City, b: City) -> Leg:
     return estimate.model_copy(update={"minutes": found.minutes})
 
 
-def rough_leg(a: City, b: City) -> Leg:
-    """Mode and time from the distance alone, when the model can't say."""
+def rough_leg(a: City, b: City, country: str | None = None) -> Leg:
+    """Mode and time from the distance and the country alone, when the model can't say. A flight only for a long
+    hop: further where fast trains run."""
     km = distance_km((a.lat, a.lng), (b.lat, b.lng))
-    if km > FLIGHT_KM:
+    rail = country in HIGH_SPEED_RAIL
+    if km > (RAIL_FLIGHT_KM if rail else FLIGHT_KM):
         return Leg(mode="flight", minutes=round(150 + km / 750 * 60))  # check-in and transfers included
+    if rail:
+        return Leg(mode="high-speed train" if km >= 150 else "train", minutes=max(30, round(km / RAIL_KMH * 60)))
     return Leg(mode="train or bus", minutes=round(travel_minutes((a.lat, a.lng), (b.lat, b.lng))))
 
 
@@ -159,14 +222,17 @@ class RouteService:
             logger.exception("Couldn't ask for the route; planning it from the map alone")
             picked, legs, tip = [], {}, None
         by_name = {t["name"]: t for t in found}
-        ranked = list(dict.fromkeys([p for p in picked if p in by_name] + [t["name"] for t in found]))[:n]
+        picked = [p for p in picked if p in by_name]
+        start = by_name[picked[0]] if picked else gateway(library, found)  # the model lists the gateway first
+        towns_in_order = [by_name[name] for name in dict.fromkeys(picked + [t["name"] for t in found])]
+        ranked = [t["name"] for t in one_way(towns_in_order, start, n)]
         ordered = order([by_name[name] for name in ranked])
         route = [City(name=c["name"], lat=c["lat"], lng=c["lng"], days=k)
                  for c, k in zip(ordered, share_days(days, ordered, ranked))]
         pairs = list(zip(route, route[1:]))
         with ThreadPoolExecutor(max_workers=MAX_CITIES) as pool:  # at once: a slow router costs one timeout, not five
             checked = pool.map(lambda pair: checked_leg(
-                legs.get(frozenset((pair[0].name, pair[1].name))) or rough_leg(*pair), *pair), pairs)
+                legs.get(frozenset((pair[0].name, pair[1].name))) or rough_leg(*pair, area.get("code")), *pair), pairs)
             for (_, city), leg in zip(pairs, checked):
                 city.leg = leg
         return route, tip
