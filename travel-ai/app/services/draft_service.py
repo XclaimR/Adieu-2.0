@@ -523,7 +523,8 @@ Rules:
         allowed = PersonalityService.traits(personality)[0]  # only known traits; guesses stay off the cards
         moments = PersonalityService.moments(personality)
         made, failure = False, None
-        for flavor, brief in FLAVORS:
+        todo = list(FLAVORS)
+        for i, (flavor, brief) in enumerate(todo):
             try:
                 plan = LLMClient.generate_structured(self._prompt(profile, pool, days, brief, personality),
                                                      RouteDraftPlan if pool.route else DraftPlan,
@@ -531,6 +532,8 @@ Rules:
             except Exception as e:
                 logger.exception("Draft %s failed", flavor)
                 failure = e
+                if i < len(FLAVORS):  # one more try after the others (Ticket #43); a retry isn't retried
+                    todo.append((flavor, brief))
                 continue
             itinerary = pool.to_itinerary(plan, profile.destination, moments)
             summary = unclaimed(plan.summary, *(a.description for d in itinerary.days for a in d.activities)) or ""
