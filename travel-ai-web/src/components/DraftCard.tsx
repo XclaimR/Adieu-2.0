@@ -6,17 +6,28 @@ import type { Draft, PlanScales } from "../types";
 /** "Packed · Icons · $$$", and all six scales plus $ next to what the traveler asked: on hover or keyboard focus,
  * or by tapping "See its scales" on a phone. Escape closes it. */
 function DraftScales({ scales, title }: { scales: PlanScales; title: string }) {
-  const [open, setOpen] = useState(false);
+  // Hover (a real mouse only), keyboard focus and the button are kept apart: a phone tap also fires fake mouse
+  // and focus events, which must not cancel the tap.
+  const [hover, setHover] = useState(false);
+  const [pinned, setPinned] = useState(false);
+  const open = hover || pinned;
+  const close = () => (setHover(false), setPinned(false));
   const id = useId();
   return (
     <div
       className="draft-scales"
-      onMouseEnter={() => setOpen(true)}
-      onMouseLeave={() => setOpen(false)}
-      onBlur={(e) => !e.currentTarget.contains(e.relatedTarget) && setOpen(false)}
-      onKeyDown={(e) => e.key === "Escape" && setOpen(false)}
+      onPointerEnter={(e) => e.pointerType === "mouse" && setHover(true)}
+      onPointerLeave={(e) => e.pointerType === "mouse" && setHover(false)}
+      onBlur={(e) => !e.currentTarget.contains(e.relatedTarget) && setPinned(false)}
+      onKeyDown={(e) => e.key === "Escape" && close()}
     >
-      <button className="draft-summary" aria-expanded={open} aria-controls={id} onClick={() => setOpen(!open)} onFocus={() => setOpen(true)}>
+      <button
+        className="draft-summary"
+        aria-expanded={open}
+        aria-controls={id}
+        onClick={() => setPinned(!pinned)}
+        onFocus={(e) => e.currentTarget.matches(":focus-visible") && setPinned(true)}
+      >
         <b>{scales.summary}</b>
         <span className="see">{open ? "Hide its scales" : "See its scales"}</span>
       </button>
