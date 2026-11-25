@@ -15,11 +15,16 @@ _NUMBER_WORDS = {
 }
 _NUM = r"(\d{1,2}|" + "|".join(_NUMBER_WORDS) + r")"
 
+# Relatives coming along. Adult siblings travel like friends; the family hint means quiet days and no nightlife.
+_RELATIVES = {
+    Party.FAMILY: r"mom|mum|dad|mother|father|parents|aunt|uncle|grand(?:ma|pa|mother|father|parents)|niece|nephew|in-laws",
+    Party.FRIENDS: r"sisters?|brothers?|siblings?|cousins?",
+}
 _PARTY_WORDS = {
     Party.SOLO: r"\b(solo|alone|myself|just me|on my own)\b",
     Party.COUPLE: r"\b(wife|husband|partner|girlfriend|boyfriend|fianc[eé]e?|couple|honeymoon|spouse|my love|my partner)\b",
-    Party.FRIENDS: r"\b(friends?|buddies|mates|group|gang|crew)\b",
-    Party.FAMILY: r"\b(family|kids?|children|child|mom|mum|dad|mother|father|parents|son|daughter|baby|toddler)\b",
+    Party.FRIENDS: rf"\b(friends?|buddies|mates|group|gang|crew|{_RELATIVES[Party.FRIENDS]})\b",
+    Party.FAMILY: rf"\b(family|kids?|children|child|son|daughter|baby|toddler|{_RELATIVES[Party.FAMILY]})\b",
 }
 _KIDS = r"\b(kids?|children|child|son|daughter|baby|toddler|family with kids)\b"
 _NO_KIDS = r"\b(no kids|without (the )?kids|kid-?free|adults only)\b"
@@ -66,6 +71,10 @@ def ground_updates(updates: ProfileUpdates, message: str) -> ProfileUpdates:
 
     if u.party and not _has(_PARTY_WORDS[u.party], text):
         u.party = None
+    # "with my sister", "my parents and I": a relative who is coming, when the model left the party empty.
+    for party, who in _RELATIVES.items():  # family first: "with my sister and my parents" is a family trip
+        if u.party is None and _has(rf"\b(with|and) (my|our) ({who})\b|\bmy ({who}) and i\b", text):
+            u.party = party
     # Keep a size only if the user said that number, or the party implies it ("my wife" = 2).
     # "Group of friends" says nothing about how many; the model likes to guess 4 or 6.
     said = {_to_int(m.group(1)) for m in re.finditer(rf"\b{_NUM}\b", text)}

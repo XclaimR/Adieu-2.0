@@ -57,7 +57,7 @@ Return:
 - profile_updates: only core facts the user actually said about THIS trip. Null for anything not said.
   Never guess defaults (no "solo", no "mid" budget, no party_size unless stated).
   Core fields: destination (a real place name, e.g. "Japan", never a sentence), start_date, duration_days,
-  party (solo|couple|friends|family), party_size, kids, budget_level (budget|mid|luxury),
+  party (solo|couple|friends|family; siblings or cousins are friends, parents or other relatives are family), party_size, kids, budget_level (budget|mid|luxury),
   origin (the city or country the trip starts from) and return_to (where they fly back to, only if said).
   An answer to "which city are you starting from" is the origin, never the destination.
   A wish about one item or day never changes budget_level.
