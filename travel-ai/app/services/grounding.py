@@ -59,10 +59,10 @@ def ground_updates(updates: ProfileUpdates, message: str) -> ProfileUpdates:
     text = message.lower()
     u = updates.model_copy(deep=True)
 
-    if u.destination:
-        words = [w for w in re.split(r"[\s,]+", u.destination.lower()) if len(w) >= 3]
-        if not any(w in text for w in words):
-            u.destination = None
+    for place in ("destination", "origin", "return_to"):
+        if (name := getattr(u, place)) and not any(
+                w in text for w in re.split(r"[\s,]+", name.lower()) if len(w) >= 3):
+            setattr(u, place, None)
 
     if u.party and not _has(_PARTY_WORDS[u.party], text):
         u.party = None

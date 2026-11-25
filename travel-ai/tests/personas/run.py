@@ -23,7 +23,8 @@ SWIPE_CHIP = "Swipe to find my style"  # the app's swipe_service.SWIPE_CHIP
 RETRIES, RETRY_WAIT = 3, 30
 DEFAULT_DAYS = 4  # the app's draft_service.DEFAULT_DAYS
 DRAFT_COUNT = 3  # the app's travel_planner_workflow.DRAFT_COUNT; fewer means a draft was silently dropped
-CHECKED_FIELDS = ["party", "party_size", "kids", "budget_level", "start_date", "duration_days", "mood"]
+CHECKED_FIELDS = ["party", "party_size", "kids", "budget_level", "start_date", "duration_days", "mood", "origin",
+                  "return_to"]
 
 
 class Api:
@@ -90,8 +91,9 @@ def converse(api: Api, persona: dict, answer=None) -> dict:
         if message == SHOW_PLANS and show_plans_turn is None:
             show_plans_turn = n
         if vibe_due is None and all(k in facts for k in ("destination", "mood", "party")):
-            # With the vibe known the app may still ask duration once (missing_vibe), unless it was already said.
-            vibe_due = n + (0 if "duration_days" in facts else 1)
+            # With the vibe known the app may still ask duration once (missing_vibe), unless it was already said,
+            # then where the trip starts and whether it ends there (Ticket #81).
+            vibe_due = n + (0 if "duration_days" in facts else 1) + 2
         trip = resp["trip"]
         if resp["drafts"] or resp.get("options"):
             plans_turn = plans_turn or n

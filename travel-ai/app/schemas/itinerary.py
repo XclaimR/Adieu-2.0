@@ -17,6 +17,12 @@ class Leg(BaseModel):
     note: str | None = None  # "covered by the JR Pass"
 
 
+class Flight(Leg):
+    """Ticket #81: the trip's first and last leg, between home and a gateway city. Kept for booking links."""
+    frm: str
+    to: str
+
+
 class City(BaseModel):
     """One base on a multi-city trip."""
     name: str
@@ -42,6 +48,8 @@ class Itinerary(BaseModel):
     stay: Pick | None = None  # one-city plans only; a route keeps a stay per city
     route: list[City] = []
     route_tip: str | None = None  # e.g. a rail pass that covers the legs
+    fly_in: Flight | None = None  # home to the first city of the route
+    fly_out: Flight | None = None  # the last city back home
     days: list[DayPlan]
 
     @model_validator(mode="before")
@@ -113,6 +121,14 @@ class Itinerary(BaseModel):
             first = next((d for d in self.days if d.city == city.name), None)
             if first is day and city.leg:
                 return city
+        return None
+
+    def light_day(self, day: DayPlan) -> str | None:
+        """"arrival" or "departure" for the first and last day of a route flown into and out of."""
+        if self.fly_in and self.days and day is self.days[0]:
+            return "arrival"
+        if self.fly_out and len(self.days) > 1 and day is self.days[-1]:
+            return "departure"
         return None
 
     def target_ids(self) -> list[str]:

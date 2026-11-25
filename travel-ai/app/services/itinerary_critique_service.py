@@ -100,6 +100,8 @@ def _timing(plan: Itinerary, day: DayPlan, known: dict[str, PlaceCandidate], vis
     # A moving day starts when the train or plane gets in.
     arriving = plan.moving_day(day)
     clock, travelled, late, from_stay = CLOCK["morning"][0] + (arriving.leg.minutes if arriving else 0), 0.0, None, 0.0
+    if plan.light_day(day) == "arrival":  # shortcut: no flight times, so an arrival day starts in the afternoon
+        clock = max(clock, CLOCK["afternoon"][0])
     ids = []
     for i, stop in enumerate(day.activities):
         leg = 0.0
@@ -159,6 +161,10 @@ def _route_issues(plan: Itinerary, day: DayPlan) -> list[Issue]:
     if (arriving := plan.moving_day(day)) and len(day.activities) > MOVING_DAY_STOPS:
         issues.append(Issue(problem=f"Day {day.day_number} is a moving day to {arriving.name} with "
                                     f"{len(day.activities)} stops", where=[day.id],
+                            suggestion=f"keep it to {MOVING_DAY_STOPS} stops or fewer: remove or move one"))
+    if (light := plan.light_day(day)) and len(day.activities) > MOVING_DAY_STOPS:
+        issues.append(Issue(problem=f"Day {day.day_number} is the {light} day with {len(day.activities)} stops",
+                            where=[day.id],
                             suggestion=f"keep it to {MOVING_DAY_STOPS} stops or fewer: remove or move one"))
     return issues
 

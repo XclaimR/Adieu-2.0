@@ -53,14 +53,17 @@ def drafts_rule(api):
     return next(r for r in check(FAMILY, converse(api, FAMILY)) if r[0] == "drafts once vibe is known")
 
 
-def test_drafts_may_wait_one_turn_for_the_duration_question():
-    # Destination arrives on turn 2; duration wasn't said yet, so the app may ask it once before drafting.
-    api = FakeApi([("Where to?", 0), ("How many days?", 0), (None, 3)])
-    assert drafts_rule(api) == ("drafts once vibe is known", True, "due by turn 3, drafts at turn 3")
+def test_drafts_may_wait_for_the_duration_and_trip_ends_questions():
+    # Destination arrives on turn 2; duration wasn't said yet, so the app may ask it once, then where the trip
+    # starts and where it ends (Ticket #81), before drafting.
+    api = FakeApi([("Where to?", 0), ("How many days?", 0), ("Which city are you starting from?", 0),
+                   ("Flying back to London at the end, or a different city?", 0), (None, 3)])
+    assert drafts_rule(api) == ("drafts once vibe is known", True, "due by turn 5, drafts at turn 5")
 
 
-def test_drafts_late_after_the_duration_question_fail():
-    api = FakeApi([("Where to?", 0), ("How many days?", 0), ("Any diet needs?", 0), (None, 3)])
+def test_drafts_late_after_those_questions_fail():
+    api = FakeApi([("Where to?", 0), ("How many days?", 0), ("Which city are you starting from?", 0),
+                   ("Flying back to London at the end, or a different city?", 0), ("Any diet needs?", 0), (None, 3)])
     assert drafts_rule(api)[1] is False
 
 

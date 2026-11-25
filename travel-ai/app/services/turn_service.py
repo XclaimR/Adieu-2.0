@@ -12,6 +12,7 @@ from app.services.llm_client import LLMClient
 
 HISTORY_LIMIT = 12
 STUCK_AFTER_QUESTIONS = 4
+MAX_QUESTIONS = 8  # before the first plans; then plans come whatever is still unknown
 SHOW_PLANS = "__show_plans__"
 SHOW_PLANS_TEXT = "Show me some plans"
 
@@ -27,6 +28,19 @@ VIBE_QUESTIONS: dict[str, tuple[str, list[str]]] = {
     "duration": ("How many days are you thinking?", ["A weekend", "4-5 days", "A week", "Not sure yet"]),
 }
 
+# Ticket #81: where the trip starts and ends, after the vibe. Asked once ever: later trips confirm the home city.
+# Worded without "where", "when" or "days", which the persona suite reads as other questions.
+ORIGIN_QUESTION = "Which city are you starting from? I'll use it to pick the airport you land at."
+CONFIRM_QUESTION = "Starting from {home} and flying back there?"
+HOME_BOTH_WAYS = "Yes, {home} both ways"
+START_ELSEWHERE = "I'm starting elsewhere"
+BACK_ELSEWHERE = "Flying back elsewhere"
+RETURN_QUESTION = "Flying back to {origin} at the end, or a different city?"
+BACK_HOME = "Back to {origin}"
+OTHER_CITY = "A different city"
+RETURN_CITY_QUESTION = "Which city are you flying back to?"
+ENDS = ("origin", "origin_city", "return", "return_city")
+
 CHANGE_QUESTION = (
     "Anything you'd like to change?",
     ["More relaxed", "More food spots", "Add a hidden gem", "Looks perfect"],
@@ -40,7 +54,9 @@ Return:
 - profile_updates: only core facts the user actually said about THIS trip. Null for anything not said.
   Never guess defaults (no "solo", no "mid" budget, no party_size unless stated).
   Core fields: destination (a real place name, e.g. "Japan", never a sentence), start_date, duration_days,
-  party (solo|couple|friends|family), party_size, kids, budget_level (budget|mid|luxury).
+  party (solo|couple|friends|family), party_size, kids, budget_level (budget|mid|luxury),
+  origin (the city or country the trip starts from) and return_to (where they fly back to, only if said).
+  An answer to "which city are you starting from" is the origin, never the destination.
   A wish about one item or day never changes budget_level.
 - note_changes: understand meaning, negation and context. One entry per separate point they made, including every
   request to change the plan. Everything that matters beyond the core facts goes here: mood, wishes, dislikes,
@@ -130,8 +146,9 @@ class TurnPlan:
     asked_field: str | None = None
 
 
-def missing_vibe(profile: TripProfile, asked: list[str]) -> str | None:
-    """The first piece of the minimum vibe still unknown (duration only until it has been asked once)."""
+def missing_vibe(profile: TripProfile, asked: list[str], message: str = "") -> str | None:
+    """The first piece of the minimum vibe still unknown (duration only until it has been asked once),
+    then where the trip starts and ends (each asked once; the return defaults to the start)."""
     if not profile.destination:
         return "destination"
     if not profile.mood:
@@ -140,7 +157,40 @@ def missing_vibe(profile: TripProfile, asked: list[str]) -> str | None:
         return "party"
     if not profile.duration_days and "duration" not in asked:
         return "duration"
+    if not profile.origin:
+        if "origin" not in asked:
+            return "origin"
+        return "origin_city" if message == START_ELSEWHERE and "origin_city" not in asked else None
+    if not profile.return_to:
+        if message in (BACK_ELSEWHERE, OTHER_CITY) and "return_city" not in asked:
+            return "return_city"
+        return "return" if not {"return", "return_city"} & set(asked) else None
     return None
+
+
+def read_ends(profile: TripProfile, message: str, last_asked: str | None, home: str | None,
+              stuck: bool = False) -> TripProfile:
+    """The start and return city from a tapped answer, or a short typed one, to the question just asked.
+    The model reads longer answers ("from Delhi, back to Mumbai") into the profile itself."""
+    if last_asked not in ENDS:
+        return profile
+    got, said = profile.model_copy(), _plain(message)
+    if home and said == _plain(HOME_BOTH_WAYS.format(home=home)):
+        got.origin = got.return_to = home
+    elif home and said == _plain(BACK_ELSEWHERE) and last_asked == "origin":
+        got.origin = home
+    elif got.origin and said == _plain(BACK_HOME.format(origin=got.origin)):
+        got.return_to = got.origin
+    elif not stuck and said not in map(_plain, (START_ELSEWHERE, BACK_ELSEWHERE, OTHER_CITY, SHOW_PLANS_TEXT)) \
+            and len(said.split()) <= 4:
+        field = "origin" if last_asked.startswith("origin") else "return_to"
+        if not getattr(got, field) and (name := re.sub(r"^(i'?m )?(from|back to|to)\s+", "", said)):
+            setattr(got, field, name.title())  # the map lookup then gives its own spelling
+    return got
+
+
+def _plain(text: str) -> str:
+    return text.strip(" .!").casefold()
 
 
 def decision_schema(itinerary: Itinerary | None) -> type[TurnDecision]:
@@ -212,6 +262,8 @@ Latest user message:
         has_drafts: bool,
         has_itinerary: bool,
         surprise: bool = False,
+        questions: int = 0,
+        home: str | None = None,
     ) -> TurnPlan:
         """Code-level guarantees that don't depend on the model behaving."""
         q, chips = decision.next_question, decision.answer_options[:5]
@@ -225,7 +277,7 @@ Latest user message:
             return TurnPlan(TurnAction.SHOW_OPTIONS, q, chips, OptionsRequest(kind=OptionsKind.DESTINATIONS))
 
         stuck = decision.user_stuck or show_plans or questions_streak >= STUCK_AFTER_QUESTIONS
-        missing = missing_vibe(profile, asked)
+        missing = missing_vibe(profile, asked, message)
 
         if not profile.destination:
             if stuck:
@@ -249,9 +301,11 @@ Latest user message:
         if decision.action == TurnAction.SHOW_OPTIONS and request and explicit:
             return TurnPlan(TurnAction.SHOW_OPTIONS, q, chips, request)
 
-        if stuck:
+        if stuck or questions >= MAX_QUESTIONS:
             return TurnPlan(TurnAction.OFFER_DRAFTS, None, [])
 
+        if missing in ENDS:
+            return TurnService._ask_ends(missing, profile, home)
         if missing:
             return TurnService._ask(missing, q, chips, decision)
 
@@ -259,6 +313,21 @@ Latest user message:
         if not has_drafts or changing or decision.action in (TurnAction.OFFER_DRAFTS, TurnAction.EDIT_ITINERARY):
             return TurnPlan(TurnAction.OFFER_DRAFTS, None, [])
         return TurnPlan(TurnAction.CHAT, q, chips)
+
+    @staticmethod
+    def _ask_ends(missing: str, profile: TripProfile, home: str | None) -> TurnPlan:
+        """Our own words: the model doesn't know the home city, and the answers are read by code."""
+        if missing == "origin" and home:
+            q, chips = CONFIRM_QUESTION.format(home=home), [HOME_BOTH_WAYS.format(home=home), START_ELSEWHERE,
+                                                           BACK_ELSEWHERE]
+        elif missing.startswith("origin"):
+            q, chips = ORIGIN_QUESTION, []
+        elif missing == "return":
+            q, chips = RETURN_QUESTION.format(origin=profile.origin), [BACK_HOME.format(origin=profile.origin),
+                                                                      OTHER_CITY]
+        else:
+            q, chips = RETURN_CITY_QUESTION, []
+        return TurnPlan(TurnAction.ASK, q, chips, asked_field=missing)
 
     @staticmethod
     def _ask(missing: str, q: str | None, chips: list[str], decision: TurnDecision) -> TurnPlan:

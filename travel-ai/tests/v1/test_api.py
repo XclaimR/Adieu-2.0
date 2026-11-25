@@ -28,8 +28,9 @@ def mood(word, quote):
 def ready_trip(client, auth, fake_llm, **extra):
     """A trip with the minimum vibe known and duration already asked, so the next turn drafts plans."""
     trip = new_trip(client, auth)
-    fake_llm.decisions.append(decision(destination="Lisbon", notes=[mood("relaxed", "relaxed")], party=Party.COUPLE, **extra))
-    say(client, auth, trip["id"], "Lisbon, relaxed, with my partner, on a budget")  # asks duration
+    fake_llm.decisions.append(decision(destination="Lisbon", notes=[mood("relaxed", "relaxed")], party=Party.COUPLE,
+                                       origin="London", return_to="London", **extra))
+    say(client, auth, trip["id"], "Lisbon, relaxed, with my partner, on a budget, from London and back")  # asks duration
     return trip
 
 
@@ -110,7 +111,7 @@ def test_a_destination_is_loaded_once_then_turns_ask_nobody_outside(client, auth
     say(client, auth, trip["id"], "show me where to eat")
 
     assert [a["place_id"] for a in fake_places.loads] == ["Q-Lisbon"]
-    assert fake_places.resolved == ["Lisbon"]
+    assert fake_places.resolved == ["Lisbon", "London"]  # where they start, looked up once too
     saved = client.get(f"/trips/{trip['id']}", headers=auth).json()
     assert saved["destination_name"] == "Lisbon"
 
@@ -362,8 +363,9 @@ def test_trip_list_shows_the_chosen_plan_name_and_length(client, auth, fake_llm)
 
 def test_friends_trip_tells_the_planner_to_skip_romantic_spots(client, auth, fake_llm):
     trip = new_trip(client, auth)
-    fake_llm.decisions.append(decision(destination="Lisbon", notes=[mood("foodie", "food trip")], party=Party.FRIENDS))
-    say(client, auth, trip["id"], "Lisbon food trip with friends")  # asks duration
+    fake_llm.decisions.append(decision(destination="Lisbon", notes=[mood("foodie", "food trip")], party=Party.FRIENDS,
+                                       origin="Paris", return_to="Paris"))
+    say(client, auth, trip["id"], "Lisbon food trip with friends, from Paris and back")  # asks duration
     say(client, auth, trip["id"], "not sure")  # drafts
 
     draft_prompts = [p for name, p in fake_llm.prompts if name == "DraftPlan"]
