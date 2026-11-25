@@ -56,6 +56,12 @@ class TripSummary(BaseModel):
     updated_at: datetime
 
 
+class ConflictOut(BaseModel):
+    """A held message that goes against an earlier wish (Ticket #87), in the traveler's words."""
+    earlier: str
+    now: str
+
+
 class TripOut(BaseModel):
     id: str
     title: str
@@ -71,6 +77,7 @@ class TripOut(BaseModel):
     skipped_place_ids: list[str]
     next_question: str | None
     answer_options: list[str]
+    conflict: ConflictOut | None = None  # while its question is the open one
     itinerary: Itinerary | None
     messages: list[MessageOut]
 

@@ -101,6 +101,11 @@ Return:
   swap_day = the same, but instead of one of the trip's days ("swap a day for X"): the trip keeps its length.
   Use the cities' usual English names. Don't also add note_changes for the stops of a city that is leaving.
   chat           - a general question or comment that needs nothing else
+- conflict: only when the latest message asks for something that goes against a note they stated earlier and
+  did not take back in this message: they asked for a small beach town and now say "put me in Ubud" (inland), or a
+  city swap that breaks a wish. note = that note's id; fill everything else as if they had agreed, without
+  removing that note (the app asks them first). Null when it adds to or narrows an earlier wish, or when they take
+  it back plainly ("forget the beach, Ubud instead" is a remove plus an add, no conflict).
 - reply: 1-2 short sentences reacting to the user. No questions in the reply. Same language as the user. Don't promise suggestions or plans ("let me suggest…") and never say a change is done — the app makes it afterwards.
 - next_question: ONE short question that matters most now, or null. Never ask what's already known.
 - answer_options: 2-5 short tap-to-answer choices for next_question (e.g. ["Just me", "My partner", "Friends"]).
@@ -136,6 +141,8 @@ Examples (non-null parts only):
   route_changes [{op swap_day, city "Osaka", place "Universal Studios Japan"}]
 - "make day 2 more relaxed" -> action edit_itinerary, edit_request "make day 2 more relaxed",
   note add d2 want "more relaxed" category "pace" then change
+- with note n1 "small beach town", "put me in Ubud for most of it" -> action edit_itinerary, the route change as
+  asked, conflict {note "n1", now "put me in Ubud", keep "the beach town", new "Ubud"}
 """
 
 

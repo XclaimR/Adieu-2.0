@@ -248,7 +248,7 @@ export default function TripScreen({ tripId, firstMessage }: { tripId: string; f
   // "Last options" reopens this session's panel, else what the server remembers.
   const lastPanel = panel ?? trip.panel;
   const showPlanList = !trip.itinerary && (drafting || trip.drafts.length > 0 || !!trip.no_plans);
-  const canShowPlans = !!trip.profile.destination && !trip.itinerary && !busy;
+  const canShowPlans = !!trip.profile.destination && !trip.itinerary && !busy && !trip.conflict;
   const title = trip.itinerary?.title ?? trip.profile.destination ?? "Your next trip";
   const scales = trip.scales;
   const lastIsAssistant = !live && trip.messages[trip.messages.length - 1]?.role === "assistant";
@@ -394,6 +394,21 @@ export default function TripScreen({ tripId, firstMessage }: { tripId: string; f
               {m.content}
             </div>
           ))}
+          {!live && trip.conflict && (
+            <div className="clash">
+              <div className="then">
+                <span className="when">You said earlier</span>
+                <q>{trip.conflict.earlier}</q>
+              </div>
+              <div className="vs">
+                <span title="doesn't fit with">≠</span>
+              </div>
+              <div className="now">
+                <span className="when">You said now</span>
+                <q>{trip.conflict.now}</q>
+              </div>
+            </div>
+          )}
           {live && <div className="msg user">{live.userText}</div>}
           {live && live.steps.length > 0 && (
             <ul className="steps">
@@ -424,11 +439,18 @@ export default function TripScreen({ tripId, firstMessage }: { tripId: string; f
 
         {!busy && (chips.length > 0 || canShowPlans) && (
           <div className="chips">
-            {chips.map((c) => (
-              <button key={c} onClick={() => (c === SWIPE_CHIP ? setDeckOpen(true) : send(c))}>
-                {c}
-              </button>
-            ))}
+            {chips.map((c, i) =>
+              trip.conflict ? (
+                <button key={c} className={`chip-choice ${i === 0 ? "keep" : ""}`} onClick={() => send(c)}>
+                  <b>{c}</b>
+                  <span>{i === 0 ? "Nothing changes" : `Forgets “${trip.conflict.earlier}”`}</span>
+                </button>
+              ) : (
+                <button key={c} onClick={() => (c === SWIPE_CHIP ? setDeckOpen(true) : send(c))}>
+                  {c}
+                </button>
+              ),
+            )}
             {canShowPlans && (
               <button className="chip-plans" onClick={() => send(SHOW_PLANS)}>
                 {trip.drafts.length > 0 ? "New plans" : "Show me plans now"}
