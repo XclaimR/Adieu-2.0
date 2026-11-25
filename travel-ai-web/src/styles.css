@@ -114,16 +114,26 @@ input:focus-visible, button:focus-visible, a:focus-visible, summary:focus-visibl
   border-top: 2px solid var(--accent);
   background: var(--panel);
 }
-.brand { border: 0; background: none; font-size: 22px; padding: 4px 0; color: var(--ink); letter-spacing: 0.04em; }
+.brand { border: 0; background: none; padding: 4px 0; color: var(--ink); }
+.lockup { display: inline-flex; align-items: center; gap: 10px; }
+.lockup img { width: 32px; height: 32px; }
+.lockup svg { height: 24px; width: auto; }
 .brand:hover:not(:disabled) { border: 0; color: var(--accent-text); }
 .avatar { width: 26px; height: 26px; border-radius: 50%; }
 .page { width: 100%; max-width: 1080px; margin: 0 auto; padding: 32px 16px 64px; overflow-y: auto; }
 .page.narrow { max-width: 720px; }
 
 /* Login */
-.login { min-height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; padding: 24px 16px; text-align: center; }
-.logo { font-size: 56px; margin: 0; color: var(--ink); letter-spacing: 0.04em; }
-.logo::after { content: ""; display: block; width: 48px; height: 2px; margin: 10px auto 0; background: var(--accent); }
+.login { position: relative; min-height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; padding: 24px 16px 112px; text-align: center; }
+/* The sea from the logo, along the bottom of the sign-in screen. */
+.login::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 72px;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 72'%3E%3Cg fill='none' stroke-width='6'%3E%3Cpath d='M-24 18q12-10 24 0t24 0 24 0 24 0' stroke='%23f2a65a'/%3E%3Cpath d='M-24 36q12-10 24 0t24 0 24 0 24 0M-24 54q12-10 24 0t24 0 24 0 24 0' stroke='%23fdf1e3'/%3E%3C/g%3E%3C/svg%3E") repeat-x bottom / 48px 72px, var(--band);
+}
+.logo { margin: 0; color: var(--ink); }
+.logo .lockup { gap: 20px; }
+.logo .lockup img { width: 72px; height: 72px; }
+.logo .lockup svg { height: 54px; }
 .tagline { max-width: 340px; color: var(--muted); font-size: 17px; }
 .dev-login { display: flex; flex-direction: column; gap: 8px; width: 100%; max-width: 320px; margin-top: 16px; padding-top: 16px; border-top: 1px dashed var(--line); }
 
@@ -142,7 +152,22 @@ input:focus-visible, button:focus-visible, a:focus-visible, summary:focus-visibl
 .vibe-emoji { font-size: 26px; margin-bottom: 4px; }
 
 /* Home */
-.hero { padding: 24px 0 8px; }
+/* Shoreline: the hero is the sea from the logo, and its bottom edge is a wave. */
+.hero { position: relative; background: var(--band); color: var(--band-ink); margin: -16px -16px 48px; padding: 32px 24px 64px; border-radius: 20px 20px 0 0; }
+.hero .muted, .hero .small { color: var(--band-muted); }
+.hero .sentence { color: var(--band-ink); }
+.hero .blank { color: var(--accent); }
+.hero .blank:hover:not(:disabled) { background: rgb(253 241 227 / 0.1); }
+.hero button.primary { background: var(--accent); border-color: var(--accent); color: var(--band); }
+.hero .row button:not(.primary) { background: transparent; color: var(--band-ink); border-color: var(--band-line); }
+.hero .error { color: #ffb4a9; }
+/* The wave edge under every teal band: page colour below the wave, an apricot line on it. */
+.hero::after, .trip-head::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 24px; pointer-events: none;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 24'%3E%3Cpath d='M-24 12q12-10 24 0t24 0 24 0 24 0' fill='none' stroke='%23f2a65a' stroke-width='3'/%3E%3C/svg%3E") repeat-x bottom / 48px 24px, var(--bg);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 24'%3E%3Cpath d='M-24 12q12-10 24 0t24 0 24 0 24 0V24H-24z' stroke='%23000' stroke-width='3'/%3E%3C/svg%3E") repeat-x bottom / 48px 24px;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 24'%3E%3Cpath d='M-24 12q12-10 24 0t24 0 24 0 24 0V24H-24z' stroke='%23000' stroke-width='3'/%3E%3C/svg%3E") repeat-x bottom / 48px 24px;
+}
 .hero-form { display: flex; gap: 8px; margin: 16px 0 12px; max-width: 560px; }
 .hero-form input { flex: 1; padding: 14px 20px; font-size: 16px; }
 .idea-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; }
@@ -195,7 +220,7 @@ input:focus-visible, button:focus-visible, a:focus-visible, summary:focus-visibl
 .chat { width: 380px; flex-shrink: 0; display: flex; flex-direction: column; min-height: 0; background: var(--panel); border-left: 1px solid var(--line); }
 .chat-toggle { display: none; }
 
-.trip-head { background: var(--band); color: var(--band-ink); padding: 20px 24px 16px; display: flex; flex-direction: column; gap: 2px; }
+.trip-head { position: relative; background: var(--band); color: var(--band-ink); padding: 20px 24px 36px; display: flex; flex-direction: column; gap: 2px; }
 .trip-head h1 { margin: 0 0 12px; font-size: clamp(28px, 4vw, 40px); font-weight: 800; line-height: 1.05; max-width: 22ch; }
 .trip-sub { font-size: 14px; color: var(--band-muted); }
 
