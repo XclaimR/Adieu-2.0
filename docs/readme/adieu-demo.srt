@@ -1,0 +1,35 @@
+1
+00:00:00,950 --> 00:00:04,017
+Adieu starts with one sentence about your trip.
+
+2
+00:00:10,750 --> 00:00:14,337
+It asks only what it needs, like where you're flying from.
+
+3
+00:00:16,550 --> 00:00:21,217
+Not sure what you like? Swipe, and your trip gets its own personality.
+
+4
+00:00:23,350 --> 00:00:25,307
+It writes a few plans,
+
+5
+00:00:29,550 --> 00:00:32,990
+and an AI critic checks each one before you see it.
+
+6
+00:00:36,150 --> 00:00:41,613
+Pick one, and the route just works: flights in and out, and a hotel in every city.
+
+7
+00:00:43,550 --> 00:00:46,344
+Each plan shows how it fits what you asked.
+
+8
+00:00:47,350 --> 00:00:50,944
+Every stop gets a time. Every day gets a rhythm.
+
+9
+00:00:52,550 --> 00:00:55,680
+Adieu plans your trip like a friend who knows you.
