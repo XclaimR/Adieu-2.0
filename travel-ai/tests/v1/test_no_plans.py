@@ -186,3 +186,30 @@ def test_with_drafts_the_reply_shown_is_the_reply_saved(client, auth, fake_llm):
     assert replies[-1].startswith(CLAIM) and "Here are 3 ways" in replies[-1]
     assert [e["type"] for e in events].index("draft") > events.index(next(e for e in events if e.get("text") == replies[-1]))
     assert events[-1]["trip"]["messages"][-1]["content"] == replies[-1]
+
+
+# ---------- one draft lost (Ticket #43) ----------
+
+def rate_limited():
+    response = httpx.Response(429, request=httpx.Request("POST", "http://llm"))
+    return RateLimitError("rate limited", response=response, body=None)
+
+
+@pytest.mark.parametrize("fails, drafts", [(1, 3), (2, 2)])
+def test_a_rate_limited_draft_is_tried_once_more_then_named(client, auth, fake_llm, monkeypatch, fails, drafts):
+    trip = ready_trip(client, auth, fake_llm)
+    left = [fails]
+
+    def generate(prompt, schema, **kwargs):
+        if schema is DraftPlan and "Off the beaten path" in prompt and left[0]:
+            left[0] -= 1
+            raise rate_limited()
+        return fake_llm(prompt, schema, **kwargs)
+    monkeypatch.setattr(LLMClient, "generate_structured", staticmethod(generate))
+
+    events = plan_turn(client, auth, trip["id"])
+
+    assert [e["type"] for e in events].count("draft") == drafts
+    shown = " ".join(e["text"] for e in events if e["type"] == "note")
+    assert ("One plan couldn't be drafted right now" in shown) is (drafts < 3)
+    assert client.get(f"/trips/{trip['id']}", headers=auth).json()["messages"][-1]["content"].endswith(shown)

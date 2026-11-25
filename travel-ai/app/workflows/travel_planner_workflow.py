@@ -39,6 +39,7 @@ _CONFIRM_RESET = re.compile(r"[^\w?]*((yes|yeah|yep|yup)(\W+(please|i\W?m sure|s
                             r"|sure|i\W?m sure|confirm)[^\w?]*", re.I)
 _DECLINE_RESET = re.compile(r"\W*(no(\W+(thanks|keep my trip))?|nope|nah|cancel|never ?mind|don\W?t)\W*", re.I)
 DRAFT_COUNT = 3
+MISSING_PLAN = "One plan couldn't be drafted right now — ask for more plans to try again."
 PLANS_READY = f"Here are {DRAFT_COUNT} ways your trip could look — pick the one that feels right."
 # A source that is out for the day says "per day" or "PerDay": trying again right away can't work.
 _DAILY_LIMIT = re.compile(r"per ?day", re.I)
@@ -391,6 +392,10 @@ class TravelPlannerWorkflow:
             if reviews:
                 yield _progress("Checking your plans…")
             yield from self._show_reviewed(trip, reviews, answer, reply_with_plans, wait=True)
+            if 0 < len(trip.drafts) < DRAFT_COUNT:
+                answer.content = f"{answer.content} {MISSING_PLAN}"
+                self.db.commit()
+                yield {"type": "note", "text": MISSING_PLAN}
         finally:
             checks.shutdown(wait=False, cancel_futures=True)  # a closed stream doesn't wait for the model
 
