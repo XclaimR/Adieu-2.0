@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ApiError, api, sendStream } from "../api";
-import type { OptionSet, Personality, PickAction, Trip, TripProfile } from "../types";
+import type { OptionSet, Personality, PickAction, PlanScales as PlanScalesReading, Trip, TripProfile } from "../types";
 import PickCard from "../components/PickCard";
 import IdeaCard from "../components/IdeaCard";
 import DraftCard, { DraftSkeleton } from "../components/DraftCard";
@@ -9,6 +9,7 @@ import ItineraryView from "../components/ItineraryView";
 import NoteList from "../components/NoteList";
 import Credits from "../components/Credits";
 import SwipeDeck, { OPEN_DECK, SWIPE_CHIP } from "../components/SwipeDeck";
+import { Dollars, Legend, SCALES, ScaleGrid, scaleWord } from "../components/PlanScales";
 
 const DRAFT_COUNT = 3;
 const SHOW_PLANS = "__show_plans__";
@@ -34,55 +35,28 @@ function profileFacts(p: TripProfile): string[] {
   return [...new Set(facts.filter((f): f is string => !!f))];
 }
 
-// Mirrors personality_service.SCALES / KNOWN / LEAN: [label, left pole, right pole, middle].
-const SCALES: [string, string, string, string, string][] = [
-  ["pace", "Pace", "Slow", "Packed", "Steady"],
-  ["food", "Food", "Just fuel", "The point", "Matters"],
-  ["energy", "Energy", "Chill", "Nightlife", "Some nights"],
-  ["crowds", "Crowds", "Hidden gems", "Icons", "A mix"],
-  ["money", "Experiences", "Cheap", "Splurge", "Some paid"],
-  ["comfort", "Comfort", "Cheap stays", "Splurge", "Mid-range"],
-];
-const KNOWN = 0.5;
-const LEAN = 0.25;
-
-/** The trip's personality as six small scales: a solid knob when Adieu is sure, a dashed one while it isn't.
- * The traveler's notes about the whole trip open underneath. */
-function PersonalityCard({ personality }: { personality: Personality }) {
-  const { scales, notes } = personality;
-  const tripNotes = notes.filter((n) => n.target === "trip");
-  const isMoment = (n: (typeof notes)[number]) => n.once && n.kind !== "avoid";
+/** The trip's personality: six scales of five notches, the chosen plan in apricot next to what the traveler asked
+ * (Ticket #83). The traveler's notes about the whole trip open underneath. */
+function PersonalityCard({ personality, reading }: { personality: Personality; reading: PlanScalesReading }) {
+  const tripNotes = personality.notes.filter((n) => n.target === "trip");
+  const isMoment = (n: (typeof tripNotes)[number]) => n.once && n.kind !== "avoid";
   const moments = tripNotes.filter(isMoment).map((n) => n.text);
-  const words = SCALES.map(([key, , left, right, middle]) => {
-    const s = scales[key];
-    const known = !!s && s.confidence >= KNOWN;
-    const value = s?.value ?? 0;
-    return { key, known, value, word: !known ? "Not sure" : value < -LEAN ? left : value > LEAN ? right : middle };
-  });
-  const fresh = useFresh(words.filter((w) => w.known).map((w) => `${w.key}:${w.word}`));
+  const fresh = useFresh(
+    SCALES.flatMap(([key]) => {
+      const r = reading.scales[key];
+      return r && (r.plan ?? r.wish) ? [`${key}:${scaleWord(key, r.plan ?? r.wish)}`] : [];
+    }),
+  );
+  const planned = Object.values(reading.scales).some((r) => r.plan != null);
   return (
     <details className="personality">
       <summary>
         <span className="personality-head">
           <span className="personality-label">Trip personality</span>
+          {planned && <Legend />}
           {tripNotes.length > 0 && <span className="small">Notes ({tripNotes.length})</span>}
         </span>
-        <span className="fingerprint">
-          {SCALES.map(([key, label], i) => {
-            const { known, value, word } = words[i];
-            return (
-              <span key={key} className={`scale ${known ? "known" : ""} ${fresh.has(`${key}:${word}`) ? "fresh" : ""}`}>
-                <span className="scale-text">
-                  <span>{label}</span>
-                  <span className="scale-word">{word}</span>
-                </span>
-                <span className="scale-track" aria-hidden>
-                  <span className="scale-knob" style={{ left: `${((value + 1) / 2) * 100}%` }} />
-                </span>
-              </span>
-            );
-          })}
-        </span>
+        <ScaleGrid reading={reading} fresh={fresh} />
       </summary>
       <NoteList notes={tripNotes.filter((n) => !isMoment(n))} target="trip" />
       {moments.length > 0 && <span className="small">To fit in: {moments.join(", ")}</span>}
@@ -276,6 +250,7 @@ export default function TripScreen({ tripId, firstMessage }: { tripId: string; f
   const showPlanList = !trip.itinerary && (drafting || trip.drafts.length > 0 || !!trip.no_plans);
   const canShowPlans = !!trip.profile.destination && !trip.itinerary && !busy;
   const title = trip.itinerary?.title ?? trip.profile.destination ?? "Your next trip";
+  const scales = trip.scales;
   const lastIsAssistant = !live && trip.messages[trip.messages.length - 1]?.role === "assistant";
 
   let panelBody: React.ReactNode = null;
@@ -319,9 +294,25 @@ export default function TripScreen({ tripId, firstMessage }: { tripId: string; f
     <main className={`trip ${chatOpen ? "chat-open" : ""}`}>
       <section className="board">
         <header className="trip-head">
-          {trip.itinerary && <span className="trip-sub">Your trip to {trip.itinerary.destination}</span>}
-          <h1>{title}</h1>
-          <PersonalityCard personality={trip.personality} />
+          <div className="head-top">
+            <div>
+              {trip.itinerary && <span className="trip-sub">Your trip to {trip.itinerary.destination}</span>}
+              <h1>{title}</h1>
+            </div>
+            {scales && (scales.cost.plan || scales.cost.wish) && (
+              <div className="cost-top">
+                <span className="cost-label">Trip cost</span>
+                <Dollars cost={scales.cost} />
+                {(scales.why || scales.cost.wish) && (
+                  <span className="cost-why">
+                    {scales.why && <span className="cost-reason">{scales.why}. </span>}
+                    {scales.cost.wish && `You asked ${"$".repeat(scales.cost.wish)}.`}
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+          {scales && <PersonalityCard personality={trip.personality} reading={scales} />}
         </header>
 
         <div className="board-body">

@@ -212,12 +212,26 @@ input:focus-visible, button:focus-visible, a:focus-visible, summary:focus-visibl
 .scale-text { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; }
 .scale-word { color: var(--band-muted); }
 .scale.known .scale-word { color: var(--band-ink); font-weight: 600; }
-.scale-track { position: relative; height: 12px; margin-inline: 6px; background: linear-gradient(var(--band-line), var(--band-line)) center / 100% 2px no-repeat; }
-.scale-knob { position: absolute; top: 0; transition: left 0.6s cubic-bezier(0.2, 0.8, 0.2, 1), width 0.3s, margin 0.3s; width: 28px; height: 12px; margin-left: -14px; border-radius: 6px; border: 1.5px dashed var(--band-muted); }
-.scale.known .scale-knob { width: 12px; margin-left: -6px; border: 0; background: var(--accent); }
+.scale-wish { font-size: 12px; color: var(--band-muted); }
+/* Ticket #83: five notches per scale. Apricot is the plan, a cream outline is what the traveler asked. */
+.notches { display: grid; grid-template-columns: repeat(5, 1fr); gap: 3px; }
+.notch { display: block; height: 10px; border-radius: 3px; background: rgb(253 241 227 / 0.14); transition: background 0.4s; }
+.notch.plan { background: var(--accent); }
+.notch.wish { box-shadow: inset 0 0 0 1.5px var(--band-ink); }
+.legend { display: flex; gap: 12px; font-size: 12px; color: var(--band-muted); margin-left: auto; margin-right: 12px; }
+.legend > span { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.legend .notch { width: 14px; }
+.dollars { display: inline-grid; grid-template-columns: repeat(5, 22px); gap: 3px; vertical-align: middle; }
+.dollars > span { text-align: center; font-family: var(--display); font-weight: 800; font-size: 14px; line-height: 22px; border-radius: 5px; color: var(--band-muted); background: rgb(253 241 227 / 0.1); }
+.dollars .plan { background: var(--accent); color: var(--ink); }
+.dollars .wish { box-shadow: inset 0 0 0 1.5px var(--band-ink); }
+.head-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+.cost-top { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex-shrink: 0; text-align: right; font-size: 13px; max-width: 40%; }
+.cost-label { color: var(--band-muted); }
+.cost-why { color: var(--band-muted); font-size: 12px; line-height: 1.35; }
 /* A new answer lands: the knob and the chip glow for a moment. */
 .scale.fresh .scale-word { color: var(--accent); }
-.scale.fresh .scale-knob { box-shadow: 0 0 0 5px color-mix(in srgb, var(--accent) 35%, transparent); }
+.scale.fresh .notch.plan, .scale.fresh .notch.wish { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent); }
 .fact.fresh { box-shadow: 0 0 0 2px var(--accent); }
 .personality-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--band-muted); }
 .log { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
@@ -278,8 +292,8 @@ input:focus-visible, button:focus-visible, a:focus-visible, summary:focus-visibl
 .pick-actions .liked-btn { border-color: var(--accent); color: var(--accent-text); }
 .pick-actions a { margin-left: auto; }
 
-.draft { border-radius: 18px; overflow: hidden; background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); display: flex; flex-direction: column; }
-.draft .photo { aspect-ratio: 16 / 7; }
+.draft { border-radius: 18px; background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); display: flex; flex-direction: column; }
+.draft .photo { aspect-ratio: 16 / 7; border-radius: 18px 18px 0 0; overflow: hidden; }
 .draft .photo:not(:has(img)) { display: none; }
 .draft-body { padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 10px; flex: 1; }
 .flavor { font-size: 13px; font-weight: 600; color: var(--accent-text); margin-bottom: -8px; }
@@ -296,6 +310,17 @@ input:focus-visible, button:focus-visible, a:focus-visible, summary:focus-visibl
 .draft-days { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 4px; font-size: 13px; }
 .draft-days li { display: grid; grid-template-columns: 52px 1fr; gap: 6px; }
 .draft-body .primary { margin-top: auto; padding: 12px 18px; }
+.closest { align-self: flex-start; font-size: 12px; font-weight: 600; padding: 2px 10px; border-radius: 999px; background: var(--accent-soft); color: var(--ink); border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent); }
+.draft-scales { position: relative; }
+.draft-summary { all: unset; box-sizing: border-box; width: 100%; display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; border-radius: 8px; }
+.draft-summary:focus-visible { outline: 2px solid var(--accent-text); outline-offset: 3px; }
+.draft-summary b { font-weight: 600; }
+.draft-summary .see { font-size: 12px; padding: 2px 10px; border-radius: 999px; border: 1px solid var(--line); color: var(--accent-text); white-space: nowrap; }
+.scales-pop { position: absolute; z-index: 5; top: calc(100% + 8px); left: 50%; width: 330px; transform: translateX(-50%); background: var(--band); color: var(--band-ink); border-radius: 14px; padding: 12px 14px; box-shadow: 0 14px 40px rgb(0 0 0 / 0.28); display: flex; flex-direction: column; gap: 8px; }
+.scales-pop .fingerprint { grid-template-columns: 1fr 1fr; gap: 10px 16px; }
+.scales-pop .scale-text { flex-direction: column; gap: 0; }
+.pop-head { font-size: 12px; color: var(--band-muted); }
+.pop-cost { display: flex; align-items: center; gap: 10px; padding-top: 8px; border-top: 1px solid var(--band-line); font-size: 13px; }
 .draft-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; align-items: stretch; }
 .no-plans { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 14px; border-radius: var(--radius); background: var(--panel); border: 1px solid var(--line); }
 .draft.skeleton .photo, .draft.skeleton .line { animation: pulse 1.4s ease-in-out infinite; }
@@ -366,6 +391,12 @@ input:focus-visible, button:focus-visible, a:focus-visible, summary:focus-visibl
   .board-body { padding: 14px 16px 24px; }
   .draft-list { display: flex; overflow-x: auto; scroll-snap-type: x mandatory; margin-inline: -16px; padding: 0 16px 6px; }
   .draft-list > * { flex: 0 0 86%; scroll-snap-align: center; }
+  /* The plan list scrolls sideways, so the scales open inside the card. */
+  .scales-pop { position: static; width: auto; transform: none; margin-top: 8px; box-shadow: none; }
+  .fingerprint { grid-template-columns: 1fr 1fr; gap: 12px 18px; }
+  .cost-reason { display: none; }
+  .personality-head { flex-wrap: wrap; row-gap: 6px; }
+  .legend { order: 3; width: 100%; margin: 0; }
   .days { grid-auto-columns: 100%; }
 
   .chat {

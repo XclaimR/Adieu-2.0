@@ -87,6 +87,10 @@ only on a clear yes while that is the current question. A no brings back the que
      remove, or do = one-time); `check_changes` checks only structure: real quote, real ids. Nothing is overwritten.
    - Targets are slots, so a note survives swapping the place. A removed stop's notes move to its day.
    - **Mood** and the **six scales** are derived from the notes (plus budget and kids from the profile).
+   - **Plan scales** (Ticket #83, `services/plan_scales.py`): rules read a plan as steps 1–5 on each scale and $ to
+     $$$$$, worked out on read in `TripRepository.to_out`, so edits move them with no stored state. Energy and cost
+     per stop come from the critic's existing per-stop ratings (`Activity.energy/cost`), with keyword fallbacks.
+     The ghosts are the stated scales (confidence ≥ 0.5); the old cheap/splurge `money` lean is the $ ghost.
    `traveler_fit` (places_service) gives ranking and drafts the stated limits, the wishes and the numbered moments
    ("one big night out"); choosing a draft points each moment's note at the stop that fulfils it.
    Live check: `python -m tests.evals.run_personality_evals` (17 messages, one call each).

@@ -100,6 +100,8 @@ export type Draft = {
   unplanned: string[];
   warnings: string[];
   itinerary: Itinerary;
+  /** Worked out on read; missing on a draft that is still streaming in. */
+  scales?: PlanScales | null;
 };
 
 /** Why the last try made no drafts. */
@@ -118,6 +120,10 @@ export type Note = {
   once: boolean;
 };
 
+/** A plan on one scale as steps 1 (left pole) to 5 (right pole), next to what the traveler asked (Ticket #83). */
+export type ScaleReading = { plan: number | null; wish: number | null };
+export type PlanScales = { scales: Record<string, ScaleReading>; cost: ScaleReading; why: string; summary: string; closest: boolean };
+
 export type Personality = { scales: Record<string, Scale>; notes: Note[]; traits: string[]; unknown: string[] };
 
 export type Message = { role: "user" | "assistant"; content: string; created_at: string };
@@ -127,6 +133,7 @@ export type Trip = {
   title: string;
   profile: TripProfile;
   personality: Personality;
+  scales: PlanScales | null;
   destination_name: string | null;
   panel: OptionSet | null;
   drafts: Draft[];

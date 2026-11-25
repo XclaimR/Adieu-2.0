@@ -128,14 +128,16 @@ class TripRepository:
     def to_out(self, trip: TripModel) -> TripOut:
         personality = self.personality(trip)
         itinerary = self.itinerary(trip)
-        drafts = [d.model_copy(update={"scales": plan_scales.read(d.itinerary, personality)}) for d in self.drafts(trip)]
+        # The wishes as the next turn would derive them: a trip saved before a scale existed still gets its ghost.
+        wished = PersonalityService.update(personality, self.profile(trip))
+        drafts = [d.model_copy(update={"scales": plan_scales.read(d.itinerary, wished)}) for d in self.drafts(trip)]
         plan_scales.mark_closest([d.scales for d in drafts])
         return TripOut(
             id=trip.id,
             title=trip.title,
             profile=self.profile(trip),
             personality=PersonalityService.card(personality),
-            scales=plan_scales.read(itinerary, personality),
+            scales=plan_scales.read(itinerary, wished),
             destination_name=(trip.destination_area or {}).get("name"),
             panel=self.panel(trip),
             drafts=drafts,
