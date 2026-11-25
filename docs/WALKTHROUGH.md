@@ -131,6 +131,25 @@ only on a clear yes while that is the current question. A no brings back the que
      Until the first reviewed draft arrives the reply is only "Let me put some plans together"; then a second `reply` event replaces it
      with the model's words and "Here are 3 ways". With no draft (too few places, so no LLM call; place data or the LLM
      unavailable; all drafts rejected) the reply and the panel say why, from `trip.state.no_plans`.
+   - Human-quality plans (Ticket #67, `services/day_rhythm.py`). Fame: Wikivoyage listings keep their Wikidata id
+     and the library stores how many Wikipedias cover each place (`wikivoyage.fame`, one Wikidata call per 50
+     places; Fushimi Inari 39, the Osaka Science Museum 8), which adds to its score. Libraries built before carry no
+     `version` and are rebuilt once. Must-sees are each city's most famous sights (15+ Wikipedias, up to days + 1);
+     a city with 3+ nights gets a day trip to the most famous town nearby (Nara from Kyoto, Miyajima from Hiroshima).
+     One model call per trip (`DraftService._check_must_sees`) drops odd picks, adds when to go or what to book,
+     and, only on a strong "avoid crowds", names a quieter stand-in, shown as "Instead of ...". Hidden gems are
+     described places under 10 Wikipedias. Tips come from the guide's own sentences (book, early, sunset, closed
+     days; no prices) or that call; a stop follows its tip (early first in the morning, sunset in the evening) and
+     shows it as a line under its note. Pace sets stops a day (slow 3 .. packed 5; drafting asks for at most 4,
+     the review adds a fifth) and rest days (`day_rhythm.roles`: slow every 3-4 days, middle once a week on 7+
+     days, none when packed), named "Rest day" by code: at most 2 places to linger (a beach, spa, garden, park or
+     café by name or type; the critic's calm rating proved too noisy), meals aside, no night out. Each city's pool
+     gets 3 such places. A rest day the traveler edits into a busier one is renamed, not faulted. A Wikidata outage
+     marks the library partial, so it is retried within the hour. Code also flags a dish twice a day or more than max(2, days/4) times a trip and 3 sights of a kind
+     a day, unless asked for; a title that promises a beach or a club the day lacks becomes "main stop and area";
+     a day nothing could fill stays, reported as empty, so the trip keeps its length. A rest day needs one calm
+     place, not only cafés or bars. A sunrise tip is an early start. Junk listings ("in front of Amed
+     Cafe", a town's own name) are dropped when the library loads.
    - Every destination has a real area (atolls and mountain ranges too). Trips saved with Google's area, which could
      be a 300 m box around a pin, are looked up again by name near that box.
    - Edit itinerary → `DraftService.edit`: the model gets the changed part with its notes and returns edit
@@ -159,7 +178,7 @@ only on a clear yes while that is the current question. A no brings back the que
         repairs can chase each other and each round costs 3-50 s.
      5. What is still wrong shows on the card ("Check before choosing") or after the edit ("Worth a look").
         If the critic fails or times out (45 s per attempt), the plan still shows, marked "I couldn't double-check
-        this plan." Cost: a drafting turn is 7 LLM calls (8 with a route), up to 13 with repairs and re-checks (under the free
+        this plan." Cost: a drafting turn is 8 LLM calls (9 with a route; one is the must-see check), up to 13 with repairs and re-checks (under the free
         tier's 15 a minute); an edit is 3, up to 5.
 6. A final `done` event carries the refreshed trip.
 
@@ -207,8 +226,9 @@ Credits for all sources are under "Data credits" at the bottom of every page.
 - `tests/v1/` — the live code: API flows with a fake LLM and fake open data (`conftest.py`), grounding, ranking, parsing and merging the open data (`test_open_data.py`).
   Run: `docker compose exec api python -m pytest -q --ignore=tests/evals`
 - `tests/evals/` — real-model conversation checks: `docker compose exec api python -m tests.evals.run_turn_evals`
-- `tests/personas/` — seven test travelers (bachelor group to Japan, Lisbon food couple, family beach, solo hiker,
-  budget backpacker, luxury weekend, and "unsure", who plays the swipe deck and picks the first idea) chat with the **running** app over HTTP and get pass/fail per rule: no invented
+- `tests/personas/` — ten test travelers (bachelor group to Japan, Lisbon food couple, family beach, solo hiker,
+  budget backpacker, luxury weekend, "unsure", who plays the swipe deck and picks the first idea, and from
+  Ticket #67 a slow wellness trip to Bali, a first-timer in Japan and a family in Rome) chat with the **running** app over HTTP and get pass/fail per rule: no invented
   profile facts, at most 8 questions before plans, drafts once destination/mood/party are known, picks fit the
   traveler. Personas and their scripted answers live in `personas.py`; the checks in `run.py`. Needs
   `ALLOW_DEV_LOGIN=true`; uses whatever model the server is configured with (local qwen3:8b takes a few minutes per
@@ -217,6 +237,10 @@ Credits for all sources are under "Data credits" at the bottom of every page.
   - From the host against any server (stdlib only): `cd travel-ai && python3 -m tests.personas.run --base-url http://localhost:8000`
   - One persona, longer per-turn timeout: `--persona bachelor --timeout 900` (`--persona` repeats)
   - Also checks all 3 drafts arrived (a dropped draft fails).
+  - Ticket #67, inside the container: exact day count, titles against stops, repeats, restful rest days, and how many
+    of a human itinerary's must-sees a draft has (`references.py`: our own summaries of seven owner-approved
+    itineraries; none for bachelor, family_beach, unsure). `--judge` adds one model call per persona that scores the
+    first plan 1-5 against it on rhythm, variety, tips and "reads like a local".
 - `tests/agent/` — AI traveler agent: a model plays each persona through the running app in its own words (taps
   chips, says "just show me plans", picks a draft), then a judge model gives each persona rule a reason, adds
   "no needless questions" and "notes match what was said", and scores "felt understood" 1–5. Reuses the personas and

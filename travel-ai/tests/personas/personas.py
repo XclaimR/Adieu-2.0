@@ -154,4 +154,59 @@ PERSONAS = [
         "banned": ["nightclub", "bar crawl", "pub crawl", "party hostel"],
         "banned_tiers": [],
     },
+    {
+        # Ticket #67: a slow pace, so the plan needs labelled rest days.
+        "name": "bali_wellness",
+        "opening": "I want a slow, restful wellness trip to Bali for 10 days with my sister.",
+        "facts": {
+            "destination": ["Bali"], "party": ["family", "friends"], "party_size": [2], "kids": [False],
+            "duration_days": [10],
+            "mood": ["wellness", "slow", "relax", "rest", "yoga", "spa", "calm", "peace", "nature", "beach"],
+        },
+        "answers": [
+            (BUDGET, "Mid-range.", {"budget_level": ["mid"]}),
+            NOT_SURE_DATES,
+            *trip_ends("Singapore"),
+        ],
+        "chips": ["relax", "slow", "wellness"],
+        "banned": ["nightclub", "bar crawl", "pub crawl", "party"],
+        "banned_tiers": [],
+    },
+    {
+        # Ticket #67: a first visit, so the must-sees and day trips (Nara, Miyajima) should be there.
+        "name": "first_timer_japan",
+        "opening": "First time in Japan! 12 days, I want to see the famous sights in Tokyo and Kyoto.",
+        "multi_city": True,
+        "facts": {
+            "destination": ["Japan"], "duration_days": [12],
+            "mood": ["sight", "famous", "icon", "highlight", "culture", "classic", "first", "explor"],
+        },
+        "answers": [
+            (WHO, "My partner and me.", {"party": ["couple"], "party_size": [2], "kids": [False]}),
+            (BUDGET, "Mid-range.", {"budget_level": ["mid"]}),
+            NOT_SURE_DATES,
+            *trip_ends("Sydney"),
+        ],
+        "chips": ["partner", "icon", "culture"],
+        "banned": ["nightclub", "kids", "playground"],
+        "banned_tiers": [],
+    },
+    {
+        # Ticket #67: a city with kids, so days keep a rhythm without overload.
+        "name": "rome_family",
+        "opening": "Five days in Rome with our two kids, aged 8 and 11.",
+        "facts": {
+            "destination": ["Rome"], "party": ["family"], "kids": [True], "party_size": [4], "duration_days": [5],
+            "mood": ["family", "history", "culture", "kid", "fun", "sight", "food", "explor"],
+        },
+        "answers": [
+            (MOOD, "History the kids will enjoy, and lots of gelato.", {}),
+            (BUDGET, "Mid-range.", {"budget_level": ["mid"]}),
+            NOT_SURE_DATES,
+            *trip_ends("Dublin"),
+        ],
+        "chips": ["family", "kids", "history"],
+        "banned": ["nightclub", "bar crawl", "pub crawl", "cocktail bar", "romantic", "adults only"],
+        "banned_tiers": [],
+    },
 ]

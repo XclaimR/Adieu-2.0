@@ -8,6 +8,20 @@ const SLOTS = ["morning", "afternoon", "evening"];
 // An evening bar is the outing itself, not a meal that leaves the evening free.
 const NIGHT_OUT = /\b(bar|pub|club|cocktails?|brewery)\b/i;
 
+/** Ticket #67: a small mark for each kind of tip (option A: a line under the stop's note). */
+function TipMark({ kind }: { kind: string }) {
+  const path = {
+    book: "M4 7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zM4 10h16M9 3v4M15 3v4",
+    sunset: "M4 18h16M7 18a5 5 0 0 1 10 0M12 7v2M5.6 10.6l1.4 1.4M18.4 10.6 17 12",
+    instead: "M7 7h11l-3-3M17 17H6l3 3",
+  }[kind] ?? "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 7v5l3 2";
+  return (
+    <svg className="tip-mark" viewBox="0 0 24 24" aria-hidden="true">
+      <path d={path} />
+    </svg>
+  );
+}
+
 /** "45 min", "1.5 h", "2 h": to the nearest half hour, since these are estimates. */
 export function duration(minutes: number) {
   if (minutes < 60) return `${Math.round(minutes / 15) * 15 || 15} min`;
@@ -141,6 +155,18 @@ export default function ItineraryView({ itinerary, notes, busy, onSwap, onRemove
                             <span className="activity-text">
                               <strong>{a.name}</strong>
                               {a.description && <span className="small muted">{a.description}</span>}
+                              {a.tip && (
+                                <span className="tip-line">
+                                  <TipMark kind={a.tip_kind ?? "time"} />
+                                  {a.tip}
+                                </span>
+                              )}
+                              {a.instead_of && (
+                                <span className="tip-line instead">
+                                  <TipMark kind="instead" />
+                                  Instead of {a.instead_of}, which is crowded
+                                </span>
+                              )}
                               {a.for_note && <span className="trait">For: {a.for_note}</span>}
                               <NoteList notes={notes.filter((n) => n.text !== a.for_note)} target={a.id} />
                             </span>

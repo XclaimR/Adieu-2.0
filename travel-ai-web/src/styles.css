@@ -446,3 +446,7 @@ input:focus-visible, button:focus-visible, a:focus-visible, summary:focus-visibl
 .day .slot h4.tod { margin: 0 0 2px 6px; font-weight: 600; }
 .dur-chip { margin-left: auto; flex-shrink: 0; align-self: flex-start; margin-top: 4px; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; color: var(--primary); background: var(--bubble); }
 .slot-free { margin: 2px 0 0 74px; font-style: italic; }
+/* Ticket #67: a tip under the stop's note, in the apricot text colour; a crowd swap is a quieter grey. */
+.tip-line { display: flex; gap: 6px; align-items: flex-start; margin-top: 3px; font-size: 13px; line-height: 1.35; font-weight: 500; color: var(--accent-text); }
+.tip-line.instead { color: var(--muted); }
+.tip-mark { width: 14px; height: 14px; flex-shrink: 0; margin-top: 2px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }

@@ -31,6 +31,10 @@ class PlaceCandidate(BaseModel):
     source_url: str | None = None
     lat: float | None = None
     lng: float | None = None
+    # Ticket #67: how many Wikipedias cover it (0 when unknown), a practical tip, and the main town it is in.
+    fame: int = 0
+    tip: str | None = None
+    town: str | None = None
 
 
 class Pick(PlaceCandidate):
