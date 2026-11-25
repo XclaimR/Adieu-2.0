@@ -109,11 +109,15 @@ only on a clear yes while that is the current question. A no brings back the que
      reach of a better-known one is a day trip, not a base), decides how many cities fit the days and the pace (about
      3 days a city; slow 4, packed 2), orders them as the shortest one-way route counted from the main city, where
      flights usually land, and shares the days so they add up to the trip. Nights are strict: the days less one.
-     With a home city (Ticket #81) the model also names the listed cities with international flights, and the route
-     runs from one of them to another, counting the flights from home and back at a quarter of a ground km each:
-     open-jaw (land in Tokyo, leave from Osaka) whatever order the model listed. `route_service.flights` adds rough
-     fly-in and fly-out legs (`Itinerary.fly_in` / `fly_out`, kept for booking links); day 1 and the last day are
-     light, in the prompt and the review. The card shows home at both ends of the line, the flights dashed.
+     With a home city (Ticket #81) the model also names the listed towns with international flights, and the order
+     counts the trip from home and back: a quarter of a ground km per km flown, plus the ride between an end city
+     and its airport. So it runs one way, open-jaw where that helps (land in Tokyo, leave from Osaka), whatever order
+     the model listed, and may end in a city without an airport a ride from one (Kyoto, then the train to Osaka).
+     `route_service.flights` gives the way in and out (`Itinerary.fly_in` / `fly_out`, kept for booking links): by
+     land when home is close, else a flight with the times airlines quote, with that ride as `transfer`; an end far
+     from every known airport flies from the city itself. One-place trips get the same, to the place itself. Day 1
+     and the last day are light, in the prompt and the review. The card shows home at both ends of the line, the
+     flights dashed; a one-place trip gets a "Getting there" card.
      One model call picks which towns suit this traveler and estimates each leg (mode, rough fare, a pass tip); then
      Transitous (api.transitous.org, an open, free public-transport router; light non-commercial use) gives the real
      journey time where it has timetables and the ride is under 8 hours. Without them, code uses the best-known towns

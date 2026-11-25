@@ -79,7 +79,7 @@ export type Leg = { mode: string; minutes: number; cost: string | null; note: st
 
 /** One base on a multi-city route; its nights are the days spent there. */
 /** Ticket #81: home to the first city, or the last city home. */
-export type Flight = Leg & { frm: string; to: string };
+export type Flight = Leg & { frm: string; to: string; transfer?: Leg | null };
 
 export type City = { name: string; days: number; nights: number; stay: Pick | null; leg: Leg | null };
 

@@ -108,16 +108,11 @@ def _hours(minutes: int) -> str:
     return f"~{minutes // 60}h {minutes % 60:02d}m" if minutes >= 60 else f"~{minutes} min"
 
 
-def _route_rules(route: list[City], fly_in: Flight | None = None, fly_out: Flight | None = None) -> str:
-    """The fixed route, for the drafting prompt: which days are in which city, and the moving days.
-    A trip flown into and out of has a light first and last day (Ticket #81)."""
+def _route_rules(route: list[City]) -> str:
+    """The fixed route, for the drafting prompt: which days are in which city, and the moving days."""
     if not route:
         return ""
     lines, start = ["The route is fixed. Plan each day only with places listed under that day's city:"], 1
-    if fly_in:
-        lines.append(f"  Day 1 is the arrival day: {fly_in.frm} to {fly_in.to} by {fly_in.mode} "
-                     f"({_hours(fly_in.minutes)}). Plan only 1-{MOVING_DAY_STOPS - 1} easy stops near the stay, "
-                     "none in the morning.")
     for before, city in zip([None, *route], route):
         end = start + city.days - 1
         lines.append(f"- Day {start}{f'-{end}' if end > start else ''}: {city.name}")
@@ -126,10 +121,35 @@ def _route_rules(route: list[City], fly_in: Flight | None = None, fly_out: Fligh
                          f"({_hours(city.leg.minutes)}). Plan only 1-{MOVING_DAY_STOPS - 1} stops in {city.name}"
                          + (", none in the morning." if city.leg.minutes >= 120 else "."))
         start = end + 1
-    if fly_out and start > 2:
-        lines.append(f"  Day {start - 1} is the departure day: {fly_out.frm} to {fly_out.to} by {fly_out.mode}. "
-                     f"Plan only 1-{MOVING_DAY_STOPS - 1} stops, in the morning, near the stay.")
     return "\n".join(lines) + "\n"
+
+
+def _trip_ends_rules(fly_in: Flight | None, fly_out: Flight | None, days: int) -> str:
+    """Ticket #81: the first and last day are light, around getting there and back."""
+    def how(f: Flight, way: str) -> str:
+        ride = f.transfer and f"{_hours(f.transfer.minutes)} by {f.transfer.mode}"
+        main = f"{f.frm} to {f.to} by {f.mode} ({_hours(f.minutes)})"
+        return (main + (f", then {ride} into the first city" if ride else "") if way == "in"
+                else (f"{ride} to {f.frm}, then " if ride else "") + main)
+    lines = []
+    if fly_in:
+        lines.append(f"- Day 1 is the arrival day: {how(fly_in, 'in')}. Plan only 1-{MOVING_DAY_STOPS - 1} easy "
+                     "stops near the stay, none in the morning.")
+    if fly_out and days > 1:
+        lines.append(f"- Day {days} is the departure day: {how(fly_out, 'out')}. Plan only "
+                     f"1-{MOVING_DAY_STOPS - 1} stops, in the morning, near the stay.")
+    return "\n".join(lines) + "\n" if lines else ""
+
+
+def _airports(plan: Itinerary) -> list[dict]:
+    """The airports a plan's flights use: a town a ride away, or the end city a flight left from directly."""
+    out = []
+    for flight, city, name in ((plan.fly_in, plan.route[:1], "to"), (plan.fly_out, plan.route[-1:], "frm")):
+        if flight and flight.lat is not None:
+            out.append({"name": getattr(flight, name), "lat": flight.lat, "lng": flight.lng})
+        elif flight and flight.mode == "flight" and city:
+            out.append({"name": city[0].name, "lat": city[0].lat, "lng": city[0].lng})
+    return out
 
 
 def _in_order(activities: list[Activity]) -> list[Activity]:
@@ -153,7 +173,7 @@ class PlacePool:
                  ends: tuple[Flight | None, Flight | None] = (None, None)):
         seen: set[str] = set()
         self.route, self.route_tip = list(route), route_tip
-        self.fly_in, self.fly_out = ends if self.route else (None, None)
+        self.fly_in, self.fly_out = ends
         self.places: list[PlaceCandidate] = []
         for p in places:
             # On a route every place belongs to one city, so each city's days stay inside it.
@@ -203,6 +223,8 @@ class PlacePool:
             title=plan.title,
             stay=Pick(**stay.model_dump()) if stay and stay.category == PickCategory.STAY else None,
             days=days,
+            fly_in=self.fly_in,
+            fly_out=self.fly_out,
         )
 
     def _to_route_itinerary(self, plan: DraftPlan, destination: str, moments: list[str]) -> Itinerary:
@@ -296,14 +318,17 @@ class DraftService:
 
     def route(self, profile: TripProfile, viewport: dict | None, personality: Personality | None,
               days: int) -> tuple[list[City], str | None, tuple[Flight | None, Flight | None]]:
-        """The cities of a country or region trip, a tip that covers the legs, and the flights in and out;
-        ([], None, (None, None)) for one place."""
+        """The cities of a country or region trip, a tip that covers the legs, and the way in and out (a one-place
+        trip too, Ticket #81); ([], None, (None, None)) when the place isn't found."""
         area = self.places.area_for(profile.destination, viewport)
         if not area:
             return [], None, (None, None)
         home, back = self.ends(profile)
-        route, tip = RouteService.plan(area, self.places.library(area), days, profile, personality, home, back)
-        return route, tip, flights(route, home, back, area.get("code"))
+        route, tip, ends = RouteService.plan(area, self.places.library(area), days, profile, personality, home, back)
+        if not route and (centre := area.get("centre")):
+            # shortcut: a one-place trip flies to the place itself; ask the model for its airport if one shows a town
+            ends = flights([City(name=area["name"], lat=centre[0], lng=centre[1])], home, back, area.get("code"))
+        return route, tip, ends
 
     def ends(self, profile: TripProfile) -> tuple[dict | None, dict | None]:
         """Where the trip starts and ends on the map ({name, lat, lng}), or None where it isn't known or found."""
@@ -342,7 +367,7 @@ class DraftService:
         return f"""
 Plan a {days}-day trip to {profile.destination}.
 This version's style: {brief}
-{_route_rules(pool.route, pool.fly_in, pool.fly_out)}
+{_route_rules(pool.route)}{_trip_ends_rules(pool.fly_in, pool.fly_out, days)}
 Trip profile:
 {profile.model_dump_json(exclude_none=True, exclude={"preferences"})}
 
@@ -608,7 +633,8 @@ Rules:
         plan.sync_route()
         self._legs(plan, before, area)
         if plan.fly_in or plan.fly_out:  # a new first or last city flies in or out instead
-            plan.fly_in, plan.fly_out = flights(plan.route, *self.ends(profile), (area or {}).get("code"))
+            plan.fly_in, plan.fly_out = flights(plan.route, *self.ends(profile), (area or {}).get("code"),
+                                                _airports(itinerary))
         for city in plan.route:
             if city.name in added:
                 city.stay = self._stay(plan, city.name, profile, viewport, personality)

@@ -18,9 +18,14 @@ class Leg(BaseModel):
 
 
 class Flight(Leg):
-    """Ticket #81: the trip's first and last leg, between home and a gateway city. Kept for booking links."""
+    """Ticket #81: the trip's first and last leg, between home and the trip. Kept for booking links. A flight may
+    land at an airport a ride away from the first city (or leave from one near the last): `transfer` is that ride,
+    and lat/lng is the airport's town."""
     frm: str
     to: str
+    lat: float | None = None
+    lng: float | None = None
+    transfer: Leg | None = None
 
 
 class City(BaseModel):

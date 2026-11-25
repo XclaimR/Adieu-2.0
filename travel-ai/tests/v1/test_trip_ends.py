@@ -7,7 +7,7 @@ from app.schemas.personality import Personality
 from app.schemas.trip_profile import Party, TripProfile
 from app.schemas.turn import TurnAction, TurnDecision
 from app.services import route_service
-from app.services.draft_service import _route_rules
+from app.services.draft_service import _route_rules, _trip_ends_rules
 from app.services.itinerary_critique_service import ItineraryCritiqueService
 from app.services.route_service import RouteService, flights, order
 from app.services.turn_service import (BACK_ELSEWHERE, HOME_BOTH_WAYS, MAX_QUESTIONS, OTHER_CITY, START_ELSEWHERE,
@@ -30,9 +30,9 @@ def _names(cities):
 
 def _plan_with(monkeypatch, picks, airports, home=DELHI, back=DELHI, days=12):
     monkeypatch.setattr(RouteService, "_ask", staticmethod(lambda *a: (picks, {}, None, airports)))
-    route, _ = RouteService.plan({"kind": "country", "code": "JP"}, _library(), days,
-                                 TripProfile(destination="Japan", origin="Delhi"), Personality(), home, back)
-    return route
+    route, _, ends = RouteService.plan({"kind": "country", "code": "JP"}, _library(), days,
+                                       TripProfile(destination="Japan", origin="Delhi"), Personality(), home, back)
+    return route, ends
 
 
 def _backtracks(route) -> bool:
@@ -53,7 +53,7 @@ def test_a_zig_zag_from_the_model_is_straightened_between_the_gateways(monkeypat
         return schema.model_validate({"cities": ["Hiroshima", "Tokyo", "Osaka", "Kyoto"], "legs": [],
                                       "airports": ["Tokyo", "Osaka", "Hiroshima"]})
     monkeypatch.setattr(route_service.LLMClient, "generate_structured", staticmethod(fake_model))
-    route, _ = RouteService.plan({"kind": "country", "code": "JP"}, _library(), 12,
+    route, *_ = RouteService.plan({"kind": "country", "code": "JP"}, _library(), 12,
                                  TripProfile(destination="Japan", origin="Delhi"), Personality(), DELHI, DELHI)
     assert "They fly in from Delhi and back to Delhi." in asked[0]
     assert _names(route) == ["Hiroshima", "Osaka", "Kyoto", "Tokyo"]
@@ -62,17 +62,20 @@ def test_a_zig_zag_from_the_model_is_straightened_between_the_gateways(monkeypat
 
 
 def test_open_jaw_lands_in_tokyo_and_leaves_from_osaka(monkeypatch):
-    route = _plan_with(monkeypatch, ["Tokyo", "Kyoto", "Osaka"], ["Tokyo", "Osaka"], days=9)
+    route, (fly_in, fly_out) = _plan_with(monkeypatch, ["Tokyo", "Kyoto", "Osaka"], ["Tokyo", "Osaka"], days=9)
     assert _names(route) == ["Tokyo", "Kyoto", "Osaka"]
-    fly_in, fly_out = flights(route, DELHI, DELHI, "JP")
     assert (fly_in.frm, fly_in.to, fly_out.frm, fly_out.to) == ("Delhi", "Tokyo", "Osaka", "Delhi")
+    assert fly_in.transfer is None and fly_out.transfer is None  # both cities have the airport
     assert fly_in.mode == fly_out.mode == "flight" and 7 * 60 <= fly_in.minutes <= 8 * 60 + 30  # as quoted: ~7h50
+
+
+PORTS = [_town("Tokyo"), _town("Osaka")]
 
 
 def test_the_route_ends_at_an_airport_rather_than_where_the_cities_run_out():
     # Kyoto has no airport: Tokyo, Osaka, Kyoto would mean a trip back to Osaka for the flight home.
     cities = [_town(n) for n in ("Tokyo", "Kyoto", "Osaka")]
-    assert _names(order(cities, DELHI, DELHI, ("Tokyo", "Osaka"))) == ["Tokyo", "Kyoto", "Osaka"]
+    assert _names(order(cities, DELHI, DELHI, PORTS)) == ["Tokyo", "Kyoto", "Osaka"]
     # Without the airports (the model failed) the route still runs one way from the main city.
     assert _names(order(cities, DELHI, DELHI)) == ["Tokyo", "Kyoto", "Osaka"]
 
@@ -80,18 +83,28 @@ def test_the_route_ends_at_an_airport_rather_than_where_the_cities_run_out():
 def test_flying_home_somewhere_else_turns_the_route_toward_it():
     cities = [_town(n) for n in ("Tokyo", "Kyoto", "Osaka")]
     # From Delhi, home to Los Angeles: land in Osaka and leave from Tokyo, the side nearer Los Angeles.
-    assert _names(order(cities, DELHI, LOS_ANGELES, ("Tokyo", "Osaka"))) == ["Osaka", "Kyoto", "Tokyo"]
+    assert _names(order(cities, DELHI, LOS_ANGELES, PORTS)) == ["Osaka", "Kyoto", "Tokyo"]
 
 
-def test_with_one_airport_the_trip_starts_there_and_ends_anywhere():
-    cities = [_town(n) for n in ("Kyoto", "Hiroshima", "Tokyo")]
-    assert _names(order(cities, DELHI, DELHI, ("Tokyo",))) == ["Tokyo", "Kyoto", "Hiroshima"]
+def _city(name):
+    return route_service.City(name=name, lat=JAPAN[name][0], lng=JAPAN[name][1])
 
 
-def test_a_home_close_by_goes_by_land():
-    route = [route_service.City(name="Kyoto", lat=JAPAN["Kyoto"][0], lng=JAPAN["Kyoto"][1])]
-    fly_in, _ = flights(route, {"name": "Osaka", "lat": 34.69, "lng": 135.50}, DELHI, "JP")
-    assert fly_in.mode == "train"
+def test_a_trip_can_end_in_a_city_without_an_airport_and_ride_to_one():
+    # Tokyo then Kyoto: the flight home leaves from Osaka, a train ride from Kyoto.
+    assert _names(order([_town("Tokyo"), _town("Kyoto")], DELHI, DELHI, PORTS)) == ["Tokyo", "Kyoto"]
+    fly_in, fly_out = flights([_city("Tokyo"), _city("Kyoto")], DELHI, DELHI, "JP", PORTS)
+    assert (fly_in.to, fly_in.transfer) == ("Tokyo", None)
+    assert (fly_out.frm, fly_out.to, fly_out.mode) == ("Osaka", "Delhi", "flight")
+    assert fly_out.transfer.mode == "train" and fly_out.transfer.minutes <= 60
+    assert (fly_out.lat, fly_out.lng) == JAPAN["Osaka"]  # kept, so a route edit still knows the airport
+
+
+def test_a_home_close_by_goes_by_land_any_vehicle():
+    osaka = {"name": "Osaka", "lat": 34.69, "lng": 135.50}
+    fly_in, fly_out = flights([_city("Tokyo")], osaka, osaka, "JP", PORTS)
+    assert (fly_in.frm, fly_in.to) == ("Osaka", "Tokyo") and fly_in.mode == "high-speed train"
+    assert fly_out.mode == "high-speed train" and fly_out.transfer is None
 
 
 def test_without_a_home_there_are_no_flights():
@@ -109,10 +122,13 @@ def _flown():
 
 def test_the_drafting_prompt_makes_the_first_and_last_days_light():
     it = _flown()
-    rules = _route_rules(it.route, it.fly_in, it.fly_out)
+    rules = _trip_ends_rules(it.fly_in, it.fly_out, 4)
     assert "Day 1 is the arrival day: Delhi to Tokyo by flight (~10h 00m)" in rules
     assert "Day 4 is the departure day: Kyoto to Delhi by flight" in rules
-    assert "arrival" not in _route_rules(it.route)  # trips from before Ticket #81
+    assert "arrival" not in _route_rules(it.route) + _trip_ends_rules(None, None, 4)  # trips from before Ticket #81
+    ride = Flight(mode="flight", minutes=560, frm="Osaka", to="Delhi",
+                  transfer=route_service.Leg(mode="train", minutes=30))
+    assert "~30 min by train to Osaka, then Osaka to Delhi by flight" in _trip_ends_rules(None, ride, 4)
 
 
 def test_the_review_flags_a_busy_arrival_or_departure_day():
@@ -203,6 +219,9 @@ def test_the_start_city_is_asked_once_and_remembered_for_the_next_trip(client, a
     assert turn["next_question"] == "Starting from Delhi and flying back there?"
     turn = say(client, auth, again["id"], "Yes, Delhi both ways")
     assert turn["drafts"]
+    one_city = turn["drafts"][0]["itinerary"]  # a one-place trip has a way in and out too
+    assert (one_city["fly_in"]["frm"], one_city["fly_in"]["to"], one_city["fly_out"]["to"]) == ("Delhi", "Lisbon", "Delhi")
+    assert any("Day 1 is the arrival day" in prompt for name, prompt in fake_llm.prompts if name == "DraftPlan")
     assert (turn["trip"]["profile"]["origin"], turn["trip"]["profile"]["return_to"]) == ("Delhi", "Delhi")
 
 
@@ -214,3 +233,9 @@ def test_skipping_the_question_plans_from_home_anyway(client, auth, fake_llm, fa
     say(client, auth, trip["id"], "Lisbon, food, with my partner, 4 days, from Delhi")
     turn = say(client, auth, trip["id"], "__show_plans__")
     assert turn["drafts"] and turn["trip"]["profile"]["return_to"] == "Delhi"  # back where they started
+
+
+def test_an_end_far_from_every_known_airport_flies_from_the_city_itself():
+    # Sapporo is a flight from Tokyo and Osaka: never a flight to an airport and then another one home.
+    _, fly_out = flights([_city("Tokyo"), _city("Sapporo")], DELHI, DELHI, "JP", PORTS)
+    assert (fly_out.frm, fly_out.transfer) == ("Sapporo", None)
