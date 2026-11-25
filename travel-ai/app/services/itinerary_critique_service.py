@@ -155,10 +155,10 @@ def _meal_only(day: DayPlan, known: dict[str, PlaceCandidate], scope: set[str] |
     return issues
 
 
-def _rest_day(day: DayPlan, known: dict[str, PlaceCandidate], ratings: dict[str, tuple[int, int]]) -> list[Issue]:
+def _rest_day(day: DayPlan, known: dict[str, PlaceCandidate]) -> list[Issue]:
     """Ticket #67: a rest day has at most two calm places (meals aside) and no night out."""
     calm_stops = [a for a in day.activities if not is_meal(a, known.get(a.place_id))]
-    lively = [a for a in calm_stops if ratings.get(a.place_id, (a.energy or 0, 0))[0] > 0]
+    lively = [a for a in calm_stops if not day_rhythm.LINGER.search(day_rhythm.text_of(a, known.get(a.place_id)))]
     issues = []
     if day.activities and not calm_stops:
         issues.append(Issue(problem=f"Day {day.day_number} is a rest day with only meals and drinks",
@@ -168,7 +168,7 @@ def _rest_day(day: DayPlan, known: dict[str, PlaceCandidate], ratings: dict[str,
                             suggestion=f"keep {REST_STOPS} calm places to linger, besides lunch and dinner",
                             where=[a.id for a in calm_stops[REST_STOPS:]]))
     if lively:
-        issues.append(Issue(problem=f"Day {day.day_number} is a rest day, but {lively[0].name} isn't restful",
+        issues.append(Issue(problem=f"Day {day.day_number} is a rest day, but {lively[0].name} isn't a place to rest",
                             suggestion="a calm place to linger nearby: a beach, spa, garden, park or café",
                             where=[a.id for a in lively]))
     return issues
@@ -206,7 +206,7 @@ class ItineraryCritiqueService:
     @staticmethod
     def counted(plan: Itinerary, places: list[PlaceCandidate], days: int | None = None,
                 scope: set[str] | None = None, visits: dict[str, int] | None = None, *, fewest: int | None = None,
-                ratings: dict[str, tuple[int, int]] | None = None, wants: str = "") -> list[Issue]:
+                wants: str = "") -> list[Issue]:
         """Errors code can count. `days` is set for drafts; after an edit, only the days in `scope` are checked.
         `fewest` is the pace's stops on a full day; `wants` is what the traveler asked for, which may repeat."""
         known = {p.place_id: p for p in places}
@@ -226,7 +226,7 @@ class ItineraryCritiqueService:
                                     suggestion=f"add a thing to do or a meal nearby, to make {fewest}",
                                     where=[day.id]))
             if day.id in touched:
-                issues += _rest_day(day, known, ratings or {}) if rest else _meal_only(day, known, scope)
+                issues += _rest_day(day, known) if rest else _meal_only(day, known, scope)
                 issues += _route_issues(plan, day)
                 if issue := _timing(plan, day, known, visits or {}):
                     issues.append(issue)

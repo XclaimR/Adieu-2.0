@@ -14,6 +14,12 @@ REST_THEME = "Rest day"
 # Pace step (1 slow .. 5 packed): (fewest stops on a full day, a rest day every N days or None).
 PACE = {1: (3, 3.5), 2: (3, 5), 3: (4, 7), 4: (4, None), 5: (5, None)}
 REST_STOPS = 2  # calm places on a rest day, besides lunch and dinner
+# Where a rest day may go: places to linger. The critic's calm rating proved too noisy for this (live, 2026-11-25:
+# a science museum rated calm, a snorkelling bay lively), so the kind of place decides.
+LINGER = re.compile(r"beach|bay|cove|coral|reef|snorkel|spa\b|massage|onsen|sent[oō]|bath|hot spring|health resort|"
+                    r"wellness|yoga|garden|park|grove|lake|pond|river|waterfront|promenade|island|cafe|café|tea house|"
+                    r"teahouse|pool|meadow|forest", re.I)
+REST_SEARCH = "spa garden park beach onsen lake"
 DAY_TRIP_NIGHTS = 3  # a city needs this many nights before one of its days goes elsewhere
 DAY_TRIP_KM = 15  # a must-see this far from the city's centre is in another town: Nara from Kyoto
 SIGHTS_OF_A_KIND = 2  # two shrines a day is Kyoto; three museums is a slog
@@ -23,13 +29,13 @@ DISHES = [(k, re.compile(p, re.I)) for k, p in [
     ("sushi", r"\b(sushi|sashimi|omakase)\b"), ("ramen", r"\bramen\b"), ("udon", r"\budon\b"), ("soba", r"\bsoba\b"),
     ("okonomiyaki", r"\bokonomiyaki\b"), ("takoyaki", r"\btakoyaki\b"), ("tempura", r"\btempura\b"),
     ("yakitori", r"\byakitori\b"), ("yakiniku", r"\b(yakiniku|wagyu|sukiyaki|shabu)\b"), ("kaiseki", r"\bkaiseki\b"),
-    ("izakaya", r"\bizakaya\b"), ("curry", r"\bcurry\b"), ("pho", r"\bpho\b"), ("banh mi", r"\bb[aá]nh m[iì]\b"),
+    ("curry", r"\bcurry\b"), ("pho", r"\bpho\b"), ("banh mi", r"\bb[aá]nh m[iì]\b"),
     ("noodles", r"\bnoodles?\b"), ("dumplings", r"\b(dumplings?|dim sum|gyoza)\b"), ("pizza", r"\bpizz(a|eria)\b"),
     ("pasta", r"\bpasta\b"), ("burgers", r"\bburgers?\b"), ("tacos", r"\btac(o|os|queria)\b"),
     ("tapas", r"\b(tapas|petiscos)\b"), ("seafood", r"\b(seafood|oysters?|fish market)\b"),
     ("steak", r"\b(steak|churrasc\w*|grill house)\b"), ("barbecue", r"\b(bbq|barbecue)\b"),
     ("thai", r"\bthai\b"), ("indian", r"\b(indian|tandoor\w*)\b"), ("mexican", r"\bmexican\b"),
-    ("vegan", r"\bvegan\b"), ("warung", r"\bwarung\b"), ("gelato", r"\b(gelato|gelateria)\b"),
+    ("vegan", r"\bvegan\b"), ("gelato", r"\b(gelato|gelateria)\b"),
     ("bakery", r"\b(bakery|pastel(aria|ería)?|patisserie|p[aâ]tisserie)\b"), ("brunch", r"\bbrunch\b"),
 ]]
 SIGHTS = [(k, re.compile(p, re.I)) for k, p in [
@@ -113,13 +119,13 @@ def day_trips(route: list[City], must_sees: dict[str, list[PlaceCandidate]], nig
     return trips
 
 
-def _text(stop: Activity, place: PlaceCandidate | None) -> str:
+def text_of(stop: Activity, place: PlaceCandidate | None) -> str:
     return " ".join(filter(None, [stop.name, stop.description, place and place.type_label, place and place.summary]))
 
 
 def kind_of(stop: Activity, place: PlaceCandidate | None) -> str | None:
     """The dish (for a meal) or the kind of sight, or None when nothing says."""
-    text = _text(stop, place)
+    text = text_of(stop, place)
     return next((k for k, pattern in (DISHES if stop.category == "eat" else SIGHTS) if pattern.search(text)), None)
 
 
@@ -158,7 +164,7 @@ def promise_broken(day: DayPlan, known: dict[str, PlaceCandidate]) -> bool:
     """The day's title promises a kind of place (a beach, a club) that none of its stops is."""
     if not day.theme or not day.activities:
         return False
-    text = " ".join(_text(a, known.get(a.place_id)) for a in day.activities)
+    text = " ".join(text_of(a, known.get(a.place_id)) for a in day.activities)
     return any(promise.search(day.theme) and not keeps.search(text) for promise, keeps in PROMISES)
 
 

@@ -83,10 +83,11 @@ def test_a_rest_day_holds_two_calm_places_besides_meals():
     it = plan(("Rest day", [stop("Spa", place_id="spa"), stop("Garden", place_id="garden"),
                             stop("Lunch", "eat", "afternoon", place_id="lunch"),
                             stop("Club", "do", "evening", place_id="club")], None))
-    assert problems(it, ratings={"spa": (0, 3), "garden": (0, 0), "club": (2, 2), "lunch": (1, 1)}) == [
-        "Day 1 is a rest day with 3 things to do", "Day 1 is a rest day, but Club isn't restful"]
+    assert problems(it) == ["Day 1 is a rest day with 3 things to do", "Day 1 is a rest day, but Club isn't a place to rest"]
+    museum = plan(("Rest day", [stop("Osaka Science Museum"), stop("Lunch", "eat", "afternoon")], None))
+    assert problems(museum) == ["Day 1 is a rest day, but Osaka Science Museum isn't a place to rest"]
     calm = plan(("Rest day", [stop("Beach"), stop("Lunch", "eat", "afternoon")], None))
-    assert problems(calm, ratings={"Beach": (0, 0), "Lunch": (1, 1)}) == []  # a lively lunch is still lunch
+    assert problems(calm) == []
     bars = plan(("Rest day", [stop("Whisky bar", "eat", "afternoon"), stop("Café", "eat", "afternoon")], None))
     assert problems(bars) == ["Day 1 is a rest day with only meals and drinks"]
 

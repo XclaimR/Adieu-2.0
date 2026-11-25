@@ -35,6 +35,7 @@ MAX_STOPS = 5  # after edits: a thing to do in each time of day, and lunch and d
 MIN_PLACES = 2
 MUST_SEES = 5  # at most, per city or for a one-city trip: one more than its days
 TRIP_MUST_SEES = 3  # what a day trip's town brings
+REST_PLACES = 3  # places to linger added per city
 QUIET_CROWDS = -0.6  # the crowds scale this far toward hidden gems swaps a must-see for a quieter one
 # How many of each kind the drafting model sees: enough to plan from, few enough for a free-tier prompt.
 POOL = {PickCategory.DO: 18, PickCategory.EAT: 14, PickCategory.HIDDEN_GEMS: 8, PickCategory.STAY: 8}  # places to visit or eat at: one day's minimum
@@ -430,10 +431,15 @@ class DraftService:
         searches = [(None, category, limit) for category, limit in POOL.items()] if not route else [
             (city.name, category, base + per_night * city.days)
             for city in route for category, (base, per_night) in CITY_POOL.items()]
+        # Ticket #67: a few places to linger in each city, so a rest day has somewhere to go.
+        searches += [(city.name if route else None, "rest", REST_PLACES) for city in route or [None]]
         places: list[PlaceCandidate] = []
         for city, category, limit in searches:
+            words = day_rhythm.REST_SEARCH if category == "rest" else ""
+            category = PickCategory.DO if category == "rest" else category
             found = self.places.candidates(profile.destination, category, profile, viewport,
-                                           query=city and f"near {city}", personality=personality, limit=limit)
+                                           query=" ".join(filter(None, [words, city and f"near {city}"])) or None,
+                                           personality=personality, limit=limit)
             if category == PickCategory.STAY and profile.budget_level:
                 limit = tier_rank(profile.budget_level.value)
                 found = [c for c in found if tier_rank(c.tier) <= limit] or found
@@ -880,8 +886,8 @@ Rules:
             plan.sync_route()
         visits = dict(critique.visit_minutes)
         ratings = dict(critique.ratings)
-        # Ticket #67: the pace's stops a day, rest days by rating, and what they asked for may repeat.
-        rules = {"fewest": day_rhythm.min_stops(personality), "ratings": ratings, "wants": _wants(profile, personality)}
+        # Ticket #67: the pace's stops a day, and what they asked for may repeat.
+        rules = {"fewest": day_rhythm.min_stops(personality), "wants": _wants(profile, personality)}
         issues = ItineraryCritiqueService.counted(plan, places, days, scope, visits, **rules) + critique.issues
 
         fixed = plan
