@@ -40,6 +40,9 @@ BACK_HOME = "Back to {origin}"
 OTHER_CITY = "A different city"
 RETURN_CITY_QUESTION = "Which city are you flying back to?"
 ENDS = ("origin", "origin_city", "return", "return_city")
+# A typed answer to those questions, never a place name: yes keeps home (or the start), no asks for the city.
+_YES = re.compile(r"(yes|yeah|yep|yup|sure|correct|right|ok|okay|same|exactly)\b.*", re.I)
+_NO = re.compile(r"(no|nope|nah|not really)\b.*", re.I)
 
 CHANGE_QUESTION = (
     "Anything you'd like to change?",
@@ -160,9 +163,10 @@ def missing_vibe(profile: TripProfile, asked: list[str], message: str = "") -> s
     if not profile.origin:
         if "origin" not in asked:
             return "origin"
-        return "origin_city" if message == START_ELSEWHERE and "origin_city" not in asked else None
+        elsewhere = message == START_ELSEWHERE or _NO.fullmatch(_plain(message))
+        return "origin_city" if elsewhere and "origin_city" not in asked else None
     if not profile.return_to:
-        if message in (BACK_ELSEWHERE, OTHER_CITY) and "return_city" not in asked:
+        if (message in (BACK_ELSEWHERE, OTHER_CITY) or _NO.fullmatch(_plain(message))) and "return_city" not in asked:
             return "return_city"
         return "return" if not {"return", "return_city"} & set(asked) else None
     return None
@@ -175,13 +179,16 @@ def read_ends(profile: TripProfile, message: str, last_asked: str | None, home: 
     if last_asked not in ENDS:
         return profile
     got, said = profile.model_copy(), _plain(message)
-    if home and said == _plain(HOME_BOTH_WAYS.format(home=home)):
+    if _NO.fullmatch(said):
+        return got
+    if home and (said == _plain(HOME_BOTH_WAYS.format(home=home)) or (last_asked == "origin" and _YES.fullmatch(said))):
         got.origin = got.return_to = home
     elif home and said == _plain(BACK_ELSEWHERE) and last_asked == "origin":
         got.origin = home
-    elif got.origin and said == _plain(BACK_HOME.format(origin=got.origin)):
+    elif got.origin and (said == _plain(BACK_HOME.format(origin=got.origin))
+                         or (last_asked == "return" and _YES.fullmatch(said))):
         got.return_to = got.origin
-    elif not stuck and said not in map(_plain, (START_ELSEWHERE, BACK_ELSEWHERE, OTHER_CITY, SHOW_PLANS_TEXT)) \
+    elif not stuck and not _YES.fullmatch(said) and said not in map(_plain, (START_ELSEWHERE, BACK_ELSEWHERE, OTHER_CITY, SHOW_PLANS_TEXT)) \
             and len(said.split()) <= 4:
         field = "origin" if last_asked.startswith("origin") else "return_to"
         if not getattr(got, field) and (name := re.sub(r"^(i'?m )?(from|back to|to)\s+", "", said)):

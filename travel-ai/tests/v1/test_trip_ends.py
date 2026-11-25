@@ -239,3 +239,15 @@ def test_an_end_far_from_every_known_airport_flies_from_the_city_itself():
     # Sapporo is a flight from Tokyo and Osaka: never a flight to an airport and then another one home.
     _, fly_out = flights([_city("Tokyo"), _city("Sapporo")], DELHI, DELHI, "JP", PORTS)
     assert (fly_out.frm, fly_out.transfer) == ("Sapporo", None)
+
+
+def test_a_typed_yes_or_no_is_an_answer_never_a_city():
+    assert (read_ends(READY, "yes", "origin", "Delhi").origin, read_ends(READY, "Yep!", "origin", "Delhi").return_to) \
+        == ("Delhi", "Delhi")
+    assert read_ends(READY, "no", "origin", "Delhi").origin is None
+    assert _plan_turn(READY, message="no", asked=("duration", "origin"), home="Delhi").asked_field == "origin_city"
+    with_start = READY.model_copy(update={"origin": "Delhi"})
+    assert read_ends(with_start, "yes", "return", None).return_to == "Delhi"
+    assert read_ends(with_start, "nope", "return", None).return_to is None
+    assert _plan_turn(with_start, message="nope", asked=("duration", "origin", "return")).asked_field == "return_city"
+    assert read_ends(READY, "yes", "origin", None).origin is None  # no home to say yes to
