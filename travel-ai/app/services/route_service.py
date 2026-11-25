@@ -301,13 +301,14 @@ class RouteService:
         except Exception:
             logger.exception("Couldn't ask for the route; planning it from the map alone")
             picked, legs, tip, airports, misses = [], {}, None, (), {}
-        broke = set(misses)
+        first = misses
         if misses:  # Ticket #87: a city that breaks a stated wish gets one more try before drafting
             try:
                 picked, legs, tip, airports, misses = RouteService._ask(found, n, days, profile, personality, misses)
             except Exception:
                 logger.exception("Couldn't ask for the route again; keeping the first choice")
-        broke |= set(misses)
+        misses = {**first, **misses}  # a city flagged once stays flagged, even if the second try forgets to say so
+        broke = set(misses)
         by_name = {t["name"]: t for t in found}
         picked = [p for p in picked if p in by_name]
         if 0 < len(fits := [p for p in picked if p not in broke]) < len(picked):

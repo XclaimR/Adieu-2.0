@@ -58,6 +58,13 @@ def test_a_route_that_fits_is_asked_for_once(answers):
     assert len(prompts) == 1
 
 
+def test_a_city_flagged_once_keeps_its_warning_if_the_second_try_forgets_it(answers):
+    queue, _ = answers
+    queue += [{"cities": ["Ubud"], "misses": {"Ubud": "small beach town"}}, {"cities": ["Ubud"]}]
+    route, *_ = _plan()
+    assert next(c for c in route if c.name == "Ubud").unmet == "small beach town"
+
+
 def test_after_the_redo_a_city_that_still_breaks_the_wish_is_dropped_when_others_fit(answers):
     # The live Bali library has only Ubud, Amed and Lovina: three bases for 10 days would force Ubud in.
     queue, _ = answers
@@ -134,3 +141,15 @@ def test_keeping_the_earlier_wish_drops_the_change(client, auth, fake_llm, db_se
     turn = say("Keep the beach town")
     assert turn["reply"] == "Okay, I kept the beach town. Nothing changed."
     assert edits == [] and _notes(turn) == ["small beach town"] and turn["trip"]["conflict"] is None
+
+
+def test_saying_it_again_after_being_asked_is_the_answer(client, auth, fake_llm, db_session, monkeypatch):
+    from app.schemas.turn import Conflict, RouteChange, TurnAction, TurnDecision
+    _, _, edits, say = _held(client, auth, fake_llm, db_session, monkeypatch)
+    fake_llm.decisions.append(TurnDecision(
+        action=TurnAction.EDIT_ITINERARY, reply="Sure!", route_changes=[RouteChange(op="swap", city="Kyoto",
+                                                                                    leaving="Tokyo")],
+        conflict=Conflict(note="ne025a4", now="Kyoto", keep="the beach town", new="Kyoto")))
+    turn = say("No really, Kyoto")
+    assert [c.city for c in edits[0]] == ["Kyoto"] and "small beach town" not in _notes(turn)
+    assert turn["trip"]["conflict"] is None

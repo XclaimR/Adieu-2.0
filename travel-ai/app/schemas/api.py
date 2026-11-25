@@ -77,7 +77,7 @@ class TripOut(BaseModel):
     skipped_place_ids: list[str]
     next_question: str | None
     answer_options: list[str]
-    conflict: ConflictOut | None = None  # while its question is the open one
+    conflict: ConflictOut | None = None  # while its two answers are still offered
     itinerary: Itinerary | None
     messages: list[MessageOut]
 
