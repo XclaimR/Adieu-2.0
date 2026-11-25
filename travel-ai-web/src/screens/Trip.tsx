@@ -1,12 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { ApiError, api, sendStream } from "../api";
-import type { OptionSet, Personality, PickAction, PlanScales as PlanScalesReading, Trip, TripProfile } from "../types";
+import type { Note, OptionSet, Personality, PickAction, PlanScales as PlanScalesReading, Trip, TripProfile } from "../types";
 import PickCard from "../components/PickCard";
 import IdeaCard from "../components/IdeaCard";
 import DraftCard, { DraftSkeleton } from "../components/DraftCard";
 import OptionsPanel from "../components/OptionsPanel";
 import ItineraryView from "../components/ItineraryView";
-import NoteList from "../components/NoteList";
 import Credits from "../components/Credits";
 import SwipeDeck, { OPEN_DECK, SWIPE_CHIP } from "../components/SwipeDeck";
 import { Dollars, Legend, SCALES, ScaleGrid, scaleWord } from "../components/PlanScales";
@@ -35,12 +34,27 @@ function profileFacts(p: TripProfile): string[] {
   return [...new Set(facts.filter((f): f is string => !!f))];
 }
 
+/** A note as a chip: "Scuba diving", "Avoid: rushed", "Fit in: one big night". */
+function noteLabel(n: Note) {
+  const kind = n.once && n.kind !== "avoid" ? "Fit in: " : n.kind === "avoid" ? "Avoid: " : n.kind === "must" ? "Must: " : "";
+  const label = `${kind}${n.text}${n.source === "inferred" ? " (my guess)" : ""}`;
+  return label.charAt(0).toUpperCase() + label.slice(1);
+}
+
+type CardProps = {
+  personality: Personality;
+  reading: PlanScalesReading;
+  onChange: (note: Note) => void;
+  onRemove: (note: Note) => void;
+};
+
 /** The trip's personality: six scales of five notches, the chosen plan in apricot next to what the traveler asked
- * (Ticket #83). The traveler's notes about the whole trip open underneath. */
-function PersonalityCard({ personality, reading }: { personality: Personality; reading: PlanScalesReading }) {
+ * (Ticket #83). Underneath, each note about the whole trip is a chip; tapping one offers to change or remove it
+ * (Ticket #101). */
+function PersonalityCard({ personality, reading, onChange, onRemove }: CardProps) {
   const tripNotes = personality.notes.filter((n) => n.target === "trip");
-  const isMoment = (n: (typeof tripNotes)[number]) => n.once && n.kind !== "avoid";
-  const moments = tripNotes.filter(isMoment).map((n) => n.text);
+  const [openId, setOpenId] = useState<string | null>(null);
+  const open = tripNotes.find((n) => n.id === openId);
   const fresh = useFresh(
     SCALES.flatMap(([key]) => {
       const r = reading.scales[key];
@@ -49,18 +63,41 @@ function PersonalityCard({ personality, reading }: { personality: Personality; r
   );
   const planned = Object.values(reading.scales).some((r) => r.plan != null);
   return (
-    <details className="personality">
-      <summary>
-        <span className="personality-head">
-          <span className="personality-label">Trip personality</span>
-          {planned && <Legend />}
-          {tripNotes.length > 0 && <span className="small">Notes ({tripNotes.length})</span>}
-        </span>
-        <ScaleGrid reading={reading} fresh={fresh} />
-      </summary>
-      <NoteList notes={tripNotes.filter((n) => !isMoment(n))} target="trip" />
-      {moments.length > 0 && <span className="small">To fit in: {moments.join(", ")}</span>}
-    </details>
+    <section className="personality" aria-label="Trip personality">
+      <span className="personality-head">
+        <span className="personality-label">Trip personality</span>
+        {planned && <Legend />}
+      </span>
+      <ScaleGrid reading={reading} fresh={fresh} />
+      {tripNotes.length > 0 && (
+        <div className="note-chips">
+          <span className="small muted">Notes ({tripNotes.length})</span>
+          {tripNotes.map((n) => (
+            <button
+              key={n.id}
+              className="note-chip"
+              aria-expanded={n.id === openId}
+              onClick={() => setOpenId(n.id === openId ? null : n.id)}
+            >
+              {noteLabel(n)}
+            </button>
+          ))}
+        </div>
+      )}
+      {open && (
+        <div className="note-actions" role="group" aria-label={`Note: ${noteLabel(open)}`}>
+          <button onClick={() => onChange(open)}>Change</button>
+          <button
+            onClick={() => {
+              setOpenId(null);
+              onRemove(open);
+            }}
+          >
+            Remove
+          </button>
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -235,6 +272,13 @@ export default function TripScreen({ tripId, firstMessage }: { tripId: string; f
       setToast("Swapped");
     });
 
+  const removeNote = (note: Note) =>
+    act(async () => {
+      if (!trip) return;
+      setTrip(await api.removeNote(trip.id, note.id));
+      setToast(`Removed “${note.text}”`);
+    });
+
   const freshFacts = useFresh(trip ? profileFacts(trip.profile) : null);
 
   if (!trip) return <div className="center muted">{error ?? "Loading trip…"}</div>;
@@ -312,7 +356,14 @@ export default function TripScreen({ tripId, firstMessage }: { tripId: string; f
               </div>
             )}
           </div>
-          {scales && <PersonalityCard personality={trip.personality} reading={scales} />}
+          {scales && (
+            <PersonalityCard
+              personality={trip.personality}
+              reading={scales}
+              onChange={(n) => ask(`Change my note “${n.text}” to `)}
+              onRemove={removeNote}
+            />
+          )}
         </header>
 
         <div className="board-body">

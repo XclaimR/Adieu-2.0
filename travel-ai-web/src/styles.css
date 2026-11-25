@@ -230,11 +230,15 @@ input:focus-visible, button:focus-visible, a:focus-visible, summary:focus-visibl
 
 .facts { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .fact { font-size: 13px; padding: 3px 12px; transition: box-shadow 0.4s; border-radius: 999px; background: var(--accent-soft); color: var(--ink); border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent); }
-.personality { font-size: 14px; display: flex; flex-direction: column; gap: 4px; }
-.personality summary { cursor: pointer; list-style: none; display: flex; flex-direction: column; gap: 10px; }
-.personality summary::-webkit-details-marker { display: none; }
+.personality { font-size: 14px; display: flex; flex-direction: column; gap: 10px; }
 .personality-head { display: flex; justify-content: space-between; align-items: baseline; }
-.personality-head .small { padding: 2px 10px; border-radius: 999px; border: 1px solid var(--band-line); }
+/* Ticket #101: each trip note is a chip shaped like the fact chips, in the band's own colors. */
+.note-chips, .note-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.note-chips > .small { margin-right: 2px; }
+.note-chip { font-size: 13px; padding: 3px 12px; background: rgb(253 241 227 / 0.1); color: var(--band-ink); border-color: var(--band-line); }
+.note-chip[aria-expanded="true"] { background: var(--band-ink); color: var(--band); border-color: var(--band-ink); }
+.note-actions button { font-size: 13px; padding: 4px 14px; background: transparent; color: var(--band-ink); border-color: var(--band-line); }
+.note-chip:focus-visible, .note-actions button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .personality .muted { color: var(--band-muted); }
 .fingerprint { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px 24px; max-width: 760px; }
 .scale { display: flex; flex-direction: column; gap: 4px; }
@@ -247,7 +251,7 @@ input:focus-visible, button:focus-visible, a:focus-visible, summary:focus-visibl
 .notch { display: block; height: 10px; border-radius: 3px; background: rgb(253 241 227 / 0.14); transition: background 0.4s; }
 .notch.plan { background: var(--accent); }
 .notch.wish { box-shadow: inset 0 0 0 1.5px var(--band-ink); }
-.legend { display: flex; gap: 12px; font-size: 12px; color: var(--band-muted); margin-left: auto; margin-right: 12px; }
+.legend { display: flex; gap: 12px; font-size: 12px; color: var(--band-muted); margin-left: auto; }
 .legend > span { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
 .legend .notch { width: 14px; }
 .dollars { display: inline-grid; grid-template-columns: repeat(5, 22px); gap: 3px; vertical-align: middle; }
@@ -386,11 +390,11 @@ input:focus-visible, button:focus-visible, a:focus-visible, summary:focus-visibl
 .day-head h3 { margin: 0; flex: 1; }
 .day-head button { flex-shrink: 0; padding: 4px 12px; font-size: 13px; border: 1px solid var(--line); }
 /* Ticket #27: the multi-city route. A row of cities on wide screens, a vertical line on phones. */
-.route-card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; box-shadow: var(--shadow); }
+.route-card { isolation: isolate; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; box-shadow: var(--shadow); }
 .route-card h3 { margin: 0 0 10px; font-size: 16px; }
 .route-card ol { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); row-gap: 14px; } /* wraps: every city shows */
 .route-card li { position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 20px 12px 0 0; }
-.route-card .dot { position: absolute; top: 0; left: 0; width: 12px; height: 12px; border-radius: 50%; background: var(--accent); }
+.route-card .dot { position: absolute; top: 0; left: 0; width: 12px; height: 12px; border-radius: 50%; background: var(--accent); z-index: 1; }
 .route-card li::after { content: ""; position: absolute; top: 5px; left: 16px; right: 4px; border-top: 2px solid var(--line); }
 .route-card li:last-child::after { display: none; }
 .route-card .leg { order: 10; margin-top: 4px; }
@@ -403,9 +407,12 @@ input:focus-visible, button:focus-visible, a:focus-visible, summary:focus-visibl
 .route-card .none { font-style: italic; }
 .route-note { margin: 10px 0 0; }
 /* Ticket #81: home at both ends, an outlined dot; the flights to and from it are dashed. */
-.route-card li.home .dot { background: var(--panel); border: 2px solid var(--primary); }
+.route-card .home .dot { background: var(--panel); border: 2px solid var(--primary); }
 .route-card .home-city { font-family: var(--display); font-weight: 700; font-size: 15px; line-height: 1.2; color: var(--primary); }
-.route-card li.home.in::after, .route-card li.before-home::after { border-top: 2px dashed var(--primary); }
+.route-card li.home.in::after { border-top: 2px dashed var(--primary); }
+/* Ticket #101: the way home sits under the last city, tied to it by a short dashed stub. */
+.route-card .home.out { order: 20; position: relative; display: flex; flex-direction: column; gap: 2px; margin-top: 14px; padding-left: 20px; }
+.route-card .home.out::before { content: ""; position: absolute; left: 5px; top: -10px; height: 10px; border-left: 2px dashed var(--primary); }
 .stay-card { display: flex; gap: 12px; align-items: center; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 10px; }
 .stay-card img { width: 84px; height: 64px; object-fit: cover; border-radius: 10px; }
 .stay-card div { display: flex; flex-direction: column; }
@@ -432,12 +439,16 @@ input:focus-visible, button:focus-visible, a:focus-visible, summary:focus-visibl
   .fact, .reopen-panel { flex-shrink: 0; }
 
   .trip { flex-direction: column; }
-  .trip-head { padding: 14px 16px 12px; }
+  .trip-head { padding: 14px 16px 26px; }
   .route-card ol { grid-template-columns: 1fr; row-gap: 0; }
   .route-card li { padding: 0 0 12px 24px; }
   .route-card li::after { top: 16px; left: 5px; right: auto; bottom: -2px; border-top: 0; border-left: 2px solid var(--line); }
   .route-card .dot { top: 4px; }
-  .route-card li.home.in::after, .route-card li.before-home::after { border-top: 0; border-left: 2px dashed var(--primary); }
+  .route-card li.home.in::after { border-top: 0; border-left: 2px dashed var(--primary); }
+  /* The dashed line runs from the last city's dot down to home; the cell clips it at the top. */
+  .route-card li.before-home { overflow: clip; }
+  .route-card .home.out { margin: 8px 0 0 -24px; padding-left: 24px; }
+  .route-card .home.out::before { top: auto; bottom: calc(100% - 6px); height: 100vh; }
   .board-body { padding: 14px 16px 24px; }
   .draft-list { display: flex; overflow-x: auto; scroll-snap-type: x mandatory; margin-inline: -16px; padding: 0 16px 6px; }
   .draft-list > * { flex: 0 0 86%; scroll-snap-align: center; }

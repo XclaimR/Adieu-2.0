@@ -1,12 +1,9 @@
 import type { City, Flight, Itinerary, Leg, Note } from "../types";
 import NoteList from "./NoteList";
+import { duration } from "../duration";
 
 /** "~2h 40m" or "~30 min": these are estimates. */
-function hours(minutes: number) {
-  if (minutes < 60) return `~${Math.round(minutes / 5) * 5 || 5} min`;
-  const m = Math.round((minutes % 60) / 5) * 5;
-  return `~${Math.floor(minutes / 60)}h${m ? ` ${String(m).padStart(2, "0")}m` : ""}`;
-}
+const hours = (minutes: number) => `~${duration(minutes)}`;
 
 function icon(mode: string) {
   if (/fl(y|ight)|plane|air/i.test(mode)) return "✈️";
@@ -28,15 +25,17 @@ function LegLine({ leg }: { leg: Leg }) {
 }
 
 /** Ticket #81: home at either end of the line, with the way in or out: a flight (maybe from an airport a ride
- * away from the city) or, from close by, any other vehicle. */
+ * away from the city) or, from close by, any other vehicle. The way out sits inside the last city's cell, so it
+ * never wraps onto a row of its own (Ticket #101). */
 function Home({ flight, way }: { flight: Flight; way: "in" | "out" }) {
   const flying = /fl(y|ight)|plane|air/i.test(flight.mode);
   const main = flying
     ? `${way === "in" ? "Fly in" : "Fly out"} ✈ ${hours(flight.minutes)}`
     : `${way === "in" ? "Arrive" : "Leave"} by ${flight.mode} ${icon(flight.mode)} ${hours(flight.minutes)}`;
   const ride = flight.transfer && `${icon(flight.transfer.mode)} ${flight.transfer.mode} ${hours(flight.transfer.minutes)}`;
+  const Tag = way === "in" ? "li" : "div";
   return (
-    <li className={`home ${way}`}>
+    <Tag className={`home ${way}`}>
       <span className="dot" aria-hidden="true" />
       <span className="home-city">{way === "in" ? flight.frm : flight.to}</span>
       <span className="small muted">
@@ -44,7 +43,7 @@ function Home({ flight, way }: { flight: Flight; way: "in" | "out" }) {
         {ride && way === "out" ? main.charAt(0).toLowerCase() + main.slice(1) : main}
         {ride && way === "in" && `, lands in ${flight.to}, then ${ride}`}
       </span>
-    </li>
+    </Tag>
   );
 }
 
@@ -101,9 +100,9 @@ export default function RouteCard({ itinerary, notes, onCity }: Props) {
               </span>
             )}
             {!single && <NoteList notes={notes} target={`s${i + 1}`} />}
+            {i === route.length - 1 && itinerary.fly_out && <Home flight={itinerary.fly_out} way="out" />}
           </li>
         ))}
-        {itinerary.fly_out && <Home flight={itinerary.fly_out} way="out" />}
       </ol>
       <p className="small muted route-note">
         {itinerary.route_tip && <>🎫 {itinerary.route_tip} </>}

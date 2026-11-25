@@ -192,6 +192,21 @@ def test_old_preferences_become_notes_on_the_next_turn(client, auth, db_session)
     assert [(n["text"], n["category"], n["kind"]) for n in turn["trip"]["personality"]["notes"]] == [("vegan", "diet", "must")]
 
 
+def test_a_note_removed_from_its_chip_stays_gone(client, auth, db_session):
+    from app.database.models.trip import TripModel
+    trip = new_trip(client, auth)
+    row = db_session.get(TripModel, trip["id"])
+    row.profile = {"preferences": [{"key": "diet", "value": "vegan", "source": "stated"}]}
+    row.personality = {"notes": [{"id": "n1", "text": "scuba diving"}, {"id": "n2", "text": "no budget"}]}
+    db_session.commit()
+
+    out = client.delete(f"/trips/{trip['id']}/notes/n1", headers=auth).json()
+    assert [n["id"] for n in out["personality"]["notes"]] == ["n2", "p_diet"]
+    client.delete(f"/trips/{trip['id']}/notes/p_diet", headers=auth)  # an old preference, too
+    assert [n["id"] for n in client.get(f"/trips/{trip['id']}", headers=auth).json()["personality"]["notes"]] == ["n2"]
+    assert client.delete(f"/trips/{trip['id']}/notes/n1", headers=auth).status_code == 404
+
+
 def test_drafts_say_which_stop_fulfils_each_moment_and_choosing_maps_the_note():
     places = [PlaceCandidate(place_id=f"p{i}", name=n, category=PickCategory.DO)
               for i, n in enumerate(["Rooftop Bar", "Old Museum"])]

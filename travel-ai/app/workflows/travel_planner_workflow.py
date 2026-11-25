@@ -534,6 +534,19 @@ class TravelPlannerWorkflow:
         self.trips.save_personality(trip, PersonalityService.update(self.trips.personality(trip), profile, [like]))
         self.db.commit()
 
+    def remove_note(self, trip: TripModel, note_id: str) -> None:
+        """Ticket #101: the traveler removes a note from its chip, without asking the model."""
+        personality = self.trips.personality(trip)
+        if not any(n.id == note_id for n in personality.notes):
+            raise TripActionError("Note not found")
+        profile = self.trips.profile(trip)
+        # A note from before notes existed lives in profile.preferences, which would bring it back on the next read.
+        profile.preferences = [p for p in profile.preferences if f"p_{p.key.lower()}" != note_id]
+        gone = NoteChange(op="remove", id=note_id, text="", quote="")
+        self.trips.save_personality(trip, PersonalityService.update(personality, profile, [gone]))
+        trip.profile = profile.model_dump(mode="json")
+        self.db.commit()
+
     def activity_action(self, trip: TripModel, user: UserModel, day_number: int, index: int, action: str) -> OptionSet | None:
         itinerary = self.trips.itinerary(trip)
         day = next((d for d in itinerary.days if d.day_number == day_number), None) if itinerary else None

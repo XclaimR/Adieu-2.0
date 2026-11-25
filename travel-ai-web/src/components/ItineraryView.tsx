@@ -3,6 +3,7 @@ import Photo, { Credit } from "./Photo";
 import type { Itinerary, Note } from "../types";
 import NoteList from "./NoteList";
 import RouteCard from "./RouteCard";
+import { duration } from "../duration";
 
 const SLOTS = ["morning", "afternoon", "evening"];
 // An evening bar is the outing itself, not a meal that leaves the evening free.
@@ -20,12 +21,6 @@ function TipMark({ kind }: { kind: string }) {
       <path d={path} />
     </svg>
   );
-}
-
-/** "45 min", "1.5 h", "2 h": to the nearest half hour, since these are estimates. */
-export function duration(minutes: number) {
-  if (minutes < 60) return `${Math.round(minutes / 15) * 15 || 15} min`;
-  return `${Math.round(minutes / 30) / 2} h`;
 }
 
 type Props = {
@@ -121,7 +116,7 @@ export default function ItineraryView({ itinerary, notes, busy, onSwap, onRemove
                 {day.theme && <span className="muted"> · {day.theme}</span>}
                 {day.activities.length > 0 && (
                   <span className="day-total">
-                    ≈ {duration(day.activities.reduce((sum, a) => sum + a.minutes, 0))} planned, plus travel
+                    ≈ {duration(day.activities.reduce((sum, a) => sum + a.minutes, 0), 15)} planned, plus travel
                   </span>
                 )}
               </h3>
@@ -176,8 +171,8 @@ export default function ItineraryView({ itinerary, notes, busy, onSwap, onRemove
                               {a.for_note && <span className="trait">For: {a.for_note}</span>}
                               <NoteList notes={notes.filter((n) => n.text !== a.for_note)} target={a.id} />
                             </span>
-                            <span className="dur-chip" aria-label={`about ${duration(a.minutes)}`}>
-                              {duration(a.minutes)}
+                            <span className="dur-chip" aria-label={`about ${duration(a.minutes, 15)}`}>
+                              {duration(a.minutes, 15)}
                             </span>
                           </button>
                           {selected === key && (
