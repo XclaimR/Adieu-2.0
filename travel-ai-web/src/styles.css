@@ -158,7 +158,7 @@ input:focus-visible, button:focus-visible, a:focus-visible, summary:focus-visibl
 .hero .sentence { color: var(--band-ink); }
 .hero .blank { color: var(--accent); }
 .hero .blank:hover:not(:disabled) { background: rgb(253 241 227 / 0.1); }
-.hero button.primary { background: var(--accent); border-color: var(--accent); color: var(--band); }
+.hero button.primary:not(:disabled) { background: var(--accent); border-color: var(--accent); color: var(--band); }
 .hero .row button:not(.primary) { background: transparent; color: var(--band-ink); border-color: var(--band-line); }
 .hero .error { color: #ffb4a9; }
 /* The wave edge under every teal band: page colour below the wave, an apricot line on it. */
