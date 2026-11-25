@@ -1,0 +1,31 @@
+Adieu demo film — third-party material
+
+Interface: Adieu's own screens (this repository), captured from a demo account on a copy of the database.
+
+Music samples:
+- Piano: "Salamander Grand Piano V3" by Alexander Holm, licensed under CC BY 3.0 (https://creativecommons.org/licenses/by/3.0/)
+- Drums: "MuldjordKit" by Lars Muldjord (drumgizmo.org), FreePats version, licensed under CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/)
+- Samples (CC0): Karoryfer Samples / sfzinstruments
+
+Voice: Kokoro-82M (hexgrad), Apache-2.0, voice af_heart, via kokoro-onnx (MIT).
+Fonts: Bricolage Grotesque, Instrument Sans — SIL Open Font License 1.1 (Google Fonts).
+
+Photos (Wikimedia Commons, shown with credits as in the app):
+- 663highland · CC BY 2.5 · https://commons.wikimedia.org/wiki/File:Daibutsu-den_in_Todaiji_Nara02bs3200.jpg
+- Eckhard Pecher · CC BY 2.5 · https://commons.wikimedia.org/wiki/File:Tokyo_Tower_20060211.JPG
+- Fg2 · Public domain · https://commons.wikimedia.org/wiki/File:Kokyo0057.jpg
+- Markus Leupold-Löwenthal · CC BY-SA 3.0 · https://commons.wikimedia.org/wiki/File:TokyoMetropolitanGovernmentOffice.jpg
+- NTT_DoCoMo_Yoyogi_Building_2009.jpg : Wiiii derivative work: 0607crp ( talk ) · CC BY-SA 3.0 · https://commons.wikimedia.org/wiki/File:NTT_DoCoMo_Yoyogi_Building_2009_cropped.jpg
+- 663highland · CC BY 2.5 · https://commons.wikimedia.org/wiki/File:Nara_national_museum01s3200.jpg
+- No machine-readable author provided. Suisui assumed (based on copyright claims). · Public domain · https://commons.wikimedia.org/wiki/File:Umeda_Sky_building.jpg
+- chensiyuan · CC BY-SA 4.0 · https://commons.wikimedia.org/wiki/File:1_shibuya_crossing_2012.jpg
+- David Monniaux · CC BY-SA 3.0 · https://commons.wikimedia.org/wiki/File:Yasukuni_Jinja_7_032.jpg
+- Mc681 · CC BY-SA 4.0 · https://commons.wikimedia.org/wiki/File:New_Tsutenkaku_in_201409_003.JPG
+- Unknown · Public domain · https://commons.wikimedia.org/wiki/File:Faithful_Dog_Hachiko_Photo.png
+- Kakidai · CC BY-SA 3.0 · https://commons.wikimedia.org/wiki/File:Shinjuku_Gyoen_National_Garden_-_sakura_3.JPG
+- 663highland · CC BY 2.5 · https://commons.wikimedia.org/wiki/File:Shitennoji03s3200.jpg
+- Paradisus Bali · CC BY-SA 4.0 · https://commons.wikimedia.org/wiki/File:YHI_Spa_treatment_room_at_Paradisus_by_Meli%C3%A1_Bali.jpg
+- Joshua Tree National Park · Public domain · https://commons.wikimedia.org/wiki/File:Tent_in_Hidden_Valley_Campground_-_Flickr_-_Joshua_Tree_National_Park.jpg
+- Nnthurber · CC BY-SA 4.0 · https://commons.wikimedia.org/wiki/File:Wide_panoramic_view_of_empty_Maya_Bay_beach_and_cliffs.jpg
+
+The CC BY-SA photos are used under that licence: the film credits them, and adaptations of those images stay CC BY-SA.
