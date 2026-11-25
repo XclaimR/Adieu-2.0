@@ -1,4 +1,4 @@
-# Adieu
+# <img src="docs/brand/adieu-logo.svg" alt="Adieu" height="64">
 
 **A travel planner that plans like a friend who knows you: one sentence in, a whole trip out.**
 

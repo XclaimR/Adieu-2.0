@@ -5,6 +5,7 @@ import Login from "./screens/Login";
 import VibePicker from "./screens/VibePicker";
 import Home from "./screens/Home";
 import TripScreen from "./screens/Trip";
+import { Logo } from "./components/Logo";
 
 type Screen = { name: "home" } | { name: "vibes" } | { name: "trip"; id: string; firstMessage?: string };
 
@@ -44,7 +45,7 @@ export default function App() {
     <div className="app">
       <header className="topbar">
         <button className="brand" onClick={() => setScreen({ name: "home" })}>
-          Adieu
+          <Logo />
         </button>
         <span className="spacer" />
         <button className="ghost" onClick={() => setScreen({ name: "vibes" })}>

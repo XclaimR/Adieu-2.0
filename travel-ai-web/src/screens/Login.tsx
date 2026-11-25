@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api, setToken } from "../api";
 import type { User } from "../types";
+import { Logo } from "../components/Logo";
 
 declare global {
   interface Window {
@@ -65,7 +66,9 @@ export default function Login({ onLogin }: { onLogin: (u: User) => void }) {
 
   return (
     <div className="login">
-      <h1 className="logo">Adieu</h1>
+      <h1 className="logo">
+        <Logo />
+      </h1>
       <p className="tagline">Trips that feel like they were planned by a friend who knows you.</p>
 
       {config?.google_client_id && <div ref={buttonRef} className="google-btn" />}
