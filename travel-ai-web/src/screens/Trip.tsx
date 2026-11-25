@@ -44,6 +44,8 @@ function noteLabel(n: Note) {
 type CardProps = {
   personality: Personality;
   reading: PlanScalesReading;
+  /** A turn in flight saves the notes it started with, so a removal now would come back. */
+  busy: boolean;
   onChange: (note: Note) => void;
   onRemove: (note: Note) => void;
 };
@@ -51,7 +53,7 @@ type CardProps = {
 /** The trip's personality: six scales of five notches, the chosen plan in apricot next to what the traveler asked
  * (Ticket #83). Underneath, each note about the whole trip is a chip; tapping one offers to change or remove it
  * (Ticket #101). */
-function PersonalityCard({ personality, reading, onChange, onRemove }: CardProps) {
+function PersonalityCard({ personality, reading, busy, onChange, onRemove }: CardProps) {
   const tripNotes = personality.notes.filter((n) => n.target === "trip");
   const [openId, setOpenId] = useState<string | null>(null);
   const open = tripNotes.find((n) => n.id === openId);
@@ -88,6 +90,7 @@ function PersonalityCard({ personality, reading, onChange, onRemove }: CardProps
         <div className="note-actions" role="group" aria-label={`Note: ${noteLabel(open)}`}>
           <button onClick={() => onChange(open)}>Change</button>
           <button
+            disabled={busy}
             onClick={() => {
               setOpenId(null);
               onRemove(open);
@@ -360,6 +363,7 @@ export default function TripScreen({ tripId, firstMessage }: { tripId: string; f
             <PersonalityCard
               personality={trip.personality}
               reading={scales}
+              busy={busy}
               onChange={(n) => ask(`Change my note “${n.text}” to `)}
               onRemove={removeNote}
             />
