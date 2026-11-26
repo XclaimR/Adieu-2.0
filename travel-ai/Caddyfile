@@ -1,0 +1,15 @@
+# Gets and renews the Let's Encrypt certificate for $DOMAIN, redirects http to https.
+{$DOMAIN} {
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy strict-origin-when-cross-origin
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		-Server
+	}
+	reverse_proxy web:80 {
+		# Trip turns stream to the browser as they happen.
+		flush_interval -1
+	}
+}
