@@ -1,6 +1,6 @@
 """Runs the test travelers against the running app over HTTP and prints pass/fail per persona per rule.
 
-    docker compose exec api python -m tests.personas.run
+    docker compose run --rm tests python -m tests.personas.run --base-url http://api:8000
     python -m tests.personas.run --base-url http://localhost:8000 --persona bachelor --timeout 300
 
 Needs ALLOW_DEV_LOGIN=true on the server. Uses whatever model the server is configured with.
@@ -194,7 +194,7 @@ def route_gaps(trip: dict) -> list[str]:
 
 def human_plan_rules(persona: dict, trip: dict, days: int) -> list[tuple[str, bool | None, str]]:
     """Ticket #67: day count, titles against stops, repeats, rest days and the human plan's must-sees. Code only;
-    it uses the app's own rules, so it runs where the app's code is (docker compose exec api ...)."""
+    it uses the app's own rules, so it runs where the app's code is (docker compose run --rm tests ...)."""
     try:
         from app.schemas.itinerary import Itinerary
         from app.services import day_rhythm

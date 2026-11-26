@@ -61,7 +61,8 @@ cp .env.example .env
 
 Edit `travel-ai/.env`:
 
-- set `SESSION_SECRET` to a long random string;
+- keep `APP_ENV=development` (the default, `production`, refuses to start with dev settings);
+- set `SESSION_SECRET` to a long random string (`openssl rand -hex 32`);
 - for Gemini, uncomment the four `LLM_` lines and add your key (left commented, the app uses Ollama on your machine);
 - set `ALLOW_DEV_LOGIN=true` to sign in with just an email. **This is for your own machine only:** keep it `false`
   anywhere other people can reach the app, and use Google sign-in (`GOOGLE_OAUTH_CLIENT_ID`) there.
