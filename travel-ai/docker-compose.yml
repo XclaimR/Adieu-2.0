@@ -9,7 +9,8 @@ services:
 
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      # Only read when the volume is first created; changing it later needs ALTER USER too.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB: travel_ai
 
     ports:
@@ -35,8 +36,10 @@ services:
 
     env_file: .env
 
-    environment:
-      DATABASE_URL: postgresql+psycopg2://postgres:postgres@postgres:5432/travel_ai
+    environment: &api_env
+      # production refuses to start with default secrets or dev sign-in; set APP_ENV=development locally.
+      APP_ENV: ${APP_ENV:-production}
+      DATABASE_URL: postgresql+psycopg2://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/travel_ai
       # Ollama runs on the host. To use a hosted model instead, set LLM_BASE_URL,
       # LLM_MODEL and LLM_API_KEY in .env (any OpenAI-compatible provider).
       LLM_BASE_URL: ${LLM_BASE_URL:-http://host.docker.internal:11434/v1}
@@ -52,6 +55,22 @@ services:
       postgres:
         condition: service_healthy
 
+  # Tests and eval runners (the api image ships without them). Only built on demand:
+  #   docker compose run --rm --build tests                      # unit tests
+  #   docker compose run --rm tests python -m tests.personas.run --base-url http://api:8000
+  tests:
+    build:
+      context: .
+      target: test
+
+    image: travel-ai-test
+
+    profiles: ["test"]
+
+    env_file: .env
+
+    environment: *api_env
+
   web:
     build: ../travel-ai-web
 
@@ -62,7 +81,9 @@ services:
     restart: unless-stopped
 
     ports:
-      - "8080:80"
+      # Loopback only: dev sign-in accepts any email, so never publish this to the network.
+      # In production a reverse proxy with TLS on the host forwards to it.
+      - "127.0.0.1:8080:80"
 
     depends_on:
       - api

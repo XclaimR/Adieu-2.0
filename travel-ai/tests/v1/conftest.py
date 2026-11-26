@@ -2,6 +2,7 @@ import os
 
 os.environ["DATABASE_URL"] = "sqlite://"
 os.environ["ALLOW_DEV_LOGIN"] = "true"
+os.environ["APP_ENV"] = "development"
 
 import pytest
 from fastapi.testclient import TestClient
