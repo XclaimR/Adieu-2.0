@@ -32,6 +32,11 @@ class Settings:
     # Lets you sign in without Google while developing. Never enable in production.
     ALLOW_DEV_LOGIN = _bool("ALLOW_DEV_LOGIN")
 
+    # Per traveler: model-using requests (chat turns, pick and activity swaps) per minute and per rolling day.
+    # The shared Gemini free tier allows ~15 calls a minute and 500 a day per model; a turn with drafts uses ~4-5.
+    TURNS_PER_MINUTE = int(os.getenv("TURNS_PER_MINUTE", "5"))
+    TURNS_PER_DAY = int(os.getenv("TURNS_PER_DAY", "40"))
+
     CORS_ORIGINS = [
         o.strip()
         for o in os.getenv("CORS_ORIGINS", "http://localhost:5173").split(",")

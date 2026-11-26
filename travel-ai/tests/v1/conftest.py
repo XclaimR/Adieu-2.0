@@ -10,6 +10,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 import app.database.models  # noqa: F401
+from app.api import limits
 from app.core.config import settings
 from app.database.base import Base
 from app.database.session import get_db, get_session_factory
@@ -146,6 +147,12 @@ def fake_places(monkeypatch):
     monkeypatch.setattr(gazetteer, "find_destination", fake.find_destination)
     monkeypatch.setattr(place_library, "build", fake.build)
     return fake
+
+
+@pytest.fixture(autouse=True)
+def unlimited_turns(monkeypatch):
+    """Tests share one dev user; test_limits.py installs tight limits of its own."""
+    monkeypatch.setattr(limits, "limiter", limits.TurnLimiter(per_minute=10**6, per_day=10**6))
 
 
 @pytest.fixture

@@ -25,6 +25,7 @@ once (15-30 s) and kept in Postgres; credits are under "Data credits" in the app
 | `GOOGLE_OAUTH_CLIENT_ID` | Shows the "Sign in with Google" button. Add `http://localhost:8080` as an authorized JavaScript origin. |
 | `ALLOW_DEV_LOGIN` | Email-only sign-in for local development. Off by default; set `ALLOW_DEV_LOGIN=true` in `.env` for local development. |
 | `SESSION_SECRET` | Signs login sessions. |
+| `TURNS_PER_MINUTE`, `TURNS_PER_DAY` | Per traveler: model-using requests (chat turns, cheaper-stay and swap lookups) per minute (default 5) and per rolling 24 hours (default 40). Past them the traveler gets a 429 with a message. Raise `TURNS_PER_DAY` locally for persona/agent runs, which all use one dev account. |
 | `LLM_BASE_URL`, `LLM_MODEL`, `LLM_API_KEY` | Any OpenAI-compatible provider. Without them the app uses local Ollama with `qwen3:8b`. |
 | `LLM_REASONING_EFFORT` | `none` by default (much faster on qwen3). Set it empty for providers that reject the parameter. |
 
