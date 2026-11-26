@@ -2,7 +2,7 @@
 Much faster than the persona suite (no Places, no drafts). Run it before changing the model, the turn prompt or
 the note schema in app/schemas/personality.py.
 
-    docker compose exec api python -m tests.evals.run_personality_evals
+    docker compose run --rm tests python -m tests.evals.run_personality_evals
 """
 import sys
 import time

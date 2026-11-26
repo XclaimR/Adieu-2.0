@@ -9,12 +9,14 @@ from app.api.auth import router as auth_router
 from app.api.me import router as me_router
 from app.api.swipes import router as swipes_router
 from app.api.trips import router as trips_router
-from app.core.config import settings
+from app.core.config import refuse_unsafe_production, settings
 from app.services.llm_client import LLMOutputError
 
 logging.basicConfig(level=logging.INFO)
 # httpx logs every request URL at INFO, which drowns the app's own logs.
 logging.getLogger("httpx").setLevel(logging.WARNING)
+
+refuse_unsafe_production(settings)
 
 app = FastAPI(title="Adieu API")
 

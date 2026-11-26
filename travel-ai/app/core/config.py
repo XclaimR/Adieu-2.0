@@ -9,6 +9,9 @@ def _bool(name: str, default: bool = False) -> bool:
 
 
 class Settings:
+    # "production" unless set otherwise, so a forgotten setting fails closed. Local dev sets APP_ENV=development.
+    APP_ENV = os.getenv("APP_ENV", "production").strip().lower()
+
     DATABASE_URL = os.getenv("DATABASE_URL")
 
     # Any OpenAI-compatible endpoint: Ollama (default), Gemini, OpenAI, ...
@@ -26,17 +29,49 @@ class Settings:
 
     GOOGLE_OAUTH_CLIENT_ID = os.getenv("GOOGLE_OAUTH_CLIENT_ID")
 
-    SESSION_SECRET = os.getenv("SESSION_SECRET", "dev-only-change-me")
+    SESSION_SECRET = os.getenv("SESSION_SECRET") or "dev-only-change-me"  # empty counts as unset
     SESSION_TTL_DAYS = int(os.getenv("SESSION_TTL_DAYS", "30"))
 
     # Lets you sign in without Google while developing. Never enable in production.
     ALLOW_DEV_LOGIN = _bool("ALLOW_DEV_LOGIN")
+
+    # Per traveler: model-using requests (chat turns, pick and activity swaps) per minute and per rolling day.
+    # The shared Gemini free tier allows ~15 calls a minute and 500 a day per model; a turn with drafts uses ~4-5.
+    TURNS_PER_MINUTE = int(os.getenv("TURNS_PER_MINUTE", "5"))
+    TURNS_PER_DAY = int(os.getenv("TURNS_PER_DAY", "40"))
 
     CORS_ORIGINS = [
         o.strip()
         for o in os.getenv("CORS_ORIGINS", "http://localhost:5173").split(",")
         if o.strip()
     ]
+
+
+_DEFAULT_SECRETS = {"dev-only-change-me", "change-me-to-a-long-random-string"}
+MIN_SECRET_LENGTH = 32
+
+
+def production_problems(s) -> list[str]:
+    """What makes these settings unsafe to serve the public. Empty outside production."""
+    if s.APP_ENV != "production":
+        return []
+    problems = []
+    secret = s.SESSION_SECRET or ""
+    if secret in _DEFAULT_SECRETS or len(secret) < MIN_SECRET_LENGTH:
+        problems.append(f"SESSION_SECRET must be set to a random string of at least {MIN_SECRET_LENGTH} characters")
+    if s.ALLOW_DEV_LOGIN:
+        problems.append("ALLOW_DEV_LOGIN must be false (it lets anyone sign in as any email)")
+    if ":postgres@" in (s.DATABASE_URL or ""):
+        problems.append("the database password must not be the default 'postgres' (set POSTGRES_PASSWORD)")
+    return problems
+
+
+def refuse_unsafe_production(s) -> None:
+    if problems := production_problems(s):
+        raise RuntimeError(
+            "Refusing to start with APP_ENV=production: " + "; ".join(problems)
+            + ". For local development set APP_ENV=development."
+        )
 
 
 settings = Settings()

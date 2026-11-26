@@ -1,6 +1,6 @@
 """Scripted conversations against the live model. Rerun whenever you change LLM_MODEL or the turn prompt.
 
-    docker compose exec api python -m tests.evals.run_turn_evals
+    docker compose run --rm tests python -m tests.evals.run_turn_evals
 """
 import time
 

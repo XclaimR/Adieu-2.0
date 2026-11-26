@@ -7,6 +7,7 @@ from openai import APIConnectionError, APIStatusError, APITimeoutError
 from sqlalchemy.orm import Session
 
 from app.api.deps import current_user
+from app.api.limits import check_turn, record_turn, spend_turn
 from app.database.models.trip import TripModel
 from app.database.models.user import UserModel
 from app.database.session import get_db, get_session_factory
@@ -73,6 +74,7 @@ def send_message(
     db: Session = Depends(get_db),
 ):
     trip = _trip_or_404(trip_id, user, db)
+    spend_turn(user.id)
     return TravelPlannerWorkflow(db).process_message(trip, user, request.message.strip())
 
 
@@ -85,6 +87,7 @@ def stream_message(
 ):
     """Same as /messages, but sends progress, reply, options and drafts as NDJSON lines as they happen."""
     user_id, message = user.id, request.message.strip()
+    spend_turn(user_id)
 
     def events():
         # Request-scoped sessions close before a streaming body finishes, so this one is our own.
@@ -130,12 +133,16 @@ def pick_action(
     db: Session = Depends(get_db),
 ):
     trip = _trip_or_404(trip_id, user, db)
+    if request.action in ("like", "too_pricey"):  # may rank cheaper stays with the model
+        check_turn(user.id)
     try:
         options = TravelPlannerWorkflow(db).pick_action(trip, user, place_id, request.action)
     except TripActionError as e:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(e))
     except PlacesUnavailableError:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Places service unavailable")
+    if options:  # only actions that came back with choices used the model
+        record_turn(user.id)
     return TripUpdateResponse(trip=TripRepository(db).to_out(trip), options=options)
 
 
@@ -159,12 +166,16 @@ def activity_action(
     db: Session = Depends(get_db),
 ):
     trip = _trip_or_404(trip_id, user, db)
+    if request.action == "swap":  # ranks alternatives with the model
+        check_turn(user.id)
     try:
         options = TravelPlannerWorkflow(db).activity_action(trip, user, day_number, index, request.action)
     except TripActionError as e:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(e))
     except PlacesUnavailableError:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Places service unavailable")
+    if options:  # only actions that came back with choices used the model
+        record_turn(user.id)
     return TripUpdateResponse(trip=TripRepository(db).to_out(trip), options=options)
 
 

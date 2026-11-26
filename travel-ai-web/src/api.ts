@@ -99,7 +99,14 @@ export async function sendStream(
   });
   if (!res.ok || !res.body) {
     if (res.status === 401) setToken(null);
-    throw new ApiError(res.status, res.status >= 500 ? "I can't reach Adieu right now — please try again." : res.statusText || "Request failed");
+    if (res.status >= 500) throw new ApiError(res.status, "I can't reach Adieu right now — please try again.");
+    let detail = res.statusText || "Request failed";
+    try {
+      detail = (await res.json()).detail ?? detail;  // e.g. the traveler's turn limit
+    } catch {
+      /* not JSON */
+    }
+    throw new ApiError(res.status, typeof detail === "string" ? detail : "Request failed");
   }
 
   const reader = res.body.getReader();

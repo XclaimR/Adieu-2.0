@@ -4,7 +4,7 @@ chips, says "just show me plans", picks a draft), then a judge model scores the 
 Runs where the app's code and LLM settings are (the agent and judge use the app's model config), e.g. your own
 api container:
     docker exec adieu-api-18 python -m tests.agent.run --base-url http://localhost:8000 --persona bachelor
-    docker compose exec api python -m tests.agent.run --report agent-report.md
+    docker compose run --rm tests python -m tests.agent.run --base-url http://api:8000 --report agent-report.md
 
 Needs ALLOW_DEV_LOGIN=true on the server. Per persona: one model call per agent turn, one to pick a draft, one judge.
 Prints the report and writes it as markdown. Exits non-zero on any failed rule.

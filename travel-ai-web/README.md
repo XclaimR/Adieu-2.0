@@ -24,9 +24,12 @@ once (15-30 s) and kept in Postgres; credits are under "Data credits" in the app
 |---|---|
 | `GOOGLE_OAUTH_CLIENT_ID` | Shows the "Sign in with Google" button. Add `http://localhost:8080` as an authorized JavaScript origin. |
 | `ALLOW_DEV_LOGIN` | Email-only sign-in for local development. Off by default; set `ALLOW_DEV_LOGIN=true` in `.env` for local development. |
-| `SESSION_SECRET` | Signs login sessions. |
+| `APP_ENV` | `production` (default) refuses to start with a missing, default or short (<32) `SESSION_SECRET`, the default database password or `ALLOW_DEV_LOGIN` on. Use `development` on your own machine. |
+| `SESSION_SECRET` | Signs login sessions. At least 32 random characters in production. |
+| `POSTGRES_PASSWORD` | Database password (letters and digits). Read only when the Postgres volume is first created. |
 | `LLM_BASE_URL`, `LLM_MODEL`, `LLM_API_KEY` | Any OpenAI-compatible provider. Without them the app uses local Ollama with `qwen3:8b`. |
 | `LLM_REASONING_EFFORT` | `none` by default (much faster on qwen3). Set it empty for providers that reject the parameter. |
+| `TURNS_PER_MINUTE`, `TURNS_PER_DAY` | Per traveler: model-using requests (chat turns, cheaper-stay and swap lookups) per minute (default 5) and per rolling 24 hours (default 40). Past them the traveler gets a 429 with a message. Raise `TURNS_PER_DAY` locally for persona/agent runs, which all use one dev account. |
 
 **Recommended: Gemini's free tier** (a turn with 3 drafts takes ~12s instead of minutes on qwen3:8b). Get a key at https://aistudio.google.com/apikey:
 
@@ -42,7 +45,7 @@ Free-tier caveats:
 
 After switching models, rerun the conversation evals:
 
-    docker compose exec api python -m tests.evals.run_turn_evals
+    docker compose run --rm --build tests python -m tests.evals.run_turn_evals
 
 ## Developing without Docker
 

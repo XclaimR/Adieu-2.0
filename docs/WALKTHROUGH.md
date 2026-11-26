@@ -224,8 +224,9 @@ Credits for all sources are under "Data credits" at the bottom of every page.
 
 ## Tests (`travel-ai/tests/`)
 - `tests/v1/` — the live code: API flows with a fake LLM and fake open data (`conftest.py`), grounding, ranking, parsing and merging the open data (`test_open_data.py`).
-  Run: `docker compose exec api python -m pytest -q --ignore=tests/evals`
-- `tests/evals/` — real-model conversation checks: `docker compose exec api python -m tests.evals.run_turn_evals`
+  Run (the app image ships without tests or pytest; they live in the `test` build stage):
+  `docker compose run --rm --build tests`
+- `tests/evals/` — real-model conversation checks: `docker compose run --rm tests python -m tests.evals.run_turn_evals`
 - `tests/personas/` — ten test travelers (bachelor group to Japan, Lisbon food couple, family beach, solo hiker,
   budget backpacker, luxury weekend, "unsure", who plays the swipe deck and picks the first idea, and from
   Ticket #67 a slow wellness trip to Bali, a first-timer in Japan and a family in Rome) chat with the **running** app over HTTP and get pass/fail per rule: no invented
@@ -233,7 +234,7 @@ Credits for all sources are under "Data credits" at the bottom of every page.
   traveler. Personas and their scripted answers live in `personas.py`; the checks in `run.py`. Needs
   `ALLOW_DEV_LOGIN=true`; uses whatever model the server is configured with (local qwen3:8b takes a few minutes per
   persona). Exits non-zero on any failure. Not part of the pytest run.
-  - All six, inside the container (after a rebuild so the image has the folder): `docker compose exec api python -m tests.personas.run`
+  - All six, in the `tests` container (after `docker compose build tests`): `docker compose run --rm tests python -m tests.personas.run --base-url http://api:8000`
   - From the host against any server (stdlib only): `cd travel-ai && python3 -m tests.personas.run --base-url http://localhost:8000`
   - One persona, longer per-turn timeout: `--persona bachelor --timeout 900` (`--persona` repeats)
   - Also checks all 3 drafts arrived (a dropped draft fails).
@@ -245,8 +246,8 @@ Credits for all sources are under "Data credits" at the bottom of every page.
   chips, says "just show me plans", picks a draft), then a judge model gives each persona rule a reason, adds
   "no needless questions" and "notes match what was said", and scores "felt understood" 1–5. Reuses the personas and
   rule checks above; the checks decide their own rules, the judge decides those two. It waits 60s between personas so
-  the test doesn't trip a 15-a-minute limit itself. It stops at the chosen draft: edits are not exercised. Uses the app's LLM settings, so run it inside an api container:
-  `docker compose exec api python -m tests.agent.run [--persona NAME] [--report agent-report.md]`. About 4 model calls
+  the test doesn't trip a 15-a-minute limit itself. It stops at the chosen draft: edits are not exercised. Uses the app's LLM settings, so run it in the `tests` container:
+  `docker compose run --rm tests python -m tests.agent.run --base-url http://api:8000 [--persona NAME] [--report agent-report.md]`. About 4 model calls
   per persona on top of the app's own (about 15 more, with the critic); waits out 429/503 a few times. With open place
   data stays rarely have a price tier, so the budget checks in "picks fit the traveler" seldom have anything to check. Sample: `docs/reports/agent-report-sample.md`.
 - `.claude/skills/traveler/` — `/traveler [local url] [who the traveler is]` in Claude Code: Claude plays a random
