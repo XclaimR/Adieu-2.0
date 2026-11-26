@@ -50,8 +50,10 @@ API starts.
    | `LLM_API_KEY` | the Gemini API key |
    | `LLM_REASONING_EFFORT` | empty |
    | `ALLOW_DEV_LOGIN` | `false` (the override forces it off anyway) |
+   | `CORS_ORIGINS` | `https://<DOMAIN>` (the override sets it from `DOMAIN` anyway) |
+   | `TURNS_PER_DAY`, `TURNS_PER_MINUTE` | optional; defaults 40 and 5 per traveler |
 
-   Leave any Google Places key out.
+   `POSTGRES_PASSWORD` must be in place before the first start. Leave any Google Places key out.
 
 6. **Google Sign-In**: Google Cloud console → APIs & Services → Credentials → the OAuth client →
    Authorized JavaScript origins → add `https://<DOMAIN>`.
