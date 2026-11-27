@@ -1,0 +1,27 @@
+# Production stack on the laptop, beside the dev app: its own project (adieu-prod), containers, images,
+# database volume and env file (.env.prod). Listens only on 127.0.0.1:8090; Tailscale Funnel publishes that
+# port over HTTPS. Run through ./deploy.sh, see docs/DEPLOY.md.
+services:
+
+  postgres:
+    container_name: adieu-prod-postgres
+    ports: !reset []
+
+  api:
+    container_name: adieu-prod-api
+    image: adieu-prod-api
+    env_file: !override .env.prod
+    ports: !reset []
+    environment:
+      APP_ENV: production
+      ALLOW_DEV_LOGIN: "false"
+      CORS_ORIGINS: https://${DOMAIN:?set DOMAIN in .env.prod}
+
+  web:
+    container_name: adieu-prod-web
+    image: adieu-prod-web
+    ports: !override
+      - "127.0.0.1:8090:80"
+    volumes:
+      - ./nginx-prod.conf:/etc/nginx/conf.d/prod.conf:ro
+

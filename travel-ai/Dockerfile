@@ -15,9 +15,10 @@ USER app
 # Into the app user's home: reads Overture's files over HTTPS.
 RUN python -c "import duckdb; duckdb.connect().execute('INSTALL httpfs')"
 
-COPY alembic.ini ./
-COPY migrations ./migrations
-COPY app ./app
+# a+rX: still readable by the app user when the checkout's files are owner-only (umask 077).
+COPY --chmod=a+rX alembic.ini ./
+COPY --chmod=a+rX migrations ./migrations
+COPY --chmod=a+rX app ./app
 
 EXPOSE 8000
 
@@ -33,8 +34,8 @@ USER root
 COPY requirements-dev.txt .
 RUN pip install --no-cache-dir -r requirements-dev.txt
 USER app
-COPY pytest.ini ./
-COPY tests ./tests
+COPY --chmod=a+rX pytest.ini ./
+COPY --chmod=a+rX tests ./tests
 CMD ["python", "-m", "pytest", "-q", "-p", "no:cacheprovider", "--ignore=tests/evals"]
 
 
