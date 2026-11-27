@@ -1,6 +1,6 @@
 # Production stack on the laptop, beside the dev app: its own project (adieu-prod), containers, images,
-# database volume and env file (.env.prod). Reachable only on 127.0.0.1:8090 and through the Cloudflare
-# Tunnel. Run through ./deploy.sh, see docs/DEPLOY.md.
+# database volume and env file (.env.prod). Listens only on 127.0.0.1:8090; Tailscale Funnel publishes that
+# port over HTTPS. Run through ./deploy.sh, see docs/DEPLOY.md.
 services:
 
   postgres:
@@ -25,13 +25,3 @@ services:
     volumes:
       - ./nginx-prod.conf:/etc/nginx/conf.d/prod.conf:ro
 
-  tunnel:
-    image: cloudflare/cloudflared:latest
-    container_name: adieu-prod-tunnel
-    restart: unless-stopped
-    # Public hostname -> http://web:80 is set on the tunnel in the Cloudflare dashboard.
-    command: tunnel --no-autoupdate run
-    environment:
-      TUNNEL_TOKEN: ${TUNNEL_TOKEN:?set TUNNEL_TOKEN in .env.prod}
-    depends_on:
-      - web

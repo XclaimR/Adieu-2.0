@@ -1,21 +1,22 @@
 # Deploying Adieu
 
 The public Adieu runs on the owner's Mac as a **separate production stack** beside the dev app, and reaches
-the internet through a **Cloudflare Tunnel**, which also provides HTTPS. No port is opened on the router.
+the internet through **Tailscale Funnel** (free), which also provides HTTPS at
+`https://<machine>.<tailnet>.ts.net`. No port is opened on the router.
 
 |  | Dev app | Production |
 |---|---|---|
 | Folder | your working checkout | its own clone, `~/adieu-prod` |
 | Compose project | `travel-ai` | `adieu-prod` |
 | Env file | `travel-ai/.env` | `travel-ai/.env.prod` |
-| Address | http://localhost:8080 (dev sign-in allowed) | https://&lt;DOMAIN&gt; and http://127.0.0.1:8090 |
+| Address | http://localhost:8080 (dev sign-in allowed) | https://&lt;DOMAIN&gt; (Funnel) and http://127.0.0.1:8090 |
 | Database | its own volume | its own volume (`adieu-prod_postgres_data`) |
 
-Only the production stack goes through the tunnel. `docker-compose.prod.yml` forces `APP_ENV=production`
-and dev sign-in off, and nginx adds the security headers and reads the visitor's address from
-`CF-Connecting-IP`.
+Only the production port (8090) goes through Funnel, never 8080. `docker-compose.prod.yml` forces `APP_ENV=production`
+and dev sign-in off, and nginx adds the security headers and reads the visitor's address from the
+`X-Forwarded-For` entry Funnel adds.
 
-**The link is down whenever the Mac sleeps, is off or loses its connection.**
+**The link is down whenever the Mac sleeps, is off, loses its connection or Tailscale is quit.**
 
 ## Redeploy
 
@@ -28,15 +29,18 @@ It pulls `main`, rebuilds, restarts what changed and prunes old images. Migratio
 ## First-time setup
 
 1. **Clone**: `git clone https://github.com/XclaimR/Adieu-2.0.git ~/adieu-prod`
-2. **Tunnel**: in the Cloudflare dashboard (Zero Trust → Networks → Tunnels → Create a tunnel, type
-   Cloudflared), name it `adieu`, copy its token, and add a public hostname on your domain with service
-   `http://web:80`. The domain must be on Cloudflare.
+2. **Tailscale**: install the standalone Mac app from https://tailscale.com/download and sign in to a free
+   account. In the admin console (https://login.tailscale.com/admin):
+   - Machines → this Mac → ⋯ → Edit machine name → `adieu` (the URL becomes `https://adieu.<tailnet>.ts.net`).
+   - DNS → enable **MagicDNS** and **HTTPS Certificates**.
+   - Access controls → make sure the policy has
+     `"nodeAttrs": [{"target": ["autogroup:member"], "attr": ["funnel"]}]`.
+   - The tailnet name (`<tailnet>.ts.net`) is on the DNS page.
 3. **Secrets**: create `~/adieu-prod/travel-ai/.env.prod` yourself (`chmod 600`); `.env.*` is gitignored:
 
    | Key | Value |
    |---|---|
-   | `DOMAIN` | the public hostname, no `https://` |
-   | `TUNNEL_TOKEN` | the tunnel token from step 2 |
+   | `DOMAIN` | `adieu.<tailnet>.ts.net`, no `https://` (sets `CORS_ORIGINS`) |
    | `APP_ENV` | `production` |
    | `SESSION_SECRET` | `openssl rand -hex 32` (new, not your dev one) |
    | `POSTGRES_PASSWORD` | `openssl rand -hex 24`; must be set before the first start |
@@ -51,10 +55,14 @@ It pulls `main`, rebuilds, restarts what changed and prunes old images. Migratio
    Leave any Google Places key out.
 4. **Google Sign-In**: Google Cloud console → APIs & Services → Credentials → the OAuth client →
    Authorized JavaScript origins → add `https://<DOMAIN>`.
-5. **Start**: `~/adieu-prod/travel-ai/deploy.sh`, then open `https://<DOMAIN>`.
+5. **Start**: `~/adieu-prod/travel-ai/deploy.sh`, check http://127.0.0.1:8090 works, then publish it:
+   `tailscale funnel --bg 8090` (on the Mac app the CLI is
+   `/Applications/Tailscale.app/Contents/MacOS/Tailscale`). `tailscale funnel status` shows the URL;
+   `tailscale funnel --https=443 off` takes it down.
 6. **Keep it running**:
    - Docker Desktop → Settings → General → *Start Docker Desktop when you sign in*. Every container has
-     `restart: unless-stopped`, so the stack and tunnel come back with Docker.
+     `restart: unless-stopped`, so the stack comes back with Docker.
+   - Tailscale → Settings → *Launch at login*. The `--bg` Funnel setting survives restarts.
    - System Settings → Battery (or Energy) → *Prevent automatic sleeping when the display is off*
      (on power adapter). For a one-off, `caffeinate -s` in a terminal keeps it awake until you stop it.
 7. **Backups**: `crontab -e` and add
@@ -76,13 +84,15 @@ It pulls `main`, rebuilds, restarts what changed and prunes old images. Migratio
 ```bash
 curl -sI https://<DOMAIN> | grep -iE 'strict-transport|x-content-type|x-frame'
 curl -s https://<DOMAIN>/api/health
-docker compose -p adieu-prod logs -f --tail=50 api tunnel
+docker compose -p adieu-prod logs -f --tail=50 api
+tailscale funnel status
 ```
 
 ## Stop
 
 ```bash
+tailscale funnel --https=443 off
 docker compose -p adieu-prod down
 ```
 
-The database volume stays; `deploy.sh` brings it all back.
+The database volume stays; `deploy.sh` and `tailscale funnel --bg 8090` bring it all back.
